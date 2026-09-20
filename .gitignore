@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+.yarn/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+
+# Build output
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.pytest_cache/
+.nyc_output/
+
+# Environment files — ignore real and local variants, but keep the examples
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

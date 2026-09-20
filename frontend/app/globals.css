@@ -1,0 +1,26 @@
+/*
+ * Global stylesheet for the PixelArt Trip Planner frontend.
+ *
+ * Tailwind entry point: the three directives below are expanded by PostCSS
+ * (see postcss.config.mjs + tailwind.config.ts) into base resets, component
+ * classes, and the generated utilities scanned from app/ and src/.
+ *
+ * Only a minimal, token-free pixel base lives here. The design tokens
+ * (colors, spacing, fonts) are defined in Task 4; nothing here hard-codes a
+ * theme value.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Keep the retro art crisp: never smooth pixel sprites/backgrounds. */
+  html {
+    image-rendering: pixelated;
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+  }
+}
