@@ -30,10 +30,10 @@ party-adventure framing.
 
 ## Guest Access (No Sign-Up)
 
-There is no account sign-up or sign-in. Users enter with a **guest name** and go straight
-into the experience. The guest identity is lightweight (a display name plus a
-session-scoped id) and carries the character and preferences the user creates. Keep the
-entry frictionless — no email, no password, no auth screens.
+There is no account sign-up or sign-in. Users enter a **room code and guest name** and go
+straight into the experience. Identity is room-scoped: the same name in the same room
+resumes the same party member, who carries the character and preferences they created.
+Keep the entry frictionless — no email, no password, no auth screens.
 
 ## Character System
 

@@ -56,9 +56,11 @@ capture finer progress within/between stages and drive the progress UI.
 
 ### 1. SETUP — Gather the party
 - **Purpose:** create the party and collect the inputs the AI reasons over.
-- **Trigger(s):** create trip; join trip via invite; submit character; submit preferences.
+- **Trigger(s):** create trip; join trip via room code + display name; submit character;
+  submit preferences.
 - **Required data:**
-  - Trip: room name (and invite handling).
+  - Trip: room name (a shareable room code is generated for invites).
+  - Join: room code + display name (an existing name in the room resumes that member).
   - Character: avatar appearance, outfit, accessories.
   - Preferences: availability dates, budget, travel style, destination interests,
     activities.
