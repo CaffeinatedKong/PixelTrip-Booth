@@ -105,12 +105,15 @@ connection.
 2. WHEN `Backend_App` starts, THE `Settings` class SHALL require `SUPABASE_URL` and
    `SUPABASE_SERVICE_ROLE_KEY` as non-empty string fields with no default values, failing
    fast with a `ConfigError` if either is absent.
-3. THE `Supabase_Client` module at `app/db/supabase_client.py` SHALL expose a factory
-   function that, when called with valid `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
-   values, returns without raising and yields a callable async Supabase client instance.
-4. THE `Supabase_Client` factory SHALL be injectable via FastAPI's `DI_Container` so that
-   the `Repository_Layer` receives it through `Depends()` rather than importing it
-   directly.
+3. THE `Supabase_Client` module at `app/db/supabase_client.py` SHALL expose a low-level
+   factory function `create_supabase_client()` that, when called with valid
+   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` values, returns without raising and
+   returns an async Supabase client (`AsyncClient`) instance. This module SHALL be
+   responsible only for creating the client and SHALL NOT define FastAPI dependencies.
+4. THE `Supabase_Client` SHALL be injectable via FastAPI's `DI_Container` through a
+   `get_supabase_client()` dependency function defined in `app/api/deps.py`, which calls
+   `create_supabase_client()`, so that the `Repository_Layer` receives the client through
+   `Depends()` rather than importing it directly.
 5. IF `SUPABASE_URL` is present but is not a valid URL (e.g. missing scheme, empty host),
    THEN THE `Backend_App` SHALL raise a `ConfigError` at startup before serving any
    requests, with an error message identifying `SUPABASE_URL` as the invalid field.
@@ -184,7 +187,8 @@ outputs so that the API validates data automatically and its shapes match `api-c
 10. THE `Backend_App` SHALL define `JoinRoomResponse` with the same top-level fields as
     `CreateRoomResponse`.
 11. WHEN a request body fails Pydantic v2 validation, THE `Backend_App` SHALL return HTTP
-    422 Unprocessable Entity with a structured error body (FastAPI default behaviour).
+    422 Unprocessable Entity with an `API_Error_Response` envelope containing
+    `code='VALIDATION_ERROR'` and identifying the invalid fields.
 12. IF a field value is out of its defined enum (for `status`, `planning_stage`, or
     `role`), THEN THE `Backend_App` SHALL return HTTP 422 with a structured error body
     identifying the offending field and its invalid value.
@@ -679,7 +683,8 @@ real route and service wiring.
    in the second response matches the `member.id` in the first response.
 4. THE test suite SHALL include an integration test for `POST /rooms/{room_code}/join`
    with a `room_code` that does not exist, asserting an HTTP 404 response whose body
-   contains a `detail` field.
+   conforms to the `API_Error_Response` envelope with `error.code` set to
+   `"ROOM_NOT_FOUND"`, e.g. `{"error": {"code": "ROOM_NOT_FOUND", "message": "..."}}`.
 5. THE test suite SHALL use `pytest` and the `httpx` TestClient already listed in
    `pyproject.toml` dev dependencies.
 6. WHERE time permits, THE test suite MAY include property-based tests using `hypothesis`

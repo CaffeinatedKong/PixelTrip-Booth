@@ -2,244 +2,306 @@
 
 ## Overview
 
-Implement the first real working backend for the PixelArt Trip Planner: a three-layer
-FastAPI application (routes → services → repositories) exposing `POST /rooms` and
-`POST /rooms/{room_code}/join`. Supabase access is isolated to the repository layer and
-wired through FastAPI's `Depends()` mechanism. Domain exceptions translate cleanly to
-HTTP error shapes so nothing sensitive escapes to a response body.
+This plan implements the two room-management endpoints (`POST /rooms` and
+`POST /rooms/{room_code}/join`) using a strict three-layer architecture
+(routes → services → repositories) with all dependencies wired through FastAPI's
+`Depends()` mechanism.
 
----
+Key design pillars this plan is derived from:
+
+- **3 domain repositories, not 5 table repos.** `RoomRepository` (room lookup + atomic
+  creation), `MemberRepository` (member CRUD + exact-match identity lookup), and
+  `ProfileRepository` (guest/character/travel-preferences accessed as one unit). There is
+  no `GuestRepository`/`CharacterRepository`/`PreferencesRepository`.
+- **Atomic room creation via a PostgreSQL RPC.** `RoomService.create_room` calls
+  `RoomRepository.create_room_with_owner`, which invokes the `create_room_with_owner` RPC —
+  a single transaction inserting all five records or none. There is no sequential 5-insert
+  chain for create.
+- **Exact, case-sensitive guest identity.** `room_id + exact display_name` → `room_member`.
+  `"Gerald"` and `"gerald"` are different members. No `normalize_display_name` function and
+  no `normalized_name` column exist anywhere. The `display_name` is passed to repositories
+  unmodified (no trim/case/normalize).
+- **Standardized error envelope.** All errors use
+  `{"error": {"code": "<CODE>", "message": "<msg>"}}` via `app/schemas/errors.py`
+  (`ErrorDetail`, `ErrorResponse`) and a shared `_err(code, message)` helper in
+  `app/main.py`. No `{"detail": ...}` shape anywhere, including for Pydantic validation.
+- **Supabase client split.** `app/db/supabase_client.py` owns the low-level
+  `create_supabase_client() -> AsyncClient` factory (creation only, no FastAPI deps);
+  `app/api/deps.py` owns `get_supabase_client()` plus the repository and service providers.
+
+The implementation language is **Python** (confirmed by the design's concrete Python code),
+so no language-selection question is required.
 
 ## Tasks
 
-- [ ] 1. Update project dependencies and environment configuration
-  - [ ] 1.1 Add `supabase>=2.4` to `[project] dependencies` in `backend/pyproject.toml`
-    - Also add `pytest-mock>=3.12` and `hypothesis>=6.100` to `[project.optional-dependencies] dev`
-    - Verify no version conflicts with existing `fastapi>=0.110`, `pydantic>=2.6`, `pydantic-settings>=2.2`
-    - _Requirements: 18.1, 18.2, 18.3, 18.4_
+- [ ] 1. Dependencies and environment configuration
+  - [ ] 1.1 Update `backend/pyproject.toml` dependencies
+    - Add `supabase>=2.4` to `[project] dependencies` (runtime).
+    - Add `pytest-mock>=3.12` and `hypothesis>=6.100` to `[project.optional-dependencies] dev`.
+    - Keep pinned minimum-version (`>=X.Y`) specifiers; do not conflict with
+      `fastapi>=0.110`, `uvicorn[standard]>=0.29`, `pydantic>=2.6`, `pydantic-settings>=2.2`.
+    - _Requirements: 21.1, 21.2, 21.3, 21.4_
 
-  - [ ] 1.2 Extend `backend/.env.example` with Supabase placeholder values
-    - Add `SUPABASE_URL=https://your-project.supabase.co` placeholder
-    - Add `SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here` placeholder
-    - _Requirements: 1.2_
+  - [ ] 1.2 Update `backend/.env.example`
+    - Add placeholders for `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
+      `FRONTEND_URL=http://localhost:3000`.
+    - _Requirements: 1.2, 16.4_
 
-- [ ] 2. Extend `app/core/config.py` with required Supabase settings
-  - [ ] 2.1 Add `supabase_url: str` with a `@field_validator` that checks for a valid URL scheme and non-empty host, raising `ConfigError` on failure
-    - Add `supabase_service_role_key: str` with `repr=False` so the value is never included in `str(settings)` or log output
-    - Both fields must have no default value — absence at startup raises `ConfigError` via the existing `get_settings()` wrapper
-    - _Requirements: 1.2, 1.5, 1.6_
+- [ ] 2. Configuration, domain exceptions, and error schema
+  - [ ] 2.1 Extend `app/core/config.py` Settings
+    - Add required `supabase_url` (with a `field_validator` that rejects a value missing a
+      scheme or host, raising a `ConfigError`-style error identifying `SUPABASE_URL`).
+    - Add required `supabase_service_role_key` declared with `repr=False` so it is omitted
+      from `str(settings)` and logs.
+    - Add `frontend_url: str = Field(default="http://localhost:3000")`.
+    - _Requirements: 1.2, 1.5, 1.6, 16.2_
 
-- [ ] 3. Create `app/exceptions.py` — domain exception hierarchy
-  - [ ] 3.1 Define the full exception hierarchy:
-    - `BackendError(Exception)` — base class for all domain errors
-    - `RoomNotFoundError(BackendError)` — maps to HTTP 404
-    - `MemberAlreadyExistsError(BackendError)` — maps to HTTP 409
-    - `InvalidDisplayNameError(BackendError)` — maps to HTTP 422
-    - `RepositoryError(BackendError)` — wraps unexpected Supabase failures, maps to HTTP 503
-    - `RoomCodeExhaustedError(BackendError)` — all 10 retries failed, maps to HTTP 500
-    - `ValidationError(BackendError)` — repo-level input guard failures, maps to HTTP 422
-    - Each exception accepts a human-readable `message` string safe for `{"detail": message}` responses
-    - Add a module-level docstring to `app/exceptions.py` stating the architecture rule: "All backend error responses use the API_Error_Response envelope. The backend owns all business mutations; the frontend may only read/subscribe via Supabase anon key."
-    - _Requirements: 1.3, 8.5, 12.1, 12.4, 15.4, 22.4_
+  - [ ] 2.2 Create `app/exceptions.py`
+    - Define `BackendError` base plus `RoomNotFoundError`, `MemberAlreadyExistsError`,
+      `InvalidDisplayNameError`, `RepositoryError`, `RoomCodeExhaustedError`, and
+      `ValidationError`.
+    - Add a module docstring stating the persistent architecture rule (backend owns all
+      mutations and error translation; all errors conform to the `API_Error_Response`
+      envelope).
+    - _Requirements: 2.2, 13.1, 18.4, 22.4_
 
-  - [ ] 3.2 Create `app/schemas/errors.py` — standardized API error response schema
-    - Define `ErrorDetail(BaseModel)` with fields `code: str` and `message: str`
-    - Define `ErrorResponse(BaseModel)` with field `error: ErrorDetail`
-    - This schema is registered in the OpenAPI output so frontend developers see the error envelope in `/docs`
+  - [ ] 2.3 Create `app/schemas/errors.py`
+    - Define `ErrorDetail(code: str, message: str)` and `ErrorResponse(error: ErrorDetail)`
+      as Pydantic models so the shape appears in the OpenAPI schema.
     - _Requirements: 22.1, 22.2_
 
-- [ ] 4. Create infrastructure layer — Supabase client factory
-  - [ ] 4.1 Create `app/db/supabase_client.py` with `get_supabase_client() -> AsyncClient`
-    - Import `acreate_client` from `supabase` and call it with `settings.supabase_url` and `settings.supabase_service_role_key`
-    - This function is the sole FastAPI dependency that touches the Supabase credentials
-    - _Requirements: 1.3, 1.4, 2.3_
+- [ ] 3. Database schema migrations
+  - [ ] 3.1 Create `supabase/migrations/20260925000001_case_sensitive_identity.sql`
+    - Drop the `UNIQUE(room_id, normalized_name)` index and the `normalized_name` generated
+      column from `room_members`; add `UNIQUE(room_id, display_name)`.
+    - Fail loudly (error, no silent row drops) if existing duplicate
+      `(room_id, display_name)` rows are present.
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
 
-- [ ] 5. Create `app/api/deps.py` — dependency injection providers
-  - [ ] 5.1 Define one provider function for each repository (`get_guest_repo`, `get_room_repo`, `get_member_repo`, `get_character_repo`, `get_prefs_repo`) each accepting `client: AsyncClient = Depends(get_supabase_client)` and returning the corresponding repository instance
-    - Define `get_room_service(guest_repo=Depends(...), room_repo=Depends(...), member_repo=Depends(...), character_repo=Depends(...), prefs_repo=Depends(...)) -> RoomService`
-    - This file is the single place tests override with `app.dependency_overrides`
+  - [ ] 3.2 Create `supabase/migrations/20260925000002_create_room_rpc.sql`
+    - Define the `create_room_with_owner(p_room_name, p_room_code, p_owner_display_name,
+      p_appearance)` plpgsql function inserting into `party_rooms`, `guests`,
+      `room_members`, `characters`, `travel_preferences` in one transaction.
+    - Return `jsonb_build_object(...)` with `room`, `guest`, `member`, `character`,
+      `travel_preferences`; roll back on any insert failure.
+    - _Requirements: 8.1, 8.2, 8.3_
+
+- [ ] 4. Supabase client factory and dependency-injection providers
+  - [ ] 4.1 Create `app/db/supabase_client.py`
+    - Implement `create_supabase_client() -> AsyncClient` using `acreate_client` with
+      `settings.supabase_url` and `settings.supabase_service_role_key`.
+    - Creation only — this module defines no FastAPI dependencies.
+    - _Requirements: 1.3_
+
+  - [ ] 4.2 Create `app/api/deps.py`
+    - Implement `get_supabase_client()` (calls the factory), and `get_room_repo`,
+      `get_member_repo`, `get_profile_repo`, `get_room_service` — each composed via
+      `Depends()`.
+    - This is the single override point for tests.
     - _Requirements: 1.4, 2.4_
 
-- [ ] 6. Create repository base class
-  - [ ] 6.1 Create `app/repositories/base.py` with `BaseRepository`
-    - Constructor accepts `client: AsyncClient` and stores it as `self._client`
-    - Implement `_handle_error(exc, operation: str, table: str) -> Never` that raises `RepositoryError` with a safe message of the form `"Database operation '{operation}' on '{table}' failed."` — never including raw Supabase internals
-    - _Requirements: 2.3, 4.4, 15.1_
+- [ ] 5. Base repository, domain repositories, and Pydantic schemas
+  - [ ] 5.1 Create `app/repositories/base.py`
+    - Implement `BaseRepository(client)` storing the injected `AsyncClient` and a
+      `_handle_error(exc, operation, table)` helper that always raises `RepositoryError`
+      with a safe message naming the operation and table (no Supabase-internal fields).
+    - _Requirements: 2.3, 6.7, 18.1_
 
-- [ ] 7. Implement `GuestRepository`
-  - [ ] 7.1 Create `app/repositories/guest_repo.py` extending `BaseRepository`
-    - `async def create_guest(self, display_name: str, avatar_url: str | None = None) -> dict`: validate input (empty / whitespace-only / > 50 chars → raise `ValidationError`), INSERT into `guests`, return dict with at minimum `id`, `display_name`, `created_at`
-    - `async def get_guest_by_id(self, guest_id: str) -> dict | None`: validate UUID format (invalid → raise `ValidationError`), SELECT from `guests`, return dict or `None`
-    - Wrap any Supabase exception via `self._handle_error()`
-    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
+  - [ ] 5.2 Create `app/repositories/room_repository.py`
+    - Implement `RoomRepository(BaseRepository)` with `create_room_with_owner` (validate
+      `name` 1–100 and non-whitespace + `room_code` against `^[A-Z0-9]{4,12}$` before any
+      DB call, invoke the RPC, parse the result dict, raise `RepositoryError` on RPC error),
+      `get_room_by_code`, and `get_room_by_id`.
+    - Perform no individual table inserts for room creation.
+    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 8.4, 8.5_
 
-- [ ] 8. Implement `RoomRepository`
-  - [ ] 8.1 Create `app/repositories/room_repo.py` extending `BaseRepository`
-    - `async def create_room(self, name: str, room_code: str) -> dict`: validate name (1–100 chars, non-whitespace-only) and room_code (`^[A-Z0-9]{4,12}$`) → raise `ValidationError` on failure; INSERT into `party_rooms`; return dict with `id`, `name`, `room_code`, `status`, `planning_stage`, `created_at`
-    - `async def get_room_by_code(self, room_code: str) -> dict | None`: SELECT by `room_code`, return dict or `None`
-    - `async def get_room_by_id(self, room_id: str) -> dict | None`: SELECT by `id`, return dict or `None`
-    - Wrap Supabase exceptions via `self._handle_error()`
-    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
+  - [ ] 5.3 Create `app/repositories/member_repository.py`
+    - Implement `MemberRepository(BaseRepository)` with `create_member` (validate args,
+      detect Postgres `23505` → `MemberAlreadyExistsError`), `get_member_by_display_name`
+      (exact case-sensitive `room_id` + `display_name` match, no normalization),
+      `get_member_by_id`, and `list_members_by_room`.
+    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7_
 
-- [ ] 9. Implement `MemberRepository`
-  - [ ] 9.1 Create `app/repositories/member_repo.py` extending `BaseRepository`
-    - `async def create_member(self, room_id: str, guest_id: str, display_name: str, role: Literal["owner","member"]) -> dict`: validate all args (UUID format, display_name 1–50 chars, valid role) → raise domain exception on failure; INSERT into `room_members`; detect Postgres `23505` uniqueness error and raise `MemberAlreadyExistsError`; return dict with `id`, `room_id`, `guest_id`, `display_name`, `normalized_name`, `role`, `created_at`
-    - `async def get_member_by_normalized_name(self, room_id: str, normalized_name: str) -> dict | None`: SELECT filtering by `room_id` AND `normalized_name`, return dict or `None`
-    - `async def get_member_by_id(self, member_id: str) -> dict | None`: SELECT by `id`, return dict or `None`
-    - `async def list_members_by_room(self, room_id: str) -> list[dict]`: SELECT all rows for `room_id`, return list (possibly empty)
-    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
+  - [ ] 5.4 Create `app/repositories/profile_repository.py`
+    - Implement `ProfileRepository(BaseRepository)` with `create_guest`, `get_guest_by_id`,
+      `create_character`, `get_character_by_member_id`, `create_preferences`, and
+      `get_preferences_by_member_id`.
+    - Add input guards raising `ValidationError` for empty/whitespace/oversized
+      `display_name` and for malformed (non-UUID) id arguments before any DB call.
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 6.10_
 
-- [ ] 10. Implement `CharacterRepository` and `PreferencesRepository`
-  - [ ] 10.1 Create `app/repositories/character_repo.py` extending `BaseRepository`
-    - `async def create_character(self, member_id: str, appearance: dict | None = None) -> dict`: validate `member_id` UUID format → raise `ValidationError`; INSERT into `characters` with `appearance` defaulting to `{}`; return dict with `id`, `member_id`, `appearance`, `created_at`
-    - `async def get_character_by_member_id(self, member_id: str) -> dict | None`: validate UUID, SELECT by `member_id`, return dict or `None`
-    - _Requirements: 7.1, 7.2, 7.5, 7.6, 7.7_
+  - [ ] 5.5 Create `app/schemas/room.py`
+    - Define `_Base` with `model_config` (`alias_generator=to_camel`,
+      `populate_by_name=True`, `from_attributes=True`) and the `_non_empty_str`
+      whitespace-rejecting validator.
+    - Define the five response schemas (`GuestSchema`, `PartyRoomSchema`,
+      `RoomMemberSchema`, `CharacterSchema`, `TravelPreferencesSchema`),
+      `CreateRoomRequest`/`JoinRoomRequest` with `Field(examples=[...])`, and the
+      `_RoomPayload` base yielding `CreateRoomResponse`/`JoinRoomResponse`.
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 17.3_
 
-  - [ ] 10.2 Create `app/repositories/preferences_repo.py` extending `BaseRepository`
-    - `async def create_preferences(self, member_id: str, available_dates: list | None = None, destinations: list | None = None, interests: list | None = None, activities: list | None = None, hard_constraints: list | None = None) -> dict`: validate UUID, INSERT into `travel_preferences` defaulting all list fields to `[]`; return dict with all required fields
-    - `async def get_preferences_by_member_id(self, member_id: str) -> dict | None`: validate UUID, SELECT by `member_id`, return dict or `None`
-    - _Requirements: 7.3, 7.4, 7.5, 7.6, 7.7_
+- [ ] 6. Room code generation utility
+  - [ ] 6.1 Add module-level `generate_room_code(length=6)` to `app/services/room_service.py`
+    - Use `secrets.choice` over `string.ascii_uppercase + string.digits`; result matches
+      `^[A-Z0-9]{4,12}$`.
+    - Do not add any `normalize_display_name` function.
+    - _Requirements: 9.1, 9.3, 9.4_
 
-- [ ] 11. Create Pydantic v2 schemas in `app/schemas/room.py`
-  - [ ] 11.1 Define `_Base(BaseModel)` with `model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)`
-    - Define `_non_empty_str` using `Annotated[str, AfterValidator(_no_whitespace_only)]` for fields that must not be whitespace-only
-    - Define all five response schemas: `GuestSchema`, `PartyRoomSchema`, `RoomMemberSchema`, `CharacterSchema`, `TravelPreferencesSchema` with fields and constraints exactly matching `api-contracts.md`
-    - Define `CreateRoomRequest`, `JoinRoomRequest` using `_non_empty_str` for name / display_name fields
-    - Define `_RoomPayload(_Base)` base with all five response fields; derive `CreateRoomResponse(_RoomPayload)` and `JoinRoomResponse(_RoomPayload)` from it
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.13_
+- [ ] 7. RoomService operations
+  - [ ] 7.1 Implement `RoomService.__init__` and `create_room`
+    - `__init__(room_repo, member_repo, profile_repo)`.
+    - `create_room`: retry `generate_room_code` up to 10× checking `get_room_by_code`;
+      raise `RoomCodeExhaustedError` if exhausted. Call `create_room_with_owner` (single
+      atomic RPC — not individual inserts) passing `appearance={}`; build
+      `CreateRoomResponse` from the RPC result; propagate domain exceptions.
+    - _Requirements: 9.2, 9.5, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9_
 
-- [ ] 12. Implement `app/services/room_service.py`
-  - [ ] 12.1 Implement module-level utility functions
-    - `generate_room_code(length: int = 6) -> str`: use `secrets.choice` over `string.ascii_uppercase + string.digits`; returned string must match `^[A-Z0-9]{4,12}$`
-    - `normalize_display_name(name: str) -> str`: strip, collapse interior whitespace with `re.sub(r'\s+', ' ', ...)`, lower-case — mirrors the PostgreSQL `GENERATED ALWAYS AS` expression
-    - _Requirements: 8.1, 8.3, 8.4, 10.2_
+  - [ ] 7.2 Implement `RoomService.join_room`
+    - `get_room_by_code` → raise `RoomNotFoundError` if `None`. Call
+      `get_member_by_display_name(room_id, display_name)` passing `display_name` unmodified
+      (no case transform/trim/normalize).
+    - Resume path: fetch guest/character/prefs, make no create calls. New-member path:
+      create guest → member (`role="member"`) → character → preferences. Propagate domain
+      exceptions.
+    - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 12.1, 12.2, 12.3, 12.4, 12.5, 13.1_
 
-  - [ ] 12.2 Implement `RoomService.create_room(request: CreateRoomRequest) -> CreateRoomResponse`
-    - Loop up to 10 times: call `generate_room_code()`, check `room_repo.get_room_by_code()` for collision; raise `RoomCodeExhaustedError` if all attempts fail
-    - Create records in strict order: `party_rooms` → `guests` → `room_members` (role=`"owner"`) → `characters` (appearance=`{}`) → `travel_preferences` (all lists=`[]`)
-    - Validate each result dict via `model_validate` into the corresponding Pydantic schema and return a `CreateRoomResponse`
-    - Propagate any domain exception from repositories unchanged; do not swallow partial failures
-    - _Requirements: 8.1, 8.2, 8.5, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9_
+- [ ] 8. Routes and application wiring
+  - [ ] 8.1 Create `app/api/routes/rooms.py`
+    - `APIRouter(prefix="/rooms", tags=["rooms"])`; `POST ""` (create_room) and
+      `POST "/{room_code}/join"` with
+      `room_code: Annotated[str, Path(pattern=r"^[A-Z0-9]{4,12}$")]`.
+    - Each route has a docstring, `summary=`, `description=`, and `responses=` documenting
+      the 200 case and applicable error cases; delegate to the service only (no manual error
+      dicts).
+    - _Requirements: 2.1, 14.1, 14.2, 14.3, 14.4, 15.1, 15.2, 15.4, 15.6, 17.1, 17.2, 17.4, 17.5_
 
-  - [ ] 12.3 Implement `RoomService.join_room(room_code: str, request: JoinRoomRequest) -> JoinRoomResponse`
-    - Look up room by code; raise `RoomNotFoundError` if absent
-    - Normalize display name; call `member_repo.get_member_by_normalized_name()`
-    - **Resume path** (member found): fetch guest, character (may be `None`), preferences (may be `None`) via `get_*` methods; return `JoinRoomResponse` from existing records — do NOT call any `create_*` method
-    - **New-member path** (member not found): validate display_name is non-empty; create guest → member (role=`"member"`) → character → preferences; return `JoinRoomResponse`
-    - Propagate domain exceptions from repositories unchanged
-    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 11.1, 11.2, 11.3, 11.4, 11.5, 12.1_
+  - [ ] 8.2 Update `app/main.py`
+    - Add `CORSMiddleware` with `allow_origins=[settings.frontend_url]`; include the rooms
+      router.
+    - Define the `_err(code, message)` helper using `ErrorResponse`/`ErrorDetail`; register
+      exception handlers for all domain exceptions per the code map; override
+      `RequestValidationError` to emit the `VALIDATION_ERROR` envelope (not
+      `{"detail": [...]}`); add a catch-all `Exception` handler → 500 `INTERNAL_ERROR` via
+      `_err`.
+    - Ensure the service-role key and raw Supabase payloads never appear in responses (the
+      `RepositoryError` handler returns a fixed safe message).
+    - _Requirements: 13.2, 13.4, 14.5, 15.3, 15.5, 16.1, 16.3, 16.5, 18.1, 18.2, 18.3, 18.4, 18.5, 22.1, 22.3, 22.4, 22.5, 22.6_
 
-- [ ] 13. Create `app/api/routes/rooms.py`
-  - [ ] 13.1 Define `router = APIRouter(prefix="/rooms", tags=["rooms"])`
-    - `POST ""` (`/rooms`): accept `CreateRoomRequest`, inject `RoomService` via `Depends(get_room_service)`, return `CreateRoomResponse` with HTTP 200
-    - `POST "/{room_code}/join"`: `room_code` annotated as `Annotated[str, Path(pattern=r"^[A-Z0-9]{4,12}$")]` so FastAPI rejects non-conforming codes with 422 before route body runs; accept `JoinRoomRequest`; return `JoinRoomResponse`
-    - Route functions delegate entirely to the service — no business logic in the route layer
-    - _Requirements: 2.1, 13.1, 13.2, 13.3, 14.1, 14.2, 14.4, 14.6_
+- [ ] 9. Checkpoint — verify wiring
+  - Run the existing health test, `ruff check .`, and confirm the app boots with
+    `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` present.
+  - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 14. Update `app/main.py` — wire router and register exception handlers
-  - [ ] 14.1 Include the rooms router: `app.include_router(rooms.router)`
-    - Register `@app.exception_handler` for each domain exception using the status-code mapping: `RoomNotFoundError` → 404, `MemberAlreadyExistsError` → 409, `InvalidDisplayNameError` → 422, `ValidationError` → 422, `RepositoryError` → 503, `RoomCodeExhaustedError` → 500
-    - Register a catch-all `Exception` handler last that returns 500 using the `_err("INTERNAL_ERROR", "An internal error occurred.")` helper — never `str(exc)` for unknown exceptions
-    - Ensure no handler ever emits the `supabase_service_role_key` value in a response body
-    - Override FastAPI's default `RequestValidationError` handler to return `{"error": {"code": "VALIDATION_ERROR", "message": "..."}}` instead of the default `{"detail": [...]}` shape
-    - All exception handlers MUST use the `ErrorResponse` / `ErrorDetail` Pydantic models from `app/schemas/errors.py` via a shared `_err(code, message)` helper function — no handler may construct a raw dict directly
-    - _Requirements: 12.2, 12.3, 12.4, 13.4, 13.5, 14.3, 14.5, 15.1, 15.2, 15.3, 15.4, 15.5, 22.1, 22.3, 22.4, 22.5, 22.6_
+- [ ] 10. Unit tests for RoomService (`tests/test_room_service.py`)
+  - [ ]* 10.1 Create fixtures and create-room tests
+    - Fixtures: `mocker.AsyncMock(spec=RoomRepository/MemberRepository/ProfileRepository)`
+      and a real `RoomService`.
+    - `test_create_room_happy_path` (all five response fields populated) and
+      `test_create_room_uses_rpc` (`create_room_with_owner` called exactly once; no
+      individual insert methods called).
+    - _Requirements: 19.1, 19.2, 19.6_
 
-- [ ] 15. Write unit tests for `RoomService` (`tests/test_room_service.py`)
-  - [ ] 15.1 Define `pytest` fixtures using `pytest-mock`: `AsyncMock` instances for all five repositories and a `room_service` fixture that composes them into a real `RoomService`
-    - **`test_create_room_happy_path`**: mock repos return valid dicts; assert returned `CreateRoomResponse` has all five populated fields (`room`, `member`, `guest`, `character`, `travel_preferences`)
-    - **`test_create_room_record_creation_order`**: use a `MagicMock` manager to track call order; assert `create_room` called before `create_guest`, `create_guest` before `create_member`, `create_member` before `create_character`, `create_character` before `create_preferences`
-    - _Requirements: 16.1, 16.2, 16.6_
+  - [ ]* 10.2 Add join-room and failure-propagation tests
+    - `test_join_room_resume_path` (no `create_*` calls), `test_join_room_new_member_path`
+      (each `create_*` called once), `test_join_room_room_not_found`
+      (`RoomNotFoundError`, no `create_*` calls), `test_join_room_exact_case_sensitivity`
+      (`"Gerald"` vs `"gerald"` passed unmodified), and `test_create_room_repo_failure`
+      (`RepositoryError` propagates).
+    - _Requirements: 19.3, 19.4, 19.5, 19.6_
 
-  - [ ] 15.2 Add join-room path tests and error propagation tests
-    - **`test_join_room_resume_path`**: mock `get_member_by_normalized_name` to return an existing member dict; assert all four `create_*` methods called exactly 0 times
-    - **`test_join_room_new_member_path`**: mock `get_member_by_normalized_name` to return `None`; assert `create_guest`, `create_member`, `create_character`, `create_preferences` each called exactly once
-    - **`test_join_room_room_not_found`**: mock `get_room_by_code` to return `None`; assert `RoomNotFoundError` raised; assert no `create_*` called
-    - **`test_create_room_repo_failure`**: mock any repo to raise `RepositoryError`; assert service propagates it unchanged
-    - _Requirements: 16.3, 16.4, 16.5, 16.6_
+- [ ] 11. Integration tests for endpoints (`tests/test_rooms_api.py`)
+  - [ ]* 11.1 Create the test client fixture and create-room tests
+    - `test_client` fixture overriding `get_room_service` with
+      `mocker.AsyncMock(spec=RoomService)`; teardown clears `app.dependency_overrides`.
+    - `test_post_rooms_200` and `test_post_rooms_422_empty_name`.
+    - _Requirements: 20.1, 20.5_
 
-- [ ] 16. Write integration tests for room endpoints (`tests/test_rooms_api.py`)
-  - [ ] 16.1 Create a `test_client` fixture that overrides `get_room_service` via `app.dependency_overrides` with an `AsyncMock(spec=RoomService)` and yields `(TestClient(app), mock_service)`
-    - **`test_post_rooms_200`**: POST `/rooms` with valid body; assert 200; assert response body contains `room`, `member`, `guest`, `character`, `travelPreferences` with their required sub-fields
-    - **`test_post_rooms_422_empty_name`**: POST `/rooms` with `name: "   "`; assert 422
-    - _Requirements: 17.1, 17.5_
+  - [ ]* 11.2 Add join-room integration tests
+    - `test_post_rooms_join_new_member_200` (`member.role == "member"`),
+      `test_post_rooms_join_resume_200` (same `member.id`),
+      `test_post_rooms_join_case_sensitive_creates_two` (`"Gerald"` vs `"gerald"` →
+      different ids), `test_post_rooms_join_404`
+      (`{"error":{"code":"ROOM_NOT_FOUND",...}}`), `test_post_rooms_join_422_bad_code`,
+      `test_post_rooms_join_409_conflict`
+      (`{"error":{"code":"MEMBER_ALREADY_EXISTS",...}}`, no constraint names),
+      `test_post_rooms_503_on_repo_error`
+      (`{"error":{"code":"DATABASE_ERROR",...}}`, no service-role key).
+    - _Requirements: 20.2, 20.3, 20.4, 20.5_
 
-  - [ ] 16.2 Add join-room integration tests
-    - **`test_post_rooms_join_new_member_200`**: POST `/rooms/ABC123/join` with new display_name; mock service returns new-member response; assert 200; assert `member.role == "member"`
-    - **`test_post_rooms_join_resume_200`**: POST same display_name twice; assert both return 200 and `member.id` is identical in both responses
-    - **`test_post_rooms_join_404`**: mock service raises `RoomNotFoundError`; assert 404; assert response body is `{"error": {"code": "ROOM_NOT_FOUND", "message": ...}}`
-    - **`test_post_rooms_join_422_bad_code`**: POST `/rooms/lowercase/join`; assert 422 (Path regex rejection before service is called)
-    - **`test_post_rooms_join_409_conflict`**: mock service raises `MemberAlreadyExistsError`; assert 409; assert response body is `{"error": {"code": "MEMBER_ALREADY_EXISTS", "message": ...}}` and `message` contains no database constraint names
-    - **`test_post_rooms_503_on_repo_error`**: mock service raises `RepositoryError`; assert 503; assert response body is `{"error": {"code": "DATABASE_ERROR", "message": ...}}` and `message` does not contain the service-role key value
-    - _Requirements: 17.2, 17.3, 17.4, 17.5_
-
-- [ ] 17. Write property-based tests (`tests/test_properties.py`)
-  - [ ]* 17.1 Write property test for `normalize_display_name` idempotency (Property 1)
-    - Use `@given(st.text())` with `max_examples=200`; assert `normalize_display_name(normalize_display_name(name)) == normalize_display_name(name)` for all generated strings
-    - **Property 1: normalize_display_name is idempotent**
-    - **Validates: Requirements 10.2, 10.4**
-
-  - [ ]* 17.2 Write property test for `generate_room_code` format (Property 3)
-    - Call `generate_room_code()` 200 times and assert each result matches `^[A-Z0-9]{4,12}$`
-    - **Property 3: Generated room codes always match the required format**
-    - **Validates: Requirements 8.1, 8.4**
-
-  - [ ]* 17.3 Write property test for whitespace-only string rejection (Property 5)
-    - Use `@given(st.text(alphabet=st.characters(whitelist_categories=("Zs",)), min_size=1))` with `max_examples=200`; assert `CreateRoomRequest(name=ws_string, owner_display_name="Valid Name")` raises Pydantic `ValidationError`
-    - **Property 5: Whitespace-only strings are rejected by the non-empty validator**
-    - **Validates: Requirements 3.13, 4.5, 11.4**
-
-- [ ] 18. Document Supabase access boundary
-  - [ ] 18.1 Add a `SUPABASE_ACCESS_BOUNDARY.md` file under `docs/` (or a comment block in `backend/README.md`) that documents:
-    - The list of operations that MUST go through FastAPI (create room, join room, update preferences, submit votes, generate itinerary, refine itinerary, update planning state)
-    - The approved direct frontend Supabase access patterns (Realtime subscriptions, non-sensitive reads) and the requirement to comment them in `src/services/*.ts` files
-    - The key rule: service-role key is backend-only; frontend uses anon key only
-    - _Requirements: 23.1, 23.2, 23.3, 23.5_
-
-  - [ ] 18.2 Add integration test asserting that `POST /rooms` and `POST /rooms/{room_code}/join` error responses conform to the `{"error": {"code": "...", "message": "..."}}` envelope
-    - **`test_error_response_shape_404`**: mock service raises `RoomNotFoundError`; assert status 404; assert response JSON equals `{"error": {"code": "ROOM_NOT_FOUND", "message": <any non-empty string>}}`; assert `"detail"` key is NOT present in response body
-    - **`test_error_response_shape_409`**: mock service raises `MemberAlreadyExistsError`; assert status 409; assert response JSON equals `{"error": {"code": "MEMBER_ALREADY_EXISTS", "message": <any non-empty string>}}`; assert `"detail"` key is NOT present in response body
-    - **`test_error_response_shape_422`**: POST with invalid body (whitespace-only name); assert status 422; assert response JSON equals `{"error": {"code": "VALIDATION_ERROR", "message": <any non-empty string>}}`; assert `"detail"` key is NOT present in response body
-    - **`test_error_response_shape_503`**: mock service raises `RepositoryError`; assert status 503; assert response JSON equals `{"error": {"code": "DATABASE_ERROR", "message": <any non-empty string>}}`; assert `"detail"` key is NOT present in response body
+- [ ] 12. Error-envelope conformance and access-boundary documentation
+  - [ ]* 12.1 Add error-envelope conformance tests
+    - `test_error_response_shape_404`, `_409`, `_422`, `_503` — each asserts the exact
+      `{"error": {"code": ..., "message": <non-empty>}}` shape and that a top-level
+      `"detail"` key is NOT present.
     - _Requirements: 22.1, 22.3, 22.4_
 
-- [ ] 19. Final checkpoint — ensure all tests pass
-  - Run `pytest` from `backend/` and confirm no failures
-  - Verify the app boots cleanly when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present in `.env`
-  - Ensure `ruff check .` passes with no lint errors
-  - Ask the user if any questions arise before marking complete
+  - [ ] 12.2 Add `docs/SUPABASE_ACCESS_BOUNDARY.md`
+    - Document operations that MUST go through FastAPI (create room, join room, update
+      preferences, submit votes, generate itinerary, refine itinerary, update planning
+      state); approved direct frontend Supabase access (realtime subscriptions,
+      non-sensitive reads) plus the requirement to comment them in `src/services/*.ts`;
+      and that the service-role key is backend-only while the frontend uses only the anon
+      key.
+    - _Requirements: 23.1, 23.2, 23.3, 23.5_
 
----
+- [ ] 13. Property-based tests (optional for MVP)
+  - [ ]* 13.1 Add `generate_room_code` format property test
+    - **Property 3: Generated room codes always match the required format**
+    - Assert every generated code matches `^[A-Z0-9]{4,12}$` across ≥100 iterations,
+      tagged `Feature: 02-backend-core, Property 3`.
+    - _Requirements: 9.1, 9.4_
+
+  - [ ]* 13.2 Add whitespace-only rejection property test
+    - **Property 5: Whitespace-only strings are rejected by the non-empty validator**
+    - Assert whitespace-only `name`/`owner_display_name`/`display_name` raises a Pydantic
+      `ValidationError`, tagged `Feature: 02-backend-core, Property 5`.
+    - _Requirements: 3.13, 12.4_
+
+- [ ] 14. Final checkpoint — full verification
+  - Run the full `pytest` suite, verify the app boots with `SUPABASE_URL` and
+    `SUPABASE_SERVICE_ROLE_KEY` present, and confirm `ruff check .` is clean.
+  - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
 
-- Tasks marked with `*` are optional property-based tests and can be skipped for a faster MVP
-- Each task references specific requirements for traceability
-- Repositories (tasks 7–10) share a common base (task 6) and can be worked in parallel once the base exists
-- The service layer (task 12) must not be started until all five repositories and schemas are in place
-- Routes and main.py wiring (tasks 13–14) must not be started until the service layer is complete
-- Tests (tasks 15–17) must not be started until the routes and main.py wiring are in place
-- Property tests use `hypothesis>=6.100` added in task 1.1
-- The `supabase_service_role_key` must never appear in any test assertion string, log output, or HTTP response — verified in integration test `test_post_rooms_503_on_repo_error`
-- Task 18 documents the Supabase access boundary (Requirement 23) and adds error-envelope conformance tests (Requirement 22)
+- Tasks marked with `*` are optional (test-focused) and may be skipped for a faster MVP;
+  core implementation tasks are never optional.
+- **3-repo domain structure:** repositories follow business domains, not tables —
+  `RoomRepository`, `MemberRepository`, `ProfileRepository`. There are no separate
+  `GuestRepository`/`CharacterRepository`/`PreferencesRepository` classes.
+- **RPC atomicity for create_room:** room creation is a single atomic
+  `create_room_with_owner` RPC transaction (all five records or none) — never a sequential
+  5-insert chain.
+- **join_room new-member path is NOT transactional:** the sequential `create_guest` →
+  `create_member` → `create_character` → `create_preferences` chain can leave partial
+  records on failure. This is an accepted MVP limitation; a future RPC/cleanup strategy may
+  strengthen it.
+- **Case-sensitive identity:** `display_name` is passed to repositories unmodified. There
+  is no `normalize_display_name` function and no `normalized_name` column. `"Gerald"` and
+  `"gerald"` are distinct members.
+- **Service-role key safety:** the service-role key, raw Supabase payloads, and stack
+  traces never appear in any response body.
+- **Migration ordering:** apply migration 3.1 (`case_sensitive_identity`) then 3.2
+  (`create_room_rpc`) before any endpoint testing so the `UNIQUE(room_id, display_name)`
+  constraint and the RPC are both active.
+- Each non-checkpoint task references the current 23-requirement numbering for traceability.
 
 ## Task Dependency Graph
 
 ```json
 {
   "waves": [
-    { "id": 0, "tasks": ["1.1", "1.2"] },
-    { "id": 1, "tasks": ["2.1", "3.1", "3.2"] },
+    { "id": 0, "tasks": ["1.1", "1.2", "2.2", "2.3", "3.1", "3.2"] },
+    { "id": 1, "tasks": ["2.1"] },
     { "id": 2, "tasks": ["4.1"] },
-    { "id": 3, "tasks": ["5.1", "6.1"] },
-    { "id": 4, "tasks": ["7.1", "8.1", "9.1", "10.1", "10.2", "11.1"] },
-    { "id": 5, "tasks": ["12.1"] },
-    { "id": 6, "tasks": ["12.2", "12.3"] },
-    { "id": 7, "tasks": ["13.1"] },
-    { "id": 8, "tasks": ["14.1"] },
-    { "id": 9, "tasks": ["15.1", "15.2", "16.1", "16.2"] },
-    { "id": 10, "tasks": ["17.1", "17.2", "17.3"] },
-    { "id": 11, "tasks": ["18.1", "18.2"] }
+    { "id": 3, "tasks": ["5.1"] },
+    { "id": 4, "tasks": ["5.2", "5.3", "5.4", "5.5"] },
+    { "id": 5, "tasks": ["4.2", "6.1"] },
+    { "id": 6, "tasks": ["7.1", "7.2"] },
+    { "id": 7, "tasks": ["8.1"] },
+    { "id": 8, "tasks": ["8.2", "12.2"] },
+    { "id": 9, "tasks": ["10.1", "10.2", "13.1", "13.2"] },
+    { "id": 10, "tasks": ["11.1", "11.2", "12.1"] }
   ]
 }
 ```

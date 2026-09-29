@@ -41,7 +41,7 @@ graph TD
     end
 
     subgraph "Infrastructure"
-        SC[AsyncClient factory<br/>app/db/supabase_client.py]
+        SC[AsyncClient factory<br/>app/db/supabase_client.py<br/>injected via app/api/deps.py]
         DB[(Supabase / PostgreSQL)]
     end
 
@@ -65,7 +65,8 @@ graph TD
 | Route | `app/api/routes/rooms.py` | Parse HTTP, validate shapes via Pydantic, delegate to service, map domain exceptions to HTTP status |
 | Service | `app/services/room_service.py` | Business logic: room code generation, member identity resolution, record-creation orchestration |
 | Repository | `app/repositories/` | All Supabase calls; wraps Supabase errors into `RepositoryError` |
-| Infra | `app/db/supabase_client.py` | Factory that initializes and yields the `AsyncClient` |
+| Dependency wiring | `app/api/deps.py` | FastAPI dependency functions (`get_supabase_client()`, repository and service providers) exposed through `Depends()` |
+| Infra | `app/db/supabase_client.py` | Low-level factory `create_supabase_client()` that creates the `AsyncClient` |
 
 ### Repository Design Principle
 
@@ -203,8 +204,8 @@ sequenceDiagram
 from supabase import AsyncClient, acreate_client
 from app.core.config import get_settings
 
-async def get_supabase_client() -> AsyncClient:
-    """FastAPI dependency: yield an initialized async Supabase client."""
+async def create_supabase_client() -> AsyncClient:
+    """Low-level factory: create an initialized async Supabase client."""
     settings = get_settings()
     client = await acreate_client(
         settings.supabase_url,
@@ -213,8 +214,11 @@ async def get_supabase_client() -> AsyncClient:
     return client
 ```
 
-The function is an async generator used via `Depends(get_supabase_client)`. A new client
-is created per request; Supabase's `AsyncClient` is stateless enough for this pattern.
+This module is responsible only for creating the `AsyncClient`; it defines no FastAPI
+dependencies. The FastAPI dependency wrapper `get_supabase_client()` lives in
+`app/api/deps.py`, calls `create_supabase_client()`, and is consumed via
+`Depends(get_supabase_client)` (see Dependency Injection Wiring). A new client is created
+per request; Supabase's `AsyncClient` is stateless enough for this pattern.
 
 ---
 
@@ -296,9 +300,12 @@ protecting it from accidental logging.
 ### `app/main.py` — CORS middleware and exception handlers
 
 ```python
+import logging
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from app.schemas.errors import ErrorDetail, ErrorResponse
+
+logger = logging.getLogger(__name__)
 
 # Helper used by all handlers
 def _err(code: str, message: str) -> dict:
@@ -328,7 +335,12 @@ async def invalid_name_handler(request, exc):
 
 @app.exception_handler(RepositoryError)
 async def repo_error_handler(request, exc):
-    return JSONResponse(status_code=503, content=_err("DATABASE_ERROR", str(exc)))
+    # Details stay in internal logs only; the response carries a fixed safe message.
+    logger.error("Repository error", exc_info=exc)
+    return JSONResponse(
+        status_code=503,
+        content=_err("DATABASE_ERROR", "Database operation failed."),
+    )
 
 @app.exception_handler(RoomCodeExhaustedError)
 async def code_exhausted_handler(request, exc):
@@ -344,6 +356,11 @@ async def validation_error_handler(request, exc):
 async def catch_all_handler(request, exc):
     return JSONResponse(status_code=500, content=_err("INTERNAL_ERROR", "An internal error occurred."))
 ```
+
+The `RepositoryError` handler never uses `str(exc)` or any other raw exception message:
+raw Supabase payloads, database error details, SQL, stack traces, constraint names, and
+internal identifiers never appear in API responses. Only safe, developer-authored messages
+reach the response; detailed exception information is kept in internal logs only.
 
 `FRONTEND_URL=http://localhost:3000` is added to `backend/.env.example` so developers
 know the variable exists and its expected format.
@@ -365,7 +382,9 @@ class BaseRepository:
 ```
 
 All three repositories extend `BaseRepository` and call `self._handle_error()` inside
-`except` blocks, keeping error wrapping DRY and consistent.
+`except` blocks, keeping error wrapping DRY and consistent. The `RepositoryError` message
+(which names the operation and table) is for internal logs only; the `RepositoryError`
+handler in `app/main.py` returns the fixed message `"Database operation failed."`.
 
 ---
 
@@ -868,6 +887,14 @@ function join_room(room_code, request):
     )
 ```
 
+**Design note — join-room is not transactional.** Unlike room creation, the MVP join-room
+new member flow does not currently use a database transaction. The sequential repository
+calls (`create_guest()` → `create_member()` → `create_character()` →
+`create_preferences()`) can theoretically leave partial records if a later insert fails.
+The sequential repository calls are acceptable for the current MVP scope. A future
+improvement may introduce a PostgreSQL RPC transaction or cleanup strategy if stronger
+consistency guarantees are required.
+
 ---
 
 ### Repository Error Handling Pattern
@@ -906,10 +933,11 @@ except Exception as exc:
 
 ```python
 # app/api/deps.py  (shared dependency providers)
+from app.db.supabase_client import create_supabase_client
 
 async def get_supabase_client() -> AsyncClient:
-    settings = get_settings()
-    return await acreate_client(settings.supabase_url, settings.supabase_service_role_key)
+    """FastAPI dependency: expose the client from the low-level factory via Depends()."""
+    return await create_supabase_client()
 
 def get_room_repo(client: AsyncClient = Depends(get_supabase_client)) -> RoomRepository:
     return RoomRepository(client)
@@ -1231,7 +1259,7 @@ def test_client(mocker):
 
 - `supabase_service_role_key` is declared with `repr=False` in Pydantic so it is excluded
   from `str(settings)` and similar logging patterns.
-- All exception handlers produce responses conforming to the `API_Error_Response` envelope with authored `code` and `message` values; no handler ever exposes `str(exc)` when `exc` is a raw Supabase exception (only `RepositoryError` messages, which are authored by us, reach the response).
+- All exception handlers produce responses conforming to the `API_Error_Response` envelope with authored `code` and `message` values; no handler ever exposes `str(exc)` when `exc` is a raw Supabase exception. The `RepositoryError` handler returns the fixed message `"Database operation failed."` and never uses the exception's message; raw Supabase payloads, database error details, SQL, stack traces, constraint names, and internal identifiers are kept in internal logs only.
 - The catch-all handler returns the `API_Error_Response` envelope with a fixed `"INTERNAL_ERROR"` code and a safe static message, never `str(exc)`.
 - The `room_code` path parameter is validated against `^[A-Z0-9]{4,12}$` by FastAPI
   before the route function body executes, preventing injection via crafted path segments.
