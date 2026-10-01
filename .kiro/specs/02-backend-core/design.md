@@ -14,8 +14,9 @@ backend internals and HTTP error shapes so nothing sensitive ever escapes to a r
 body.
 
 Room creation is atomic via a PostgreSQL RPC function — either all five records are
-created or none are. Identity is room-scoped using an exact, case-sensitive display name
-match: `room_id + display_name` → `room_member`.
+created or none are. Identity is room-scoped and case-insensitive:
+`room_id + normalized display_name` → `room_member`, so `"Gerald"`, `"gerald"`, and
+`"GERald"` are the same member.
 
 ---
 
@@ -77,7 +78,7 @@ maintainability.
 
 The three domain repositories are:
 - **RoomRepository** — room creation (via RPC transaction), room lookup
-- **MemberRepository** — room member CRUD and exact-match identity lookup
+- **MemberRepository** — room member CRUD and case-insensitive identity lookup
 - **ProfileRepository** — guest profiles, characters, and travel preferences (the
   three tables are always accessed together as a unit)
 
@@ -151,8 +152,8 @@ sequenceDiagram
 
     RR-->>S: room dict
     S->>MR: get_member_by_display_name(room_id, display_name)
-    Note over MR,DB: Exact case-sensitive match on display_name
-    MR->>DB: SELECT room_members WHERE room_id=? AND display_name=?
+    Note over MR,DB: Case-insensitive match via normalize_display_name()
+    MR->>DB: SELECT room_members WHERE room_id=? AND normalized_name=?
     DB-->>MR: member dict OR None
 
     alt Resume Path (member found)
@@ -429,7 +430,7 @@ class MemberRepository(BaseRepository):
     async def get_member_by_display_name(
         self, room_id: str, display_name: str
     ) -> dict | None:
-        """Exact case-sensitive match on display_name within the given room."""
+        """Case-insensitive match on normalized_name within the given room."""
         ...
 
     async def get_member_by_id(self, member_id: str) -> dict | None: ...
@@ -437,14 +438,26 @@ class MemberRepository(BaseRepository):
     async def list_members_by_room(self, room_id: str) -> list[dict]: ...
 ```
 
-`get_member_by_display_name` performs an exact case-sensitive query:
-`room_members WHERE room_id = ? AND display_name = ?`. No trimming, casing, or
-normalization is applied — the caller passes the value as-is. Uniqueness violations from
-Postgres (`23505`) are caught and re-raised as `MemberAlreadyExistsError`.
+`get_member_by_display_name` normalizes the given name and queries
+`room_members WHERE room_id = ? AND normalized_name = ?`. Callers pass the display name as
+received; normalization happens only here. Uniqueness violations from Postgres (`23505`,
+from `UNIQUE(room_id, normalized_name)`) are caught and re-raised as
+`MemberAlreadyExistsError`.
+
+The module also defines the normalization helper, which must produce the same value as the
+database's generated `normalized_name` column
+(`lower(btrim(regexp_replace(display_name, '\s+', ' ', 'g')))`):
+
+```python
+def normalize_display_name(name: str) -> str:
+    """Trim, collapse internal whitespace to one space, and lower-case."""
+    return " ".join(name.split()).lower()
+```
 
 **Identity limitation:** This is an MVP convenience model, not authentication. Anyone who
-knows the room code and the exact display name (including correct casing) can resume that
-member. `"Gerald"` and `"gerald"` are treated as two different members.
+knows the room code and a member's display name (in any casing) can resume that member.
+`"Gerald"`, `"gerald"`, and `"GERald"` are the same member; the response returns the
+`display_name` as it was first stored.
 
 ---
 
@@ -537,8 +550,9 @@ async def create_room(
     response_model=JoinRoomResponse,
     summary="Join or resume a party room",
     description=(
-        "Joins an existing room. If the exact display name (case-sensitive) already "
-        "exists in the room, the existing member is resumed. Otherwise a new member is created."
+        "Joins an existing room. If the display name already exists in the room "
+        "(ignoring case and surrounding spaces), the existing member is resumed. "
+        "Otherwise a new member is created."
     ),
     responses={
         404: {"description": "Room not found"},
@@ -596,20 +610,17 @@ includes complete example values for every field.
 
 ## Schema Migrations
 
-Three migration files manage the database evolution:
+Two migration files manage the database, applied in order:
 
 | File | Purpose |
 |---|---|
-| `supabase/migrations/20260925000000_initial_schema.sql` | Base schema — all tables, types, indexes, triggers, RLS, and `normalized_name` generated column on `room_members` |
-| `supabase/migrations/20260925000001_case_sensitive_identity.sql` | Drops `normalized_name` column and `UNIQUE(room_id, normalized_name)`, adds `UNIQUE(room_id, display_name)` |
+| `supabase/migrations/20260925000000_initial_schema.sql` | Base schema — all tables, types, indexes, triggers, RLS, and the `normalized_name` generated column with `UNIQUE(room_id, normalized_name)` on `room_members` |
 | `supabase/migrations/20260925000002_create_room_rpc.sql` | Defines the `create_room_with_owner` PostgreSQL function |
 
-Migration 2 (`case_sensitive_identity`) must be applied before any backend endpoint is
-tested so that the `UNIQUE(room_id, display_name)` constraint is active. If the table
-already contains rows with duplicate `(room_id, display_name)` combinations the migration
-fails with an error rather than silently dropping conflicting rows.
+Both must be applied before any backend endpoint is tested against a real database, so
+that the `UNIQUE(room_id, normalized_name)` constraint and the RPC are active.
 
-### `create_room_with_owner` RPC function (Migration 3)
+### `create_room_with_owner` RPC function (Migration 2)
 
 ```sql
 CREATE OR REPLACE FUNCTION create_room_with_owner(
@@ -844,10 +855,10 @@ function join_room(room_code, request):
     if room is None:
         raise RoomNotFoundError(f"Room '{room_code}' not found.")
 
-    # 2. Check for existing member — exact case-sensitive match on display_name
+    # 2. Check for existing member — case-insensitive match (repo normalizes the name)
     existing_member = await member_repo.get_member_by_display_name(
         room_id=room["id"],
-        display_name=request.display_name,   # passed as-is, no normalization
+        display_name=request.display_name,   # passed as received
     )
 
     if existing_member is not None:
@@ -967,20 +978,21 @@ This wiring means:
 
 *A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
-### Property 1: Case-sensitive identity — different names create different members
+### Property 1: Normalization matches the identity rule
 
-*For any* room and any two display name strings `a` and `b` where `a != b` (exact
-case-sensitive comparison), calling `join_room` with `a` and then with `b` produces two
-responses with different `member.id` values.
+*For any* valid display name `a`, `normalize_display_name(a)` is idempotent, equals
+`normalize_display_name(a.upper())`, `normalize_display_name(a.lower())`, and
+`normalize_display_name("  " + a + "  ")`, and contains no leading, trailing, or repeated
+whitespace. Names that normalize to the same value resume the same member.
 
-**Validates: Requirements 11.4, 12.1**
+**Validates: Requirements 7.3, 11.4**
 
 ---
 
-### Property 2: Exact-match identity — same name always resumes the same member
+### Property 2: Same name always resumes the same member
 
-*For any* room and any valid `display_name`, calling `join_room` with that exact string
-twice returns a `JoinRoomResponse` where both responses carry the same `member.id`,
+*For any* room and any valid `display_name`, calling `join_room` with that name twice (in
+any casing) returns a `JoinRoomResponse` where both responses carry the same `member.id`,
 `member.guest_id`, and `member.role`.
 
 **Validates: Requirements 11.1, 11.2, 11.3**
@@ -1096,7 +1108,7 @@ Error code mapping:
 ### Concurrent Join Race Condition
 
 When two requests attempt to create a member with the same display name in the same room
-concurrently, the database `UNIQUE (room_id, display_name)` constraint ensures only one
+concurrently, the database `UNIQUE (room_id, normalized_name)` constraint ensures only one
 INSERT succeeds. The losing request receives a Postgres `23505` error, which
 `MemberRepository` converts to `MemberAlreadyExistsError`, which the handler maps to
 HTTP 409.
@@ -1173,7 +1185,8 @@ def room_service(mock_room_repo, mock_member_repo, mock_profile_repo):
 | `test_join_room_resume_path` | `get_member_by_display_name` returns existing member; `create_guest`, `create_member`, `create_character`, `create_preferences` each called 0 times |
 | `test_join_room_new_member_path` | `get_member_by_display_name` returns `None`; `create_guest`, `create_member`, `create_character`, `create_preferences` each called exactly once |
 | `test_join_room_room_not_found` | `get_room_by_code` returns `None`; `RoomNotFoundError` raised; no create methods called |
-| `test_join_room_exact_case_sensitivity` | `"Gerald"` and `"gerald"` each call `get_member_by_display_name` with the unmodified string |
+| `test_join_room_passes_name_as_received` | `"GERald"` is passed to `get_member_by_display_name` unchanged (normalization belongs to the repository) |
+| `test_normalize_display_name` | `"Gerald"`, `"gerald"`, `"GERald"`, `"  Gerald  "` all normalize to `"gerald"`; `"Mary   Jane"` → `"mary jane"` |
 | `test_create_room_repo_failure` | Any repo raises `RepositoryError`; service propagates it unchanged |
 | `test_generate_room_code_format` | 100 iterations of `generate_room_code()`, each result matches `^[A-Z0-9]{4,12}$` |
 
@@ -1184,8 +1197,7 @@ from hypothesis import given, settings
 import hypothesis.strategies as st
 
 # Feature: 02-backend-core, Property 3: Generated room codes always match required format
-@settings(max_examples=200)
-@given(st.nothing())  # pure function, no input needed — call directly
+# generate_room_code() takes no generated input, so this is a plain repeated check.
 def test_room_code_format_property():
     for _ in range(200):
         code = generate_room_code()
@@ -1229,8 +1241,7 @@ def test_client(mocker):
 | `test_post_rooms_200` | `POST /rooms` with valid body | 200; body has `room`, `member`, `guest`, `character`, `travelPreferences` |
 | `test_post_rooms_422_empty_name` | `POST /rooms` with `name: "   "` | 422 |
 | `test_post_rooms_join_new_member_200` | `POST /rooms/ABC123/join` with new name | 200; `member.role == "member"` |
-| `test_post_rooms_join_resume_200` | Same exact display name (same casing) twice | 200; both responses share `member.id` |
-| `test_post_rooms_join_case_sensitive_creates_two` | `"Gerald"` then `"gerald"` in same room | 200 + 200; `member.id` values differ |
+| `test_post_rooms_join_resume_200` | `"Gerald"` then `"gerald"` in the same room | 200 + 200; both responses share `member.id` |
 | `test_post_rooms_join_404` | `POST /rooms/XXXX/join` (not found) | 404; body is `{"error": {"code": "ROOM_NOT_FOUND", ...}}` |
 | `test_post_rooms_join_422_bad_code` | `POST /rooms/lowercase/join` | 422 (Path regex) |
 | `test_post_rooms_join_409_conflict` | Service raises `MemberAlreadyExistsError` | 409; body is `{"error": {"code": "MEMBER_ALREADY_EXISTS", ...}}`; no constraint name in body |
@@ -1266,8 +1277,8 @@ def test_client(mocker):
 - Input guards in each repository method run before any Supabase call, preventing calls
   with pathological inputs (e.g. SQL-injectable strings are safely passed as parameterized
   values by `supabase-py`, but we validate early to fail fast).
-- **Identity caveat**: Anyone who knows the room code and an existing member's exact display
-  name (including correct casing) can resume that member. This is an intentional MVP
+- **Identity caveat**: Anyone who knows the room code and an existing member's display
+  name (in any casing) can resume that member. This is an intentional MVP
   convenience model. Do not store sensitive personal data.
 
 ---
