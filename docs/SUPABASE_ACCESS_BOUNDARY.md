@@ -47,6 +47,12 @@ Every direct access must be documented with a comment in the relevant
 - why direct access is appropriate (Realtime or read-only), and
 - the expected data shape.
 
+**Realtime timing:** after `channel.subscribe()` reports `SUBSCRIBED`, Supabase takes a
+moment more before database changes are delivered (it then sends a `system` message,
+"Subscribed to PostgreSQL"). Changes made in that gap are missed. So subscribe first,
+wait for that system message, then load the initial data (e.g. `listMembers`) — that way
+nothing falls between the initial load and the live updates.
+
 Example:
 
 ```ts
@@ -55,10 +61,10 @@ Example:
 // Shape: { id, room_id, guest_id, display_name, role, created_at }
 ```
 
-> **Current state:** RLS is enabled on every table, but no anon policies exist yet (see the
-> TODO at the end of `supabase/migrations/20260925000000_initial_schema.sql`). Until those
-> policies are added, anon reads and Realtime subscriptions return no rows; only the
-> backend (service role) can read or write.
+> **Current state:** the anon key can read `party_rooms`, `room_members`, `guests`, and
+> `characters` (migration `20260926000000_anon_room_read_policies.sql`). Every other table,
+> including `travel_preferences`, returns no rows to the anon key until a policy is added
+> for it. The anon key cannot write to the core tables at all.
 
 ## Keys
 
