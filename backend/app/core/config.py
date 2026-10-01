@@ -12,8 +12,9 @@ LangGraph/AI configuration is included by design.
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import urlparse
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,10 +41,21 @@ class Settings(BaseSettings):
     app_name: str = Field(default="PixelArt Trip Planner API")
     environment: str = Field(default="development")
 
-    # NOTE: Required-but-missing secrets (e.g. a Supabase service-role key) will
-    # be declared here without a default as real backend features land, e.g.:
-    #     supabase_service_key: str
-    # A missing value then fails fast through get_settings() below.
+    # --- Supabase (required: no defaults, so a missing value fails fast) ---
+    supabase_url: str = Field(min_length=1)
+    # repr=False keeps the key out of str(settings), repr(settings), and logs.
+    supabase_service_role_key: str = Field(min_length=1, repr=False)
+
+    # --- CORS ---
+    frontend_url: str = Field(default="http://localhost:3000")
+
+    @field_validator("supabase_url")
+    @classmethod
+    def _validate_supabase_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("SUPABASE_URL must be a valid URL with a scheme and host")
+        return value
 
 
 @lru_cache
