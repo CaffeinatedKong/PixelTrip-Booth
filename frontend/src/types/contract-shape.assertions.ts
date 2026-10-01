@@ -23,7 +23,12 @@ import type {
   Guest,
   PlanningStage,
   PartyRoom,
+  RoomStatus,
+  MemberRole,
   RoomMember,
+  RoomSession,
+  Character,
+  TravelPreferences,
   SenderType,
   MessageKind,
   Message,
@@ -52,20 +57,18 @@ type Equal<A, B> =
 type Expect<T extends true> = T;
 
 /* ------------------------------------------------------------------ *
- * Guest — { id, displayName, avatarUrl? }
+ * Guest — { id, displayName, avatarUrl (string | null) }
  * ------------------------------------------------------------------ */
 
-// Required fields only (avatarUrl optional) must satisfy Guest.
-const _guest = { id: "", displayName: "" } satisfies Guest;
-// avatarUrl may be provided.
+const _guest = { id: "", displayName: "", avatarUrl: null } satisfies Guest;
 const _guestWithAvatar = {
   id: "",
   displayName: "",
   avatarUrl: "",
 } satisfies Guest;
-// id is a string.
 type _GuestId = Expect<Equal<Guest["id"], string>>;
 type _GuestDisplayName = Expect<Equal<Guest["displayName"], string>>;
+type _GuestAvatar = Expect<Equal<Guest["avatarUrl"], string | null>>;
 
 /* ------------------------------------------------------------------ *
  * Stage & State — PlanningStage union
@@ -79,37 +82,81 @@ type _PlanningStage = Expect<
 >;
 
 /* ------------------------------------------------------------------ *
- * PartyRoom — { id, name, ownerId, status, planningStage }
+ * PartyRoom — { id, roomCode, name, status, planningStage }
  * ------------------------------------------------------------------ */
 
 const _partyRoom = {
   id: "",
+  roomCode: "",
   name: "",
-  ownerId: "",
-  status: "",
+  status: "active",
   planningStage: "setup",
 } satisfies PartyRoom;
 type _PartyRoomId = Expect<Equal<PartyRoom["id"], string>>;
+type _PartyRoomCode = Expect<Equal<PartyRoom["roomCode"], string>>;
+type _RoomStatus = Expect<
+  Equal<RoomStatus, "active" | "finalised" | "cancelled">
+>;
 type _PartyRoomStage = Expect<Equal<PartyRoom["planningStage"], PlanningStage>>;
 
 /* ------------------------------------------------------------------ *
- * RoomMember — { id, roomId, guestId, characterId?, role }
+ * RoomMember — { id, roomId, guestId, displayName, role }
  * ------------------------------------------------------------------ */
 
-// characterId is optional and may be omitted.
 const _roomMember = {
   id: "",
   roomId: "",
   guestId: "",
-  role: "",
+  displayName: "",
+  role: "member",
 } satisfies RoomMember;
-const _roomMemberWithCharacter = {
+type _MemberRole = Expect<Equal<MemberRole, "owner" | "member">>;
+
+/* ------------------------------------------------------------------ *
+ * Character — { id, memberId, appearance, spriteKey (string | null) }
+ * ------------------------------------------------------------------ */
+
+const _character = {
   id: "",
-  roomId: "",
-  guestId: "",
-  characterId: "",
-  role: "",
-} satisfies RoomMember;
+  memberId: "",
+  appearance: {},
+  spriteKey: null,
+} satisfies Character;
+type _CharacterAppearance = Expect<
+  Equal<Character["appearance"], Record<string, unknown>>
+>;
+
+/* ------------------------------------------------------------------ *
+ * TravelPreferences — list fields are arrays; optional values are null
+ * ------------------------------------------------------------------ */
+
+const _travelPreferences = {
+  id: "",
+  memberId: "",
+  availableDates: [],
+  destinations: [],
+  travelStyle: null,
+  budget: null,
+  interests: [],
+  activities: [],
+  hardConstraints: [],
+} satisfies TravelPreferences;
+type _Budget = Expect<Equal<TravelPreferences["budget"], number | null>>;
+
+/* ------------------------------------------------------------------ *
+ * RoomSession — create/join result; character/prefs may be null on resume
+ * ------------------------------------------------------------------ */
+
+const _roomSession = {
+  room: _partyRoom,
+  member: _roomMember,
+  guest: _guest,
+  character: null,
+  travelPreferences: null,
+} satisfies RoomSession;
+type _SessionCharacter = Expect<
+  Equal<RoomSession["character"], Character | null>
+>;
 
 /* ------------------------------------------------------------------ *
  * Message — envelope + kind-dependent unknown content
@@ -230,7 +277,9 @@ export const __contractShapeGuards = [
   _guestWithAvatar,
   _partyRoom,
   _roomMember,
-  _roomMemberWithCharacter,
+  _character,
+  _travelPreferences,
+  _roomSession,
   _messageUser,
   _messageAi,
   _voteOption,
