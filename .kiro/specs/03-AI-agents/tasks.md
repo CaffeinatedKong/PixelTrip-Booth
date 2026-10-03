@@ -682,22 +682,22 @@ question is required.
     dispatches correctly end-to-end for each `run_type` against mocked repositories.
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 22. SETUP/WRAP stage handling and secret-safety/layering enforcement
-  - [ ] 22.1 Implement SETUP guidance and WRAP summary helpers
+- [x] 22. SETUP/WRAP stage handling and secret-safety/layering enforcement
+  - [x] 22.1 Implement SETUP guidance and WRAP summary helpers
     - Implement plain service-layer/helper code (not graph nodes) that emits SETUP guidance
       `NPC_Message` rows without creating an `agent_runs` row, and a WRAP summary helper that
       reads the single `status='approved'` `itinerary_versions` row and fails with
       `NoApprovedItineraryError` (no summary emitted) when none exists.
     - _Requirements: 1.11, 1.12, 1.13_
 
-  - [ ] 22.2 Add logging redaction enforcement in `app/agents/` modules
+  - [x] 22.2 Add logging redaction enforcement in `app/agents/` modules
     - Ensure every log call across `app/agents/` excludes `Service_Role_Key` values, LLM API
       keys, `External_Tool` credentials, raw Supabase payloads, SQL text, LLM prompt/
       completion text, and stack traces at every log level, matching spec 02's
       `RepositoryError` handler discipline of authored, safe messages.
     - _Requirements: 20.5, 20.6_
 
-  - [ ]* 22.3 Write unit tests for SETUP/WRAP and layering
+  - [x]* 22.3 Write unit tests for SETUP/WRAP and layering
     - Assert SETUP guidance creates zero `agent_runs` rows; assert WRAP with no approved
       version raises `NoApprovedItineraryError` with no summary message emitted; assert a
       static-analysis-style test (e.g. `ast`-based import scan) confirms no module under
