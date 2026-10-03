@@ -705,8 +705,8 @@ question is required.
       imports the Supabase client factory directly.
     - _Requirements: 1.11, 1.13, 20.1, 20.2_
 
-- [ ] 23. Property-based tests for design correctness properties
-  - [ ]* 23.1 Add version-lifecycle property tests
+- [x] 23. Property-based tests for design correctness properties
+  - [x]* 23.1 Add version-lifecycle property tests
     - **Property 1: Version monotonicity, no gaps, no overwrites** — using the fake
       repository, assert any interleaving of concurrent inserts yields a contiguous
       version sequence starting at 1 with no overwrite, tagged
@@ -726,7 +726,7 @@ question is required.
       `Feature: 03-AI-agents, Property 15`.
     - _Requirements: 5.1, 5.2, 5.3, 5.9, 5.10, 5.11, 5.12, 9.9, 9.10_
 
-  - [ ]* 23.2 Add guardrail and escalation property tests
+  - [x]* 23.2 Add guardrail and escalation property tests
     - **Property 4: Guardrail soundness** — assert zero repository write calls for any
       malformed/rejected `Proposal`, tagged `Feature: 03-AI-agents, Property 4`.
     - **Property 8: Iteration and tool-call cap bound** — assert
@@ -741,7 +741,7 @@ question is required.
       `API_Error_Response.message`, tagged `Feature: 03-AI-agents, Property 12`.
     - _Requirements: 3.6, 11.6, 12.11, 12.8, 12.9, 13.1, 13.3, 13.4, 13.5, 13.6, 13.9, 14.10, 19.2, 20.5, 20.8_
 
-  - [ ]* 23.3 Add run-lifecycle and idempotency property tests
+  - [x]* 23.3 Add run-lifecycle and idempotency property tests
     - **Property 6: Idempotency replay** — assert 2-10 concurrent
       `create_pending` calls with the same key produce exactly one row and one shared id,
       tagged `Feature: 03-AI-agents, Property 6`.
@@ -750,7 +750,7 @@ question is required.
       `Feature: 03-AI-agents, Property 7`.
     - _Requirements: 3.3, 3.5, 4.1, 4.2, 4.5, 14.5, 14.6_
 
-  - [ ]* 23.4 Add negotiation, messaging, and status property tests
+  - [x]* 23.4 Add negotiation, messaging, and status property tests
     - **Property 5: Unaffected-scope preservation** — assert every day/item outside
       `compute_affected_scope` is field-by-field identical between base and refined
       versions, tagged `Feature: 03-AI-agents, Property 5`.
