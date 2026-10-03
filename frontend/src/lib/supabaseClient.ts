@@ -1,37 +1,44 @@
 /**
- * Supabase client — placeholder (Foundation phase).
+ * Frontend Supabase client (anon key only).
  *
- * This module reserves the single location where the frontend's Supabase
- * client integration will live. Per the Supabase ownership split
- * (`supabase-architecture.md`, Requirement 13):
+ * Per the Supabase access boundary (`docs/SUPABASE_ACCESS_BOUNDARY.md`):
  *
- * - The frontend owns only an **anon-key** oriented client. It reads the
- *   public, browser-safe values `NEXT_PUBLIC_SUPABASE_URL` and
- *   `NEXT_PUBLIC_SUPABASE_ANON_KEY` (conceptually — no client is initialised
- *   here yet).
- * - The frontend **never** holds the Supabase service-role key. That key
- *   belongs exclusively to the backend/service role and must not appear in any
- *   committed or bundled frontend file.
+ * - The frontend uses only the public, browser-safe `NEXT_PUBLIC_SUPABASE_URL`
+ *   and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and only for approved read-only queries
+ *   and Realtime subscriptions. All writes go through FastAPI.
+ * - The frontend **never** holds the Supabase service-role key.
  *
- * In the Foundation this performs **no network calls** and does **no real
- * initialisation** — it exists so that, when real services land, all Supabase
- * access is confined to the service layer (`src/services/*.api.ts`) via this
- * client. UI code (`app/`, `src/features`, `src/components`) must never import
- * this module directly.
+ * Only the real service implementations (`src/services/*.api.ts`) may import this
+ * module; UI code must never import it directly. The client is created lazily on
+ * first use, so importing this module performs no network calls.
  */
-import { notImplemented } from "./errors";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+import { ConfigError } from "./errors";
 
 /** Public, browser-safe Supabase environment variable names (anon-key only). */
 export const SUPABASE_URL_ENV = "NEXT_PUBLIC_SUPABASE_URL";
 export const SUPABASE_ANON_KEY_ENV = "NEXT_PUBLIC_SUPABASE_ANON_KEY";
 
+let client: SupabaseClient | null = null;
+
 /**
- * Return the frontend Supabase client.
+ * Return the shared anon-key Supabase client, creating it on first use.
  *
- * Placeholder: throws {@link NotImplementedError} in the Foundation phase. When
- * implemented it will lazily create an anon-key client from the public env
- * values above — and will still never reference the service-role key.
+ * @throws {ConfigError} if the URL or anon key is not configured.
  */
-export function getSupabaseClient(): never {
-  throw notImplemented("getSupabaseClient");
+export function getSupabaseClient(): SupabaseClient {
+  if (client) {
+    return client;
+  }
+  // NEXT_PUBLIC_* values are inlined at build time, so they must be read by name.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!url || !anonKey) {
+    throw new ConfigError(
+      `${SUPABASE_URL_ENV} and ${SUPABASE_ANON_KEY_ENV} must be set to use real services.`,
+    );
+  }
+  client = createClient(url, anonKey, { auth: { persistSession: false } });
+  return client;
 }

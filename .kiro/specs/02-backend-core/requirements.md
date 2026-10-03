@@ -13,13 +13,13 @@ backend: the two endpoints (`POST /rooms` and `POST /rooms/{room_code}/join`) th
 a party to form and carry the guest-identity model defined in `supabase-architecture.md`
 and `api-contracts.md`.
 
-**Guest identity model (MVP):** Identity is room-scoped using an exact, case-sensitive
-`display_name` match. `room_id + exact display_name` → `room_member`. `"Gerald"` and
-`"gerald"` are treated as different members in the same room. This is a convenience-based
-identity model, not authentication — anyone who knows the room code and the exact display
-name used by another member can resume that member identity. Do not store sensitive
-personal data. The `UNIQUE(room_id, display_name)` database constraint enforces
-uniqueness; the `normalized_name` generated column from the previous design is removed.
+**Guest identity model (MVP):** Identity is room-scoped and case-insensitive.
+`room_id + normalized display_name` → `room_member`. `"Gerald"`, `"gerald"`, `"GERald"`, and
+`" Gerald "` are the same member in the same room. This is a convenience-based identity
+model, not authentication — anyone who knows the room code and a member's display name (in
+any casing) can resume that member identity. Do not store sensitive personal data. The
+`normalized_name` generated column and the `UNIQUE(room_id, normalized_name)` database
+constraint from the initial schema enforce uniqueness.
 
 Repository boundaries follow business domains, not individual database tables.
 
@@ -42,8 +42,8 @@ feedback, deployment — remains excluded.
   all `party_rooms` table operations, room code generation, and the atomic room creation
   RPC transaction.
 - **MemberRepository**: The repository at `app/repositories/member_repository.py` that
-  owns all `room_members` table operations, including exact-match display name lookup and
-  join logic.
+  owns all `room_members` table operations, including case-insensitive display name lookup
+  and join logic.
 - **ProfileRepository**: The repository at `app/repositories/profile_repository.py` that
   owns the guest profile domain: `guests`, `characters`, and `travel_preferences` table
   operations.
@@ -57,20 +57,25 @@ feedback, deployment — remains excluded.
   `party_rooms` record and is shared with party members so they can join.
 - **Guest**: A lightweight profile record in the `guests` table holding `display_name` and
   optional `avatar_url`. Not an authenticated user.
+- **Normalized_Name**: A display name with leading and trailing whitespace removed, each
+  run of internal whitespace collapsed to a single space, and all letters lower-cased
+  (e.g. `"  GERald  "` → `"gerald"`). Stored in the `room_members.normalized_name` generated
+  column and used for identity matching. The original `display_name` is kept for display.
 - **Room_Member**: A record in `room_members` joining a Guest to a Party_Room with a role
   (`owner` or `member`). Uniqueness within a room is enforced by
-  `UNIQUE(room_id, display_name)` using an exact, case-sensitive match.
+  `UNIQUE(room_id, normalized_name)`, so names differing only in case or surrounding
+  whitespace are the same member.
 - **Character**: A record in `characters` linked to a Room_Member, holding `appearance`
   (JSONB) and optional `sprite_key`.
 - **Travel_Preferences**: A record in `travel_preferences` linked to a Room_Member,
   holding JSONB fields for dates, destinations, budget, interests, activities, and
   hard constraints.
 - **Owner**: The Room_Member whose `role` is `"owner"` — the creator of the room.
-- **Resume_Path**: The join-room branch where the exact (case-sensitive) `display_name`
-  matches an existing Room_Member in the room; the existing member and associated records
+- **Resume_Path**: The join-room branch where the `Normalized_Name` of the given
+  `display_name` matches an existing Room_Member in the room; the existing member and associated records
   are returned unchanged.
-- **New_Member_Path**: The join-room branch where no exact `display_name` match is found
-  in the room; a new Guest, Room_Member, Character, and Travel_Preferences are created.
+- **New_Member_Path**: The join-room branch where no Room_Member with the same
+  `Normalized_Name` is found in the room; a new Guest, Room_Member, Character, and Travel_Preferences are created.
 - **Domain_Exception**: A typed Python exception raised by the Repository or Service Layer
   to represent a known business error (e.g. `RoomNotFoundError`).
 - **Settings**: The `pydantic-settings` `Settings` class in `app/core/config.py` that
@@ -238,7 +243,8 @@ encapsulated behind a clean interface.
 ### Requirement 5: Repository Layer — MemberRepository
 
 **User Story:** As Dev B, I want a `MemberRepository` that owns all `room_members`
-operations so that exact-match display name identity lookup is encapsulated and correct.
+operations so that case-insensitive display name identity lookup is encapsulated and
+correct.
 
 #### Acceptance Criteria
 
@@ -248,9 +254,9 @@ operations so that exact-match display name identity lookup is encapsulated and 
    the created record as a dict containing at minimum `id`, `room_id`, `guest_id`,
    `display_name`, `role`, and `created_at`.
 2. THE `MemberRepository` SHALL implement a `get_member_by_display_name` method that
-   accepts `room_id` (UUID string) and `display_name` (str, 1–50 characters), queries
-   `room_members` filtering by both `room_id` and `display_name` using an exact
-   case-sensitive match, and returns the matching record as a dict containing at minimum
+   accepts `room_id` (UUID string) and `display_name` (str, 1–50 characters), computes its
+   `Normalized_Name`, queries `room_members` filtering by both `room_id` and
+   `normalized_name`, and returns the matching record as a dict containing at minimum
    `id`, `room_id`, `guest_id`, `display_name`, `role`, and `created_at`, or `None` if no
    matching row exists.
 3. THE `MemberRepository` SHALL implement a `get_member_by_id` method that accepts a
@@ -323,28 +329,25 @@ repository class.
 
 ---
 
-### Requirement 7: Schema Migration — Case-Sensitive Identity
+### Requirement 7: Case-Insensitive Identity in the Schema
 
-**User Story:** As Dev B, I want a Supabase migration that replaces the normalized-name
-identity constraint with an exact display name constraint so that the database enforces the
-new case-sensitive identity model.
+**User Story:** As Dev B, I want the database to enforce case-insensitive member identity so
+that two members of the same room can never have names that differ only in case or
+whitespace.
 
 #### Acceptance Criteria
 
-1. THE `Backend_App` SHALL include a new migration file under `supabase/migrations/` that
-   drops the `UNIQUE(room_id, normalized_name)` index on `room_members`, drops the
-   `normalized_name` generated column from `room_members`, and adds a
-   `UNIQUE(room_id, display_name)` constraint on `room_members`.
-2. WHEN the migration is applied, THE database SHALL enforce that no two `room_members`
-   rows with the same `room_id` may share the same `display_name` value using exact
-   case-sensitive comparison.
-3. WHEN the migration is applied, THE `room_members` table SHALL NOT contain a
-   `normalized_name` column.
-4. THE migration file SHALL be applied before any backend core endpoint is used in testing
-   or integration, so that the `UNIQUE(room_id, display_name)` constraint is active.
-5. IF the migration is applied to a `room_members` table that contains existing rows with
-   duplicate `(room_id, display_name)` combinations, THEN the migration SHALL fail with an
-   error rather than silently dropping conflicting rows.
+1. THE `room_members` table SHALL have a `normalized_name` column generated by the database
+   from `display_name` using the `Normalized_Name` rule, defined in
+   `supabase/migrations/20260925000000_initial_schema.sql`.
+2. THE database SHALL enforce `UNIQUE(room_id, normalized_name)` on `room_members`, so that
+   no two rows in the same room share a `Normalized_Name`.
+3. THE `Normalized_Name` computed in Python by `normalize_display_name()` SHALL produce the
+   same value as the database's generated `normalized_name` column for any valid display
+   name.
+4. THE initial schema migration SHALL be applied before any backend core endpoint is used
+   in testing or integration, so that the `UNIQUE(room_id, normalized_name)` constraint is
+   active.
 
 ---
 
@@ -434,28 +437,30 @@ shared space to plan together, identified by a unique room code.
 
 ### Requirement 11: Join Room — Resume Existing Member
 
-**User Story:** As a returning party member, I want to rejoin a room using my exact display
-name so that my existing character and preferences are restored without creating duplicate
+**User Story:** As a returning party member, I want to rejoin a room using my display name
+(in any casing) so that my existing character and preferences are restored without creating duplicate
 records.
 
-**Note:** Identity matching is exact and case-sensitive. `"Gerald"` and `"gerald"` are
-treated as different members. Anyone who knows the room code and the exact display name
-can resume that member's identity — this is an intentional MVP convenience model, not
+**Note:** Identity matching is case-insensitive. `"Gerald"`, `"gerald"`, and `"GERald"` are
+the same member. Anyone who knows the room code and a member's display name can resume that
+member's identity — this is an intentional MVP convenience model, not
 authentication.
 
 #### Acceptance Criteria
 
-1. WHEN `RoomService.join_room` is called with a `room_code` and a `display_name` that
-   exactly matches (case-sensitive) an existing `room_members.display_name` for that room,
+1. WHEN `RoomService.join_room` is called with a `room_code` and a `display_name` whose
+   `Normalized_Name` matches an existing `room_members.normalized_name` for that room,
    THE `Service_Layer` SHALL follow the `Resume_Path` and return the existing `guest`,
    `member`, `character`, and `travel_preferences` records without creating new ones.
-2. THE `Service_Layer` SHALL pass the `display_name` to `MemberRepository.get_member_by_display_name`
-   without applying any case transformation, trimming, or normalization.
+2. THE `Service_Layer` SHALL pass the `display_name` as received to
+   `MemberRepository.get_member_by_display_name`; normalization is applied inside the
+   `MemberRepository` only.
 3. THE `JoinRoomResponse` returned on the `Resume_Path` SHALL reflect the persisted state
    of the existing records, not the input values.
-4. WHEN `display_name` values differ in letter case (e.g. `"Gerald"` vs `"gerald"`), THE
-   `Service_Layer` SHALL treat them as different members and follow the `New_Member_Path`
-   for the non-matching name.
+4. WHEN `display_name` values differ only in letter case or surrounding whitespace (e.g.
+   `"Gerald"`, `"gerald"`, `" GERald "`), THE `Service_Layer` SHALL treat them as the same
+   member and follow the `Resume_Path`, returning the member's originally stored
+   `display_name`.
 5. WHEN `RoomService.join_room` is called with a `room_code` that does not match any
    record in `party_rooms`, THE `Service_Layer` SHALL raise a `RoomNotFoundError` domain
    exception regardless of the `display_name` value.
@@ -473,8 +478,8 @@ room code and my display name so that I am added to the party and can start plan
 #### Acceptance Criteria
 
 1. WHEN `RoomService.join_room` is called with a valid `room_code` and a `display_name`
-   of 1–50 characters that does not exactly match any existing `room_members.display_name`
-   for that room, THE `Service_Layer` SHALL follow the `New_Member_Path` and create
+   of 1–50 characters whose `Normalized_Name` does not match any existing
+   `room_members.normalized_name` for that room, THE `Service_Layer` SHALL follow the `New_Member_Path` and create
    records in `guests`, `room_members`, `characters`, and `travel_preferences`.
 2. THE created `room_members` record on the `New_Member_Path` SHALL have `role` set to
    `"member"`.
@@ -678,8 +683,8 @@ real route and service wiring.
    HTTP 200 response whose body contains `member.id`, `member.roomId`, `member.guestId`,
    `member.displayName`, and `member.role` set to `"member"`.
 3. THE test suite SHALL include an integration test for `POST /rooms/{room_code}/join`
-   where the same `display_name` (identical string, case-sensitive) is submitted twice
-   (Resume_Path), asserting that both responses return HTTP 200 and that the `member.id`
+   where the same display name is submitted twice with different casing (e.g. `"Gerald"`
+   then `"gerald"`) (Resume_Path), asserting that both responses return HTTP 200 and that the `member.id`
    in the second response matches the `member.id` in the first response.
 4. THE test suite SHALL include an integration test for `POST /rooms/{room_code}/join`
    with a `room_code` that does not exist, asserting an HTTP 404 response whose body

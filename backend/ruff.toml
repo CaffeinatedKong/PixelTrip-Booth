@@ -7,3 +7,8 @@ src = ["app", "tests"]
 
 [lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[lint.isort]
+# `src` points inside the package, so name it explicitly to keep app imports grouped
+# after third-party imports.
+known-first-party = ["app"]

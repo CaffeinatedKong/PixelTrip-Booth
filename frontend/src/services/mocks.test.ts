@@ -26,35 +26,98 @@ const VOTE_SESSION_ID = "99999999-9999-4999-8999-999999999999";
 const TRIP_ID = "bbbbbbb0-bbbb-4bbb-8bbb-bbbbbbbbbbb0";
 
 describe("MockGuestService", () => {
-  it("createGuest returns a Guest with a generated id and the given name", async () => {
-    const guest = await new MockGuestService().createGuest({
-      displayName: "Adventurer",
-    });
-    expect(typeof guest.id).toBe("string");
-    expect(guest.id.length).toBeGreaterThan(0);
-    expect(guest.displayName).toBe("Adventurer");
-  });
-
   it("getGuest resolves a contract-shaped Guest for a known id", async () => {
     const guest = await new MockGuestService().getGuest(GUEST_ID);
-    expect(guest).not.toBeNull();
-    expect(guest).toMatchObject({
-      id: expect.any(String),
+    expect(guest).toEqual({
+      id: GUEST_ID,
       displayName: expect.any(String),
+      avatarUrl: expect.any(String),
     });
+  });
+
+  it("getGuest resolves null for an unknown id", async () => {
+    await expect(
+      new MockGuestService().getGuest("unknown"),
+    ).resolves.toBeNull();
   });
 });
 
 describe("MockRoomService", () => {
   it("getRoom resolves a contract-shaped PartyRoom for a known id", async () => {
     const room = await new MockRoomService().getRoom(ROOM_ID);
-    expect(room).not.toBeNull();
-    expect(room).toMatchObject({
+    expect(room).toEqual({
       id: ROOM_ID,
+      roomCode: "PIXEL1",
       name: expect.any(String),
-      ownerId: expect.any(String),
-      status: expect.any(String),
-      planningStage: expect.any(String),
+      status: "active",
+      planningStage: "setup",
+    });
+  });
+
+  it("listMembers returns contract-shaped members for the room", async () => {
+    const members = await new MockRoomService().listMembers(ROOM_ID);
+    expect(members.length).toBeGreaterThan(0);
+    for (const member of members) {
+      expect(member).toEqual({
+        id: expect.any(String),
+        roomId: ROOM_ID,
+        guestId: expect.any(String),
+        displayName: expect.any(String),
+        role: expect.stringMatching(/^(owner|member)$/),
+      });
+    }
+  });
+
+  it("createRoom returns a full session with the caller as owner", async () => {
+    const session = await new MockRoomService().createRoom({
+      name: "Weekend Quest",
+      ownerDisplayName: "Gerald",
+    });
+    expect(session.room.roomCode).toMatch(/^[A-Z0-9]{4,12}$/);
+    expect(session.member).toMatchObject({
+      roomId: session.room.id,
+      guestId: session.guest.id,
+      displayName: "Gerald",
+      role: "owner",
+    });
+    expect(session.character?.memberId).toBe(session.member.id);
+    expect(session.travelPreferences?.memberId).toBe(session.member.id);
+  });
+
+  it("joinRoom resumes a member by name in any casing", async () => {
+    const service = new MockRoomService();
+    const created = await service.createRoom({
+      name: "Weekend Quest",
+      ownerDisplayName: "Gerald",
+    });
+
+    const resumed = await service.joinRoom({
+      roomCode: created.room.roomCode.toLowerCase(),
+      displayName: "  GERald ",
+    });
+
+    expect(resumed.member.id).toBe(created.member.id);
+    expect(resumed.member.displayName).toBe("Gerald");
+  });
+
+  it("joinRoom creates a new member for a new name", async () => {
+    const session = await new MockRoomService().joinRoom({
+      roomCode: "PIXEL1",
+      displayName: "Priya",
+    });
+    expect(session.member).toMatchObject({ roomId: ROOM_ID, role: "member" });
+  });
+
+  it("joinRoom rejects an unknown room code with ROOM_NOT_FOUND", async () => {
+    await expect(
+      new MockRoomService().joinRoom({
+        roomCode: "NOPE99",
+        displayName: "Gerald",
+      }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      code: "ROOM_NOT_FOUND",
+      status: 404,
     });
   });
 });
