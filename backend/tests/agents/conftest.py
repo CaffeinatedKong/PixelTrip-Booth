@@ -17,8 +17,21 @@ from __future__ import annotations
 import socket
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
+from app.agents.state import RepositoryBundle
+from app.repositories.agent_run_repository import AgentRunRepository
+from app.repositories.feedback_repository import FeedbackRepository
+from app.repositories.itinerary_version_repository import ItineraryVersionRepository
+from app.repositories.member_repository import MemberRepository
+from app.repositories.message_repository import MessageRepository
+from app.repositories.profile_repository import ProfileRepository
+from app.repositories.room_repository import RoomRepository
+from app.repositories.selection_repository import SelectionRepository
+from app.repositories.trip_repository import TripRepository
+from app.repositories.vote_repository import VoteRepository
+from app.repositories.vote_session_repository import VoteSessionRepository
 
 # ---------------------------------------------------------------------------
 # No-network enforcement
@@ -255,4 +268,145 @@ def unique_violation(constraint: str) -> FakePostgresError:
     return FakePostgresError(
         f'duplicate key value violates unique constraint "{constraint}"',
         code="23505",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared repository/tool mock fixtures (Requirement 21.7-21.8, 21.10)
+# ---------------------------------------------------------------------------
+#
+# Each fixture is an ``AsyncMock(spec=...)`` against the real repository
+# class, following spec 02's fixture pattern: ``spec=`` means calling a method
+# that does not exist on the real class fails loudly, the same way a typo
+# would against the genuine object, rather than silently returning another
+# mock. These are for tests that only need "a repository was/wasn't called
+# with X", not the full query-chain fidelity ``FakeSupabaseClient`` gives
+# the repository-layer tests themselves.
+
+
+@pytest.fixture
+def mock_trip_repo() -> AsyncMock:
+    return AsyncMock(spec=TripRepository)
+
+
+@pytest.fixture
+def mock_room_repo() -> AsyncMock:
+    return AsyncMock(spec=RoomRepository)
+
+
+@pytest.fixture
+def mock_message_repo() -> AsyncMock:
+    return AsyncMock(spec=MessageRepository)
+
+
+@pytest.fixture
+def mock_vote_session_repo() -> AsyncMock:
+    return AsyncMock(spec=VoteSessionRepository)
+
+
+@pytest.fixture
+def mock_vote_repo() -> AsyncMock:
+    return AsyncMock(spec=VoteRepository)
+
+
+@pytest.fixture
+def mock_selection_repo() -> AsyncMock:
+    return AsyncMock(spec=SelectionRepository)
+
+
+@pytest.fixture
+def mock_itinerary_version_repo() -> AsyncMock:
+    return AsyncMock(spec=ItineraryVersionRepository)
+
+
+@pytest.fixture
+def mock_feedback_repo() -> AsyncMock:
+    return AsyncMock(spec=FeedbackRepository)
+
+
+@pytest.fixture
+def mock_agent_run_repo() -> AsyncMock:
+    return AsyncMock(spec=AgentRunRepository)
+
+
+@pytest.fixture
+def mock_member_repo() -> AsyncMock:
+    return AsyncMock(spec=MemberRepository)
+
+
+@pytest.fixture
+def mock_profile_repo() -> AsyncMock:
+    return AsyncMock(spec=ProfileRepository)
+
+
+@pytest.fixture
+def mock_llm() -> AsyncMock:
+    """A test double for the (not-yet-wired) LLM client.
+
+    No concrete LLM client class exists yet under ``app/agents/`` (see the
+    discovery/itinerary/negotiation node docstrings), so this has no ``spec``
+    to pin against. It exists now so a node that gains a real LLM call later
+    has an established fixture name to swap in against.
+    """
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_flight_tool() -> AsyncMock:
+    """A test double for ``FlightSearchTool``, returning ``(response, state)``."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_places_tool() -> AsyncMock:
+    """A test double for ``PlacesLookupTool``, returning ``(response, state)``."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_weather_tool() -> AsyncMock:
+    """A test double for ``WeatherLookupTool``, returning ``(response, state)``."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_repository_bundle(
+    mock_trip_repo: AsyncMock,
+    mock_room_repo: AsyncMock,
+    mock_message_repo: AsyncMock,
+    mock_vote_session_repo: AsyncMock,
+    mock_vote_repo: AsyncMock,
+    mock_selection_repo: AsyncMock,
+    mock_itinerary_version_repo: AsyncMock,
+    mock_feedback_repo: AsyncMock,
+    mock_agent_run_repo: AsyncMock,
+    mock_member_repo: AsyncMock,
+    mock_profile_repo: AsyncMock,
+    mock_llm: AsyncMock,
+    mock_flight_tool: AsyncMock,
+    mock_places_tool: AsyncMock,
+    mock_weather_tool: AsyncMock,
+) -> RepositoryBundle:
+    """A :class:`RepositoryBundle` built entirely from the mocks above.
+
+    Convenient for a test that drives a node or ``run_agent_graph`` and wants
+    to assert on call counts across every dependency at once, rather than
+    assembling the bundle by hand each time.
+    """
+    return RepositoryBundle(
+        trip_repo=mock_trip_repo,
+        room_repo=mock_room_repo,
+        message_repo=mock_message_repo,
+        vote_session_repo=mock_vote_session_repo,
+        vote_repo=mock_vote_repo,
+        selection_repo=mock_selection_repo,
+        itinerary_version_repo=mock_itinerary_version_repo,
+        feedback_repo=mock_feedback_repo,
+        agent_run_repo=mock_agent_run_repo,
+        member_repo=mock_member_repo,
+        profile_repo=mock_profile_repo,
+        flight_tool=mock_flight_tool,
+        places_tool=mock_places_tool,
+        weather_tool=mock_weather_tool,
+        llm=mock_llm,
     )

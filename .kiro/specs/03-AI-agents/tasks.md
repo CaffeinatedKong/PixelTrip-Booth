@@ -771,22 +771,22 @@ question is required.
       tagged `Feature: 03-AI-agents, Property 18`.
     - _Requirements: 10.2, 10.3, 15.1, 15.2, 15.3, 15.10, 15.11, 16.1, 16.9, 18.1, 18.6, 18.7, 18.8, 18.10_
 
-- [ ] 24. No-network enforcement and integration-style tests
-  - [ ] 24.1 Add the autouse `block_network` fixture in `tests/agents/conftest.py`
+- [x] 24. No-network enforcement and integration-style tests
+  - [x] 24.1 Add the autouse `block_network` fixture in `tests/agents/conftest.py`
     - Monkeypatch `socket.socket` to raise `AssertionError` on any real network attempt,
       applied to every test under `tests/agents/`.
     - Add the shared `mocker.AsyncMock(spec=...)` fixtures for all eight new repositories
       plus `mock_llm`, `mock_flight_tool`, etc., following spec 02's fixture pattern.
     - _Requirements: 21.7, 21.8, 21.10, 21.11_
 
-  - [ ]* 24.2 Write end-to-end node-dispatch integration tests with mocked repositories
+  - [x]* 24.2 Write end-to-end node-dispatch integration tests with mocked repositories
     - For each `run_type`, drive `run_agent_graph` with fully mocked `RepositoryBundle` and
       test-double `llm`/tool clients returning fixed, pre-declared responses, and assert the
       expected repository write call counts and `agent_runs` status outcome for a
       representative happy path and one guardrail-rejection path per node.
     - _Requirements: 21.1, 21.2, 21.3, 21.4, 21.5, 21.6, 21.7, 21.8, 21.9, 21.12, 21.13_
 
-- [ ] 25. Final checkpoint — full verification
+- [x] 25. Final checkpoint — full verification
   - Run the full `pytest` suite (including the property-based tests with the fixed seed
     and ≥50 examples each), confirm zero failures/errors with no network interface
     available and no Supabase credentials present in the environment, and confirm
