@@ -572,7 +572,7 @@ question is required.
   - Run `ruff check .` and all node tests from tasks 16-17.
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 19. Itinerary persistence helper and Itinerary_Node (BUILD stage)
+- [x] 19. Itinerary persistence helper and Itinerary_Node (BUILD stage)
   - [x] 19.1 Implement `persist_itinerary_version` in `app/agents/nodes/itinerary.py`
     - Implement the optimistic-lock loop from the design's Algorithmic Pseudocode: insert
       at `base_version + 1` with `source="build"` iff `version == 1` and `"refine"`
