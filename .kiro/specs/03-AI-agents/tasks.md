@@ -623,8 +623,8 @@ question is required.
       the (simulated) frontend type omits them.
     - _Requirements: 9.5, 9.9, 9.11, 9.12, 9.16_
 
-- [ ] 20. Negotiation_Node (REFINE stage)
-  - [ ] 20.1 Implement `compute_affected_scope` and `detect_conflicts` in
+- [x] 20. Negotiation_Node (REFINE stage)
+  - [x] 20.1 Implement `compute_affected_scope` and `detect_conflicts` in
     `app/agents/nodes/negotiation.py`
     - Implement the union of every open `feedback` row's target day/item, every same-day
       item whose time range overlaps a changed item, and the immediately adjacent items in
@@ -640,14 +640,14 @@ question is required.
       `Affected_Scope`, left `status='open'`, and named in an `NPC_Message` as not located.
     - _Requirements: 10.2, 10.9, 10.14, 10.15_
 
-  - [ ]* 20.2 Write unit tests for `compute_affected_scope`/`detect_conflicts`
+  - [x]* 20.2 Write unit tests for `compute_affected_scope`/`detect_conflicts`
     - Assert the same set of open `feedback` rows always yields the same conflict set
       across repeated calls; assert a legacy flat-string target that exact-matches an item
       id resolves the same as a structured target would; assert an unresolvable target
       (structured or flat-string) is excluded from `Affected_Scope` and left open.
     - _Requirements: 10.9, 10.14, 10.15_
 
-  - [ ] 20.3 Implement `negotiation_node` in `app/agents/nodes/negotiation.py`
+  - [x] 20.3 Implement `negotiation_node` in `app/agents/nodes/negotiation.py`
     - Call `load_trip_context` at entry (Requirement 6). Fail with
       `NoItineraryToRefineError` (no writes, no status change) when the trip has
       no `itinerary_versions` row.
@@ -669,7 +669,7 @@ question is required.
       frontend type's current gap.
     - _Requirements: 6.1, 6.2, 10.1, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.10, 10.11, 10.12, 10.13, 10.16, 15.8_
 
-  - [ ]* 20.4 Write unit tests for `negotiation_node`
+  - [x]* 20.4 Write unit tests for `negotiation_node`
     - Assert a trip with no itinerary version raises `NoItineraryToRefineError` with no
       writes; assert no open feedback completes the run with no version insert and
       `trips.status` unchanged; assert every `Unaffected_Scope` item is byte-identical
@@ -677,7 +677,7 @@ question is required.
       is not reflected stays `status='open'` and is named in the emitted message.
     - _Requirements: 10.3, 10.7, 10.12, 10.13_
 
-- [ ] 21. Checkpoint — all specialist nodes verification
+- [x] 21. Checkpoint — all specialist nodes verification
   - Run `ruff check .` and all node tests from tasks 19-20; confirm the full `Agent_Graph`
     dispatches correctly end-to-end for each `run_type` against mocked repositories.
   - Ensure all tests pass, ask the user if questions arise.

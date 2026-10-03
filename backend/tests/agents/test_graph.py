@@ -76,12 +76,11 @@ def test_the_graph_is_compiled_once_and_cached() -> None:
 @pytest.mark.parametrize(
     ("run_type", "expected_error"),
     [
-        # discovery, logistics, and itinerary are implemented (tasks 16-19);
-        # negotiation is still a placeholder.
+        # All four specialists are implemented (tasks 16-20).
         ("discovery", "preferences"),
         ("logistics", "destination"),
         ("itinerary", "destination"),
-        ("refinement", "negotiation_node is implemented in task 20"),
+        ("refinement", "quest log"),
     ],
 )
 async def test_each_run_type_dispatches_to_its_mapped_node(
@@ -89,10 +88,10 @@ async def test_each_run_type_dispatches_to_its_mapped_node(
 ) -> None:
     """Each run type reaches exactly its mapped specialist, and no other.
 
-    One specialist node is still a placeholder (task 20), so "reached the right
-    node" is observed through its `NotImplementedError`. The other three are
-    implemented, so each one's own distinct failure mode, given the bare
-    fixture here, stands in for the same "reached the right node" signal.
+    All four specialists are implemented, so each one's own distinct failure
+    mode, given the bare fixture here, stands in for the "reached the right
+    node" signal. Negotiation fails with `NoItineraryToRefineError` ("no quest
+    log yet to refine"), distinct from itinerary_node's own failure modes.
     """
     _client, bundle = resolvable_bundle()
     state = make_state(run_type=run_type)
