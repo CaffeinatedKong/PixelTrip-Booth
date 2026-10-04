@@ -1,17 +1,24 @@
 /**
- * Party room and membership fixtures.
+ * Party room, membership, character, and preference fixtures.
  *
- * Contract-shaped `PartyRoom` / `RoomMember` data (see the room/member and
- * "Stage & State" sections of `api-contracts.md`). Consumed only by the mock
- * service implementations. IDs are UUID-format strings.
+ * Contract-shaped data (see "Guest Identity Flow" and "HTTP API" in
+ * `api-contracts.md`). Consumed only by the mock service implementations. IDs
+ * are UUID-format strings.
  */
-import type { PartyRoom, RoomMember } from "@/types";
+import type {
+  Character,
+  PartyRoom,
+  RoomMember,
+  TravelPreferences,
+} from "@/types";
 
-/** A stable fixture room returned by `room.mock.ts` lookups. */
+import { mockGuest, mockGuest2 } from "./guests";
+
+/** A stable fixture room. Join it in mock mode with room code "PIXEL1". */
 export const mockRoom: PartyRoom = {
   id: "22222222-2222-4222-8222-222222222222",
+  roomCode: "PIXEL1",
   name: "The Wandering Party",
-  ownerId: "11111111-1111-4111-8111-111111111111",
   status: "active",
   planningStage: "setup",
 };
@@ -21,17 +28,39 @@ export const mockRoomMembers: readonly RoomMember[] = [
   {
     id: "33333333-3333-4333-8333-333333333333",
     roomId: mockRoom.id,
-    guestId: "11111111-1111-4111-8111-111111111111",
-    characterId: "44444444-4444-4444-8444-444444444444",
+    guestId: mockGuest.id,
+    displayName: mockGuest.displayName,
     role: "owner",
   },
   {
     id: "55555555-5555-4555-8555-555555555555",
     roomId: mockRoom.id,
-    guestId: "66666666-6666-4666-8666-666666666666",
+    guestId: mockGuest2.id,
+    displayName: mockGuest2.displayName,
     role: "member",
   },
 ];
+
+/** The owner's character. The second fixture member has none (resume returns null). */
+export const mockCharacter: Character = {
+  id: "44444444-4444-4444-8444-444444444444",
+  memberId: mockRoomMembers[0].id,
+  appearance: { outfit: "explorer", palette: "forest" },
+  spriteKey: "sprite:explorer-01",
+};
+
+/** The owner's travel preferences. */
+export const mockTravelPreferences: TravelPreferences = {
+  id: "77777777-7777-4777-8777-777777777777",
+  memberId: mockRoomMembers[0].id,
+  availableDates: ["2025-12-20", "2025-12-27"],
+  destinations: ["Tokyo"],
+  travelStyle: "relaxed",
+  budget: 1500,
+  interests: ["food", "museums"],
+  activities: ["hiking"],
+  hardConstraints: [],
+};
 
 /** Keyed rooms for id lookups; unknown ids resolve to `null`. */
 export const mockRoomsById: Readonly<Record<string, PartyRoom>> = {

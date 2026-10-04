@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 #: Sentinel secrets. The secret-non-disclosure tests assert these substrings
 #: never appear in an error envelope, log record, or emitted message, so they are
 #: distinctive enough to match on reliably.
@@ -39,3 +41,9 @@ _TEST_ENV = {
 
 for _key, _value in _TEST_ENV.items():
     os.environ.setdefault(_key, _value)
+
+
+@pytest.fixture
+def anyio_backend():
+    """Run ``@pytest.mark.anyio`` async tests on asyncio only."""
+    return "asyncio"

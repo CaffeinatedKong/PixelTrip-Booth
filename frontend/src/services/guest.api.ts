@@ -1,25 +1,37 @@
 /**
  * Guest service — real (backend-backed) implementation.
  *
- * Placeholder for the Foundation phase: every method throws
- * {@link NotImplementedError} and performs no Supabase/FastAPI access. It holds
- * the shape of the real integration without implementing it, so all backend
- * access stays confined to the service layer. Behaviour arrives when the
- * backend endpoints land; until then run with `NEXT_PUBLIC_SERVICE_MODE=mock`.
+ * Read-only: guests are created by the backend when a room is created or
+ * joined. `getGuest` is an approved direct anon-key Supabase read (see
+ * `docs/SUPABASE_ACCESS_BOUNDARY.md`). Failures surface as `ApiError`.
  */
+import { getSupabaseClient } from "@/lib/supabaseClient";
 import type { Guest } from "@/types";
-import { notImplemented } from "@/lib/errors";
-import type { CreateGuestInput, GuestService } from "./guest.contract";
+
+import type { GuestService } from "./guest.contract";
+import {
+  GUEST_COLUMNS,
+  type GuestRow,
+  supabaseReadError,
+  toGuest,
+} from "./supabaseRows";
 
 class GuestApiService implements GuestService {
-  createGuest(_input: CreateGuestInput): Promise<Guest> {
-    throw notImplemented("GuestService.createGuest");
-  }
-
-  getGuest(_guestId: string): Promise<Guest | null> {
-    throw notImplemented("GuestService.getGuest");
+  // Direct Supabase access (approved: read-only).
+  // Table: guests — display name and avatar for a party member; no side effects.
+  // Shape: { id, display_name, avatar_url } → Guest.
+  async getGuest(guestId: string): Promise<Guest | null> {
+    const { data, error } = await getSupabaseClient()
+      .from("guests")
+      .select(GUEST_COLUMNS)
+      .eq("id", guestId)
+      .maybeSingle<GuestRow>();
+    if (error) {
+      throw supabaseReadError("guests");
+    }
+    return data ? toGuest(data) : null;
   }
 }
 
-/** Singleton real Guest service placeholder. */
+/** Singleton real Guest service. */
 export const guestApiService: GuestService = new GuestApiService();

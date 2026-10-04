@@ -7,7 +7,16 @@
  */
 
 export type { Guest } from "./guest";
-export type { PlanningStage, PartyRoom, RoomMember } from "./room";
+export type {
+  PlanningStage,
+  RoomStatus,
+  MemberRole,
+  PartyRoom,
+  RoomMember,
+  RoomSession,
+} from "./room";
+export type { Character } from "./character";
+export type { TravelPreferences } from "./preferences";
 export type { SenderType, MessageKind, Message } from "./message";
 export type { VoteOption, VoteSession } from "./vote";
 export type {

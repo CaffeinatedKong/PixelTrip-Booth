@@ -43,6 +43,7 @@ from app.repositories.trip_repository import TripRepository
 from app.repositories.vote_repository import VoteRepository
 from app.repositories.vote_session_repository import VoteSessionRepository
 from app.services.agent_run_service import AgentRunService
+from app.services.room_service import RoomService
 
 
 async def get_supabase_client() -> AsyncClient:
@@ -147,3 +148,15 @@ def get_agent_run_service(
         vote_session_repo=vote_session_repo,
         vote_repo=vote_repo,
     )
+
+
+# --- Room API service (spec 02) ----------------------------------------------
+
+
+def get_room_service(
+    room_repo: Annotated[RoomRepository, Depends(get_room_repo)],
+    member_repo: Annotated[MemberRepository, Depends(get_member_repo)],
+    profile_repo: Annotated[ProfileRepository, Depends(get_profile_repo)],
+) -> RoomService:
+    """Compose the room service from its three repositories."""
+    return RoomService(room_repo, member_repo, profile_repo)

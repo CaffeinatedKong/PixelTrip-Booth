@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.exceptions import (
     BackendError,
     ConflictError,
+    InvalidDisplayNameError,
     MemberAlreadyExistsError,
     NotFoundError,
     RepositoryError,
@@ -43,8 +44,9 @@ def test_error_body_has_exact_envelope_shape() -> None:
 @pytest.mark.parametrize(
     ("exc", "expected_status", "expected_code"),
     [
-        (RoomNotFoundError("nope"), 404, "NOT_FOUND"),
-        (MemberAlreadyExistsError("dupe"), 409, "CONFLICT"),
+        (RoomNotFoundError("nope"), 404, "ROOM_NOT_FOUND"),
+        (MemberAlreadyExistsError("dupe"), 409, "MEMBER_ALREADY_EXISTS"),
+        (InvalidDisplayNameError("blank"), 422, "INVALID_DISPLAY_NAME"),
         (ValidationError("bad"), 422, "VALIDATION_ERROR"),
         (RepositoryError("insert on x failed"), 503, "DATABASE_ERROR"),
         (RoomCodeExhaustedError("exhausted"), 500, "ROOM_CODE_EXHAUSTED"),
@@ -62,7 +64,7 @@ def test_resolve_error_mapping_covers_each_family(
 def test_subclass_inherits_family_mapping() -> None:
     """An unregistered subclass inherits its base family's mapping via the MRO."""
 
-    class DeeplyNestedNotFound(RoomNotFoundError):
+    class DeeplyNestedNotFound(NotFoundError):
         pass
 
     status_code, code, _ = resolve_error_mapping(DeeplyNestedNotFound("x"))
@@ -119,8 +121,8 @@ def error_client() -> TestClient:
     @probe.get("/raise/{kind}")
     async def _raise(kind: str) -> dict[str, str]:
         mapping: dict[str, BackendError] = {
-            "notfound": RoomNotFoundError("Room not found."),
-            "conflict": MemberAlreadyExistsError("Already in room."),
+            "notfound": NotFoundError("Not found."),
+            "conflict": ConflictError("Conflict."),
             "validation": ValidationError("Bad field."),
             "repository": RepositoryError(
                 f"insert failed for key {FAKE_SERVICE_ROLE_KEY} on room_members"

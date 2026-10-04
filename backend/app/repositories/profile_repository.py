@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, require_text, require_uuid
 
 _GUESTS = "guests"
 _CHARACTERS = "characters"
@@ -24,6 +24,7 @@ class ProfileRepository(BaseRepository):
 
     async def get_guest_by_id(self, guest_id: str) -> dict[str, Any] | None:
         """Return the guest row for ``guest_id``, or ``None`` if absent."""
+        require_uuid(guest_id, "guest_id")
         try:
             response = (
                 await self._client.table(_GUESTS).select("*").eq("id", guest_id).limit(1).execute()
@@ -36,6 +37,7 @@ class ProfileRepository(BaseRepository):
 
     async def get_character_by_member_id(self, member_id: str) -> dict[str, Any] | None:
         """Return the character row for ``member_id``, or ``None`` if absent."""
+        require_uuid(member_id, "member_id")
         try:
             response = (
                 await self._client.table(_CHARACTERS)
@@ -71,6 +73,7 @@ class ProfileRepository(BaseRepository):
 
     async def get_preferences_by_member_id(self, member_id: str) -> dict[str, Any] | None:
         """Return the preferences row for ``member_id``, or ``None`` if absent."""
+        require_uuid(member_id, "member_id")
         try:
             response = (
                 await self._client.table(_PREFERENCES)
@@ -101,3 +104,41 @@ class ProfileRepository(BaseRepository):
         except Exception as exc:
             self._handle_error(exc, operation="list_preferences_by_member_ids", table=_PREFERENCES)
         return self._rows(response)
+
+    # --- creation (room join flow) -----------------------------------------
+
+    async def create_guest(self, display_name: str, avatar_url: str | None = None) -> dict:
+        """Insert a guest profile and return it."""
+        require_text(display_name, "display_name", 50)
+        data: dict = {"display_name": display_name}
+        if avatar_url is not None:
+            data["avatar_url"] = avatar_url
+        return await self._insert_one(_GUESTS, data)
+
+    async def create_character(self, member_id: str, appearance: dict | None = None) -> dict:
+        """Insert a character for the member and return it."""
+        require_uuid(member_id, "member_id")
+        return await self._insert_one(
+            _CHARACTERS, {"member_id": member_id, "appearance": appearance or {}}
+        )
+
+    async def create_preferences(
+        self,
+        member_id: str,
+        available_dates: list | None = None,
+        destinations: list | None = None,
+        interests: list | None = None,
+        activities: list | None = None,
+        hard_constraints: list | None = None,
+    ) -> dict:
+        """Insert the member's travel preferences (list fields default to ``[]``)."""
+        require_uuid(member_id, "member_id")
+        data = {
+            "member_id": member_id,
+            "available_dates": available_dates or [],
+            "destinations": destinations or [],
+            "interests": interests or [],
+            "activities": activities or [],
+            "hard_constraints": hard_constraints or [],
+        }
+        return await self._insert_one(_PREFERENCES, data)

@@ -16,6 +16,8 @@ import type { ChatService } from "./chat.contract";
 import type { VoteService } from "./vote.contract";
 import type { ItineraryService } from "./itinerary.contract";
 
+import { ConfigError } from "@/lib/errors";
+
 import { buildMockRegistry } from "./registry.mock";
 import { buildRealRegistry } from "./registry.real";
 
@@ -42,17 +44,8 @@ export interface ServiceRegistry {
   itinerary: ItineraryService;
 }
 
-/**
- * Configuration error raised when the service mode is set to an unrecognized
- * value. Naming both the invalid value and the variable enables fail-fast
- * diagnosis rather than silently running the wrong implementation.
- */
-export class ConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ConfigError";
-  }
-}
+/** Re-exported so callers keep importing it from the service selector. */
+export { ConfigError };
 
 /**
  * Resolve the configured {@link ServiceMode}.

@@ -52,8 +52,8 @@ describe("getServices", () => {
     process.env[ENV_KEY] = "real";
     const registry = getServices();
     expect(Object.keys(registry).sort()).toEqual(EXPECTED_KEYS);
-    // Real placeholders throw NotImplementedError when invoked.
-    expect(() => registry.guest.getGuest("any")).toThrow();
+    // Real services whose backend does not exist yet throw NotImplementedError.
+    expect(() => registry.chat.listMessages("any")).toThrow(/not implemented/);
   });
 
   it("throws ConfigError on an unknown mode, naming the value and variable", () => {

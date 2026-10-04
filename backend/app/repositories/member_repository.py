@@ -8,15 +8,32 @@ restricts counts to members still present in the room (Requirement 17.6).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from app.repositories.base import BaseRepository
+from app.exceptions import MemberAlreadyExistsError, ValidationError
+from app.repositories.base import (
+    BaseRepository,
+    is_unique_violation,
+    require_text,
+    require_uuid,
+)
 
 _TABLE = "room_members"
+ROLES = ("owner", "member")
+
+
+def normalize_display_name(name: str) -> str:
+    """Trim, collapse internal whitespace to one space, and lower-case.
+
+    Identity rule: ``room_id + normalized display name`` -> room member, so "Gerald",
+    "gerald", "GERald", and "  Gerald  " are the same member. Must match the database
+    column: ``lower(btrim(regexp_replace(display_name, '\\s+', ' ', 'g')))``.
+    """
+    return " ".join(name.split()).lower()
 
 
 class MemberRepository(BaseRepository):
-    """Reads and writes ``room_members`` rows."""
+    """Reads and writes ``room_members`` rows, including case-insensitive identity."""
 
     async def get_by_id(self, member_id: str) -> dict[str, Any] | None:
         """Return the member row for ``member_id``, or ``None`` if absent.
@@ -68,3 +85,63 @@ class MemberRepository(BaseRepository):
         except Exception as exc:
             self._handle_error(exc, operation="get_owner", table=_TABLE)
         return self._first_row(response)
+
+    async def create_member(
+        self,
+        room_id: str,
+        guest_id: str,
+        display_name: str,
+        role: Literal["owner", "member"],
+    ) -> dict:
+        """Insert a membership row and return it.
+
+        Raises ``MemberAlreadyExistsError`` if a member with the same normalized name
+        already exists in the room (e.g. two concurrent joins).
+        """
+        require_uuid(room_id, "room_id")
+        require_uuid(guest_id, "guest_id")
+        require_text(display_name, "display_name", 50)
+        if role not in ROLES:
+            raise ValidationError("'role' must be 'owner' or 'member'.")
+
+        data = {
+            "room_id": room_id,
+            "guest_id": guest_id,
+            "display_name": display_name,
+            "role": role,
+        }
+        try:
+            response = await self._client.table(_TABLE).insert(data).execute()
+        except Exception as exc:
+            if is_unique_violation(exc):
+                raise MemberAlreadyExistsError(
+                    "A member with that name already exists in this room."
+                ) from exc
+            self._handle_error(exc, operation="create_member", table=_TABLE)
+        if not response.data:
+            self._handle_error(
+                ValueError("No data returned"), operation="create_member", table=_TABLE
+            )
+        return response.data[0]
+
+    async def get_member_by_display_name(self, room_id: str, display_name: str) -> dict | None:
+        """Case-insensitive match on ``normalized_name`` within the given room."""
+        require_uuid(room_id, "room_id")
+        require_text(display_name, "display_name", 50)
+        return await self._select_one(
+            _TABLE, room_id=room_id, normalized_name=normalize_display_name(display_name)
+        )
+
+    async def get_member_by_id(self, member_id: str) -> dict | None:
+        """Return the member with this id, or ``None`` (rejects malformed ids)."""
+        require_uuid(member_id, "member_id")
+        return await self._select_one(_TABLE, id=member_id)
+
+    async def list_members_by_room(self, room_id: str) -> list[dict]:
+        """Return all members of the room (possibly empty; rejects malformed ids)."""
+        require_uuid(room_id, "room_id")
+        try:
+            response = await self._client.table(_TABLE).select("*").eq("room_id", room_id).execute()
+        except Exception as exc:
+            self._handle_error(exc, operation="list_members_by_room", table=_TABLE)
+        return response.data or []

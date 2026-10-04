@@ -22,14 +22,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health
+from app.api.routes import health, rooms
 from app.core.config import get_settings
 from app.exceptions import (
     BackendError,
     ConflictError,
+    InvalidDisplayNameError,
+    MemberAlreadyExistsError,
     NotFoundError,
     RepositoryError,
     RoomCodeExhaustedError,
+    RoomNotFoundError,
     ValidationError,
 )
 from app.schemas.errors import error_body
@@ -49,6 +52,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(rooms.router)
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +72,11 @@ ERROR_CODES: dict[type[BackendError], tuple[int, str]] = {
     ValidationError: (422, "VALIDATION_ERROR"),
     RepositoryError: (503, "DATABASE_ERROR"),
     RoomCodeExhaustedError: (500, "ROOM_CODE_EXHAUSTED"),
+    # Leaf overrides: the MRO walk finds these before the family default, so the
+    # room API keeps its specific codes.
+    RoomNotFoundError: (404, "ROOM_NOT_FOUND"),
+    MemberAlreadyExistsError: (409, "MEMBER_ALREADY_EXISTS"),
+    InvalidDisplayNameError: (422, "INVALID_DISPLAY_NAME"),
 }
 
 #: Exceptions whose own message must never reach the client. For these the

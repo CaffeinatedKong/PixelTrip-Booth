@@ -15,6 +15,8 @@ duplicating it.
   and backend and work in parallel.
 - [Contracts](./contracts.md) — where the API contract single source of truth lives and
   how to use it.
+- [Supabase Access Boundary](./SUPABASE_ACCESS_BOUNDARY.md) — which writes must go through
+  FastAPI and what the frontend may read or subscribe to directly.
 
 ## Repository layout at a glance
 

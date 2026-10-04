@@ -46,9 +46,11 @@ CREATE TABLE room_members (
   room_id UUID NOT NULL REFERENCES party_rooms(id) ON DELETE CASCADE,
   guest_id UUID NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
   display_name TEXT NOT NULL CHECK (char_length(btrim(display_name)) BETWEEN 1 AND 50),
-  -- Trimmed, whitespace-collapsed, lower-cased display name used for identity matching.
+  -- Whitespace-collapsed, trimmed, lower-cased display name used for identity matching
+  -- ("Gerald", "gerald" and " GERald " are the same member). Must match
+  -- normalize_display_name() in the backend: " ".join(name.split()).lower().
   normalized_name TEXT GENERATED ALWAYS AS (
-    lower(regexp_replace(btrim(display_name), '\s+', ' ', 'g'))
+    lower(btrim(regexp_replace(display_name, '\s+', ' ', 'g')))
   ) STORED,
   role member_role NOT NULL DEFAULT 'member',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
