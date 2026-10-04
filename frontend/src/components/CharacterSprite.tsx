@@ -15,6 +15,8 @@ export interface CharacterSpriteProps {
   spriteKey: string;
   /** Accessible label describing the character. */
   label: string;
+  /** Marks a purely decorative sprite as hidden from assistive technology. */
+  decorative?: boolean;
   /** Integer-scaled sprite size. Defaults to `md`. */
   size?: CharacterSpriteSize;
 }
@@ -28,12 +30,14 @@ const SIZE_CLASSES: Record<CharacterSpriteSize, string> = {
 export function CharacterSprite({
   spriteKey,
   label,
+  decorative = false,
   size = "md",
 }: CharacterSpriteProps): ReactElement {
   return (
     <div
-      role="img"
-      aria-label={label}
+      role={decorative ? undefined : "img"}
+      aria-hidden={decorative || undefined}
+      aria-label={decorative ? undefined : label}
       data-sprite-key={spriteKey}
       className={`image-rendering-pixelated bg-bg-alt border-2 border-ink ${SIZE_CLASSES[size]}`}
     />

@@ -190,7 +190,7 @@ marked optional (`*`).
     truth with no conflicting contract statements. This is a documentation change, not code.
   - _Requirements: 11.4, 11.5, 11.6_
 
-- [-] 19. Final checkpoint - foundation complete and scope guards hold
+- [x] 19. Final checkpoint - foundation complete and scope guards hold
   - Verify both parts build/run independently, integrate only at the contract layer, and that the
     scope guards hold: no auth flows/fields, no AI/LangGraph, no real Supabase calls, no business
     logic beyond the selector + contract-shaped mocks. Ensure all tests pass, ask the user if

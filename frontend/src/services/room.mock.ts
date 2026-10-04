@@ -6,6 +6,8 @@
  * - `createRoom` generates a room code and makes the caller the owner.
  * - `joinRoom` resumes a member whose name matches ignoring case and extra spaces,
  *   otherwise creates a new member; an unknown code throws `ROOM_NOT_FOUND`.
+ * - `subscribeMembers` simulates Supabase Realtime with a local interval timer,
+ *   priming once immediately then re-reading via `listMembers`.
  * State is seeded from `src/mocks` and lives for the lifetime of the instance.
  * Join the fixture room with code "PIXEL1".
  */
@@ -24,6 +26,7 @@ import type {
   RoomMember,
   RoomSession,
   TravelPreferences,
+  Unsubscribe,
 } from "@/types";
 
 import type {
@@ -33,6 +36,9 @@ import type {
 } from "./room.contract";
 
 const ROOM_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+/** Interval between simulated realtime roster emissions, in milliseconds. */
+const ROSTER_EMIT_INTERVAL_MS = 2000;
 
 /** Same rule as the backend: trim, collapse inner whitespace, lower-case. */
 function normalizeDisplayName(name: string): string {
@@ -126,6 +132,33 @@ export class MockRoomService implements RoomService {
 
   async listMembers(roomId: string): Promise<RoomMember[]> {
     return this.members.filter((member) => member.roomId === roomId);
+  }
+
+  // Simulates Supabase Realtime with a local timer: primes the roster once
+  // immediately, then re-reads via listMembers on an interval. The returned
+  // Unsubscribe clears the timer so ZERO further callbacks fire after it runs.
+  subscribeMembers(
+    roomId: string,
+    onChange: (members: RoomMember[]) => void,
+  ): Unsubscribe {
+    let active = true;
+
+    const push = (): void => {
+      if (!active) return;
+      void this.listMembers(roomId).then((members) => {
+        if (active) onChange(members);
+      });
+    };
+
+    // Prime immediately.
+    push();
+
+    const timer = setInterval(push, ROSTER_EMIT_INTERVAL_MS);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }
 
   private addMember(
