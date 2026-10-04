@@ -263,7 +263,10 @@ def _build_itinerary(
 ) -> ItineraryModel:
     """Build the itinerary object for a fresh BUILD-stage version."""
     destination_data = destination_selection.get("data") or {}
-    destination_title = destination_data.get("title", "the destination")
+    # Vote options (and so the locked selection) carry "label"; accept "title" too.
+    destination_title = (
+        destination_data.get("title") or destination_data.get("label") or "the destination"
+    )
 
     days = [
         ItineraryDayModel(
