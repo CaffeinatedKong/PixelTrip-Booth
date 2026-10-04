@@ -165,3 +165,23 @@ class ProfileRepository(BaseRepository):
         if row is not None:
             return row
         return await self._insert_one(_PREFERENCES, {"member_id": member_id, **data})
+
+    async def save_character(
+        self, member_id: str, appearance: dict[str, Any], sprite_key: str | None
+    ) -> dict:
+        """Replace the member's character (created on join); create it if missing."""
+        require_uuid(member_id, "member_id")
+        data = {"appearance": appearance, "sprite_key": sprite_key}
+        try:
+            response = (
+                await self._client.table(_CHARACTERS)
+                .update(data)
+                .eq("member_id", member_id)
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="save_character", table=_CHARACTERS)
+        row = self._first_row(response)
+        if row is not None:
+            return row
+        return await self._insert_one(_CHARACTERS, {"member_id": member_id, **data})

@@ -81,6 +81,12 @@ def test_save_preferences_200(services):
                 "origin": "SIN",
                 "submitted_at": "2026-10-04T00:00:00+00:00",
             },
+            "character": {
+                "id": "c1",
+                "member_id": MEMBER_ID,
+                "appearance": {"outfit": "explorer"},
+                "sprite_key": "explorer-01",
+            },
             "trip": {
                 "id": TRIP_ID,
                 "room_id": ROOM_ID,
@@ -96,6 +102,7 @@ def test_save_preferences_200(services):
             "availableDates": [{"start": "2026-12-20", "end": "2026-12-27"}],
             "budget": 1500,
             "origin": "SIN",
+            "character": {"appearance": {"outfit": "explorer"}, "spriteKey": "explorer-01"},
         },
     )
 
@@ -104,9 +111,12 @@ def test_save_preferences_200(services):
     assert body["travelPreferences"]["origin"] == "SIN"
     assert body["travelPreferences"]["submittedAt"]
     assert body["trip"]["status"] == "preferences_collected"
+    assert body["character"]["spriteKey"] == "explorer-01"
     room_code, member_id, request = service.save.await_args.args
     assert (room_code, member_id) == ("ABC123", MEMBER_ID)
     assert request.budget == 1500
+    assert request.character.sprite_key == "explorer-01"
+    assert request.character.appearance == {"outfit": "explorer"}
 
 
 @pytest.mark.parametrize(
@@ -119,6 +129,10 @@ def test_save_preferences_200(services):
             {"availableDates": [{"start": "2026-12-27", "end": "2026-12-20"}]},
         ),
         (f"/rooms/ABC123/members/{MEMBER_ID}/preferences", {"budget": -1}),
+        (
+            f"/rooms/ABC123/members/{MEMBER_ID}/preferences",
+            {"character": {"spriteKey": "x" * 101}},
+        ),
     ],
 )
 def test_save_preferences_validation_errors(services, path, body):

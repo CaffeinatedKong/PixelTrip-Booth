@@ -71,6 +71,14 @@ def prefs_row(member_id: str, submitted: bool) -> dict[str, Any]:
     }
 
 
+CHARACTER = {
+    "id": "c-1",
+    "member_id": M1,
+    "appearance": {"outfit": "explorer"},
+    "sprite_key": "explorer-01",
+}
+
+
 def bundle() -> SimpleNamespace:
     """Every repository as a spec'd AsyncMock, shaped like RepositoryBundle."""
     return SimpleNamespace(
@@ -99,6 +107,7 @@ def repos() -> SimpleNamespace:
     r.profile_repo.save_preferences.return_value = prefs_row(M1, submitted=True)
     r.trip_repo.get_by_room_id.return_value = TRIP
     r.member_repo.list_by_room.return_value = [member(M1), member(M2)]
+    r.profile_repo.get_character_by_member_id.return_value = CHARACTER
     return r
 
 
@@ -194,6 +203,49 @@ async def test_preferences_member_from_another_room_is_rejected(repos):
     with pytest.raises(UnresolvedMemberError):
         await preference_service(repos).save("ABC123", M1, SavePreferencesRequest())
     repos.profile_repo.save_preferences.assert_not_awaited()
+
+
+async def test_character_is_saved_with_preferences(repos):
+    repos.profile_repo.list_preferences_by_member_ids.return_value = [prefs_row(M1, True)]
+    repos.profile_repo.save_character.return_value = {
+        **CHARACTER,
+        "appearance": {"outfit": "knight"},
+        "sprite_key": "knight-02",
+    }
+    request = SavePreferencesRequest(
+        budget=1500,
+        character={"appearance": {"outfit": "knight"}, "sprite_key": "  knight-02 "},
+    )
+
+    response = await preference_service(repos).save("ABC123", M1, request)
+
+    repos.profile_repo.save_character.assert_awaited_once_with(
+        M1, {"outfit": "knight"}, "knight-02"
+    )
+    _, fields = repos.profile_repo.save_preferences.await_args.args
+    assert "character" not in fields  # not a travel_preferences column
+    assert response.character is not None
+    assert response.character.sprite_key == "knight-02"
+
+
+async def test_omitted_character_is_left_unchanged(repos):
+    repos.profile_repo.list_preferences_by_member_ids.return_value = [prefs_row(M1, True)]
+
+    response = await preference_service(repos).save("ABC123", M1, SavePreferencesRequest())
+
+    repos.profile_repo.save_character.assert_not_awaited()
+    assert response.character is not None
+    assert response.character.sprite_key == "explorer-01"
+
+
+async def test_rejected_member_saves_no_character(repos):
+    repos.member_repo.get_member_by_id.return_value = member(M1, room_id=OTHER_ROOM_ID)
+
+    with pytest.raises(UnresolvedMemberError):
+        await preference_service(repos).save(
+            "ABC123", M1, SavePreferencesRequest(character={"appearance": {}})
+        )
+    repos.profile_repo.save_character.assert_not_awaited()
 
 
 # --- VotingEndpointService --------------------------------------------------------

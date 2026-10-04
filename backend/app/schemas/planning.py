@@ -13,7 +13,7 @@ from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 
-from app.schemas.room import TravelPreferencesSchema, TripSchema, _Base
+from app.schemas.room import CharacterSchema, TravelPreferencesSchema, TripSchema, _Base
 
 _MEMBER_ID_EXAMPLE = "3a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d"
 
@@ -33,8 +33,36 @@ class DateRange(_Base):
         return self
 
 
+class CharacterInput(_Base):
+    """The member's pixel character. Replaces the saved character when sent."""
+
+    appearance: dict[str, Any] = Field(
+        default_factory=dict,
+        max_length=50,
+        description="Free-form choices from the character creator.",
+        examples=[{"outfit": "explorer", "palette": "forest", "accessory": "backpack"}],
+    )
+    sprite_key: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Which sprite to draw; null means the default sprite.",
+        examples=["explorer-01"],
+    )
+
+    @field_validator("sprite_key")
+    @classmethod
+    def _blank_sprite_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
 class SavePreferencesRequest(_Base):
-    """A member's full set of travel preferences. Replaces whatever was saved before."""
+    """A member's full set of travel preferences. Replaces whatever was saved before.
+
+    ``character`` is optional: when sent it replaces the member's character; when
+    omitted the character is left unchanged.
+    """
 
     available_dates: list[DateRange] = Field(
         default_factory=list,
@@ -65,6 +93,11 @@ class SavePreferencesRequest(_Base):
         examples=["SIN"],
     )
 
+    character: CharacterInput | None = Field(
+        default=None,
+        description="Optional. Saves the member's pixel character in the same call.",
+    )
+
     @field_validator("travel_style", "origin")
     @classmethod
     def _blank_to_none(cls, value: str | None) -> str | None:
@@ -75,9 +108,12 @@ class SavePreferencesRequest(_Base):
 
 
 class SavePreferencesResponse(_Base):
-    """The saved preferences plus the trip, whose status may have advanced."""
+    """The saved preferences and character, plus the trip (its status may have advanced)."""
 
     travel_preferences: TravelPreferencesSchema
+    character: CharacterSchema | None = Field(
+        default=None, description="The member's character; null only if none exists."
+    )
     trip: TripSchema
 
 

@@ -127,10 +127,12 @@ Errors: `404 ROOM_NOT_FOUND`, `409 MEMBER_ALREADY_EXISTS` (two people joined wit
 name at the same moment — retrying the join resumes that member), `422 VALIDATION_ERROR`,
 `503 DATABASE_ERROR`.
 
-### `PUT /rooms/{roomCode}/members/{memberId}/preferences` — save preferences
+### `PUT /rooms/{roomCode}/members/{memberId}/preferences` — save preferences and character
 
-Replaces the member's preferences. All fields are optional; anything omitted is saved as
-empty (`[]` or `null`), so always send the full set.
+Replaces the member's preferences, and optionally their pixel character, in one call. All
+preference fields are optional; anything omitted is saved as empty (`[]` or `null`), so
+always send the full set. `character` is different: omit it to leave the character as it
+is, or send it to replace it.
 
 ```json
 {
@@ -141,7 +143,11 @@ empty (`[]` or `null`), so always send the full set.
   "interests": ["food", "museums"],
   "activities": [{ "name": "hiking", "priority": "must_have" }, { "name": "spa", "priority": "optional" }],
   "hardConstraints": ["no red-eye flights"],
-  "origin": "SIN"
+  "origin": "SIN",
+  "character": {
+    "appearance": { "outfit": "explorer", "palette": "forest", "accessory": "backpack" },
+    "spriteKey": "explorer-01"
+  }
 }
 ```
 
@@ -155,7 +161,11 @@ empty (`[]` or `null`), so always send the full set.
 - `origin`: also copied into `hardConstraints` as `{ "type": "departure_origin", "value": … }`,
   which is where the AI's flight search currently reads it. Don't send that entry yourself.
 
-`200` response: `{ "travelPreferences": { … }, "trip": { … } }`. When this was the last
+- `character.appearance`: free-form object from the character creator (up to 50 keys).
+  `character.spriteKey`: which sprite to draw (≤ 100 chars), or `null` for the default.
+
+`200` response: `{ "travelPreferences": { … }, "character": { … }, "trip": { … } }`
+(`character` is `null` only if the member has none). When this was the last
 member to save, `trip.status` is now `preferences_collected` (stage `discover`), and the
 party can start a `discovery` run.
 

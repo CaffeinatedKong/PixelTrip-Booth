@@ -1,4 +1,5 @@
-"""Preference service: save a member's travel preferences and detect "everyone's in".
+"""Preference service: save a member's travel preferences (and optionally their
+character) and detect "everyone's in".
 
 When the last member of a room saves preferences, the trip advances to
 ``preferences_collected`` (planning stage ``discover``), which is what lets the party
@@ -16,7 +17,7 @@ from app.repositories.profile_repository import ProfileRepository
 from app.repositories.room_repository import RoomRepository
 from app.repositories.trip_repository import TripRepository
 from app.schemas.planning import SavePreferencesRequest, SavePreferencesResponse
-from app.schemas.room import TravelPreferencesSchema, TripSchema
+from app.schemas.room import CharacterSchema, TravelPreferencesSchema, TripSchema
 from app.services.trip_progress import advance_trip, require_room_trip
 
 #: Interim: the agent layer's flight search reads the departure origin from this
@@ -27,7 +28,7 @@ _ORIGIN_CONSTRAINT_TYPE = "departure_origin"
 
 def _to_columns(request: SavePreferencesRequest) -> dict[str, Any]:
     """Map the request to ``travel_preferences`` columns, mirroring ``origin``."""
-    fields = request.model_dump(mode="json")
+    fields = request.model_dump(mode="json", exclude={"character"})
     constraints = [
         item
         for item in fields["hard_constraints"]
@@ -67,6 +68,12 @@ class PreferenceService:
             raise UnresolvedMemberError(member_id)
 
         saved = await self._profile_repo.save_preferences(member_id, _to_columns(request))
+        if request.character is not None:
+            character = await self._profile_repo.save_character(
+                member_id, request.character.appearance, request.character.sprite_key
+            )
+        else:
+            character = await self._profile_repo.get_character_by_member_id(member_id)
 
         trip = await require_room_trip(self._trip_repo, room["id"])
         if await self._everyone_submitted(room["id"]):
@@ -74,6 +81,7 @@ class PreferenceService:
 
         return SavePreferencesResponse(
             travel_preferences=TravelPreferencesSchema.model_validate(saved),
+            character=CharacterSchema.model_validate(character) if character else None,
             trip=TripSchema.model_validate(trip),
         )
 
