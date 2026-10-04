@@ -18,6 +18,7 @@ dependencies = [
     "supabase>=2.4",         # async Supabase client (spec 02 repository layer)
     "langgraph>=0.2",        # Agent_Graph StateGraph (spec 03)
     "langchain-core>=0.3",   # LLM message/runnable primitives used by the nodes
+    "langchain-google-genai>=2.0",  # Gemini chat model; only app/agents/llm.py imports it
     "httpx>=0.27",           # runtime: External_Tool HTTP clients
 ]
 

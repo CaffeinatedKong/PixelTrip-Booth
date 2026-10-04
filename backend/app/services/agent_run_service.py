@@ -38,6 +38,7 @@ from app.agents.errors import (
     UnresolvedMemberError,
 )
 from app.agents.graph import run_agent_graph
+from app.agents.llm import LLMClient
 from app.agents.messages import TextMessageContent, emit_progress_message
 from app.agents.state import RUN_TYPES, AgentState, RepositoryBundle
 from app.exceptions import RepositoryError
@@ -118,6 +119,9 @@ class AgentRunService:
     feedback_repo: FeedbackRepository
     vote_session_repo: VoteSessionRepository
     vote_repo: VoteRepository
+    #: The shared LLM client. Optional: with none, every node uses its
+    #: deterministic behaviour, so a run never depends on a model being reachable.
+    llm_client: LLMClient | None = None
 
     def _bundle(self) -> RepositoryBundle:
         """Assemble the bundle every node reads and writes through."""
@@ -133,6 +137,7 @@ class AgentRunService:
             agent_run_repo=self.agent_run_repo,
             member_repo=self.member_repo,
             profile_repo=self.profile_repo,
+            llm=self.llm_client,
         )
 
     async def trigger_run(

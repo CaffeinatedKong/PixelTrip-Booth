@@ -25,11 +25,13 @@ Two deliberate style choices, both load-bearing:
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
 from supabase import AsyncClient
 
+from app.agents.llm import LLMClient
 from app.db.supabase_client import create_supabase_client
 from app.repositories.agent_run_repository import AgentRunRepository
 from app.repositories.feedback_repository import FeedbackRepository
@@ -116,6 +118,25 @@ def get_agent_run_repo(client: SupabaseClient) -> AgentRunRepository:
     return AgentRunRepository(client)
 
 
+# --- LLM client (spec 03) ------------------------------------------------------
+
+
+@lru_cache
+def _shared_llm_client() -> LLMClient:
+    """Build the process-wide client once.
+
+    Shared so its per-model cooldowns survive across requests: a model found
+    out of quota stays skipped for a few minutes instead of being retried first
+    on every single request.
+    """
+    return LLMClient()
+
+
+def get_llm_client() -> LLMClient:
+    """Provide the shared :class:`LLMClient` (models are built lazily on first use)."""
+    return _shared_llm_client()
+
+
 # --- Spec 03 agent-layer services --------------------------------------------
 
 
@@ -133,6 +154,7 @@ def get_agent_run_service(
     feedback_repo: Annotated[FeedbackRepository, Depends(get_feedback_repo)],
     vote_session_repo: Annotated[VoteSessionRepository, Depends(get_vote_session_repo)],
     vote_repo: Annotated[VoteRepository, Depends(get_vote_repo)],
+    llm_client: Annotated[LLMClient, Depends(get_llm_client)],
 ) -> AgentRunService:
     """Provide an :class:`AgentRunService` wired to every repository it needs."""
     return AgentRunService(
@@ -147,6 +169,7 @@ def get_agent_run_service(
         feedback_repo=feedback_repo,
         vote_session_repo=vote_session_repo,
         vote_repo=vote_repo,
+        llm_client=llm_client,
     )
 
 

@@ -20,6 +20,8 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from app.agents.errors import LLMGenerationError
+from app.agents.llm import LLMClient
 from app.agents.state import RepositoryBundle
 from app.repositories.agent_run_repository import AgentRunRepository
 from app.repositories.feedback_repository import FeedbackRepository
@@ -341,14 +343,16 @@ def mock_profile_repo() -> AsyncMock:
 
 @pytest.fixture
 def mock_llm() -> AsyncMock:
-    """A test double for the (not-yet-wired) LLM client.
+    """A test double for :class:`~app.agents.llm.LLMClient`.
 
-    No concrete LLM client class exists yet under ``app/agents/`` (see the
-    discovery/itinerary/negotiation node docstrings), so this has no ``spec``
-    to pin against. It exists now so a node that gains a real LLM call later
-    has an established fixture name to swap in against.
+    Pinned to the real class's interface so a call to something that does not
+    exist fails loudly. Defaults to "the model is unavailable": every node then
+    takes its deterministic path, which is what a test that is not about the
+    LLM wants. A test of LLM behaviour overrides ``generate_structured``.
     """
-    return AsyncMock()
+    llm = AsyncMock(spec=LLMClient)
+    llm.generate_structured.side_effect = LLMGenerationError("mock_llm")
+    return llm
 
 
 @pytest.fixture

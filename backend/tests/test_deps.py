@@ -16,6 +16,7 @@ import inspect
 import typing
 
 import pytest
+from app.agents.llm import LLMClient
 from app.api import deps
 from app.repositories.agent_run_repository import AgentRunRepository
 from app.repositories.base import BaseRepository
@@ -149,3 +150,48 @@ def test_no_provider_calls_the_client_factory_itself() -> None:
         source = inspect.getsource(getattr(deps, name))
         assert "create_supabase_client" not in source
         assert "acreate_client" not in source
+
+
+def test_llm_client_provider_is_lazy() -> None:
+    """Building the provider's client must not import the provider package or hit the network."""
+    client = deps.get_llm_client()
+
+    assert isinstance(client, LLMClient)
+    assert client._models == {}
+
+
+def test_the_llm_client_is_shared_so_model_cooldowns_outlive_a_request() -> None:
+    """A fresh client per request would forget which models are out of quota."""
+    assert deps.get_llm_client() is deps.get_llm_client()
+
+
+def test_agent_run_service_receives_the_injected_llm_client() -> None:
+    """``get_agent_run_service`` hands the injected client to the service."""
+    stub = _StubClient()
+    repos = {name: getattr(deps, name)(stub) for name in PROVIDERS}
+    llm = LLMClient()
+
+    service = deps.get_agent_run_service(
+        agent_run_repo=repos["get_agent_run_repo"],
+        trip_repo=repos["get_trip_repo"],
+        room_repo=repos["get_room_repo"],
+        message_repo=repos["get_message_repo"],
+        member_repo=repos["get_member_repo"],
+        profile_repo=repos["get_profile_repo"],
+        itinerary_version_repo=repos["get_itinerary_version_repo"],
+        selection_repo=repos["get_selection_repo"],
+        feedback_repo=repos["get_feedback_repo"],
+        vote_session_repo=repos["get_vote_session_repo"],
+        vote_repo=repos["get_vote_repo"],
+        llm_client=llm,
+    )
+
+    assert service.llm_client is llm
+    assert service._bundle().llm is llm
+
+
+def test_agent_run_service_annotations_resolve_at_runtime() -> None:
+    """FastAPI resolves these via ``get_type_hints`` at startup; a bad import would raise here."""
+    hints = typing.get_type_hints(deps.get_agent_run_service, include_extras=True)
+
+    assert "llm_client" in hints
