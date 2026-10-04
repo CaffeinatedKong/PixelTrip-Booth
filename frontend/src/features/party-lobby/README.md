@@ -48,3 +48,76 @@ contract (`RoomService` from `@/services`).
 - Stages 2–6 are honest placeholders: their backends (the AI Travel Guide) do
   not exist yet, so they render `StagePlaceholder` with no fake data and make no
   chat/vote/itinerary service calls (those real services throw `notImplemented`).
+
+## Lobby Character Creation (SETUP stage)
+
+The SETUP stage is a two-column, session-only character-creation experience
+composed in `SetupStageContent`: the **CharacterCreator** on the left and the
+**AdventureSidebar** on the right. It is frontend-only — nothing it collects is
+persisted or sent anywhere.
+
+### Left column — CharacterCreator
+
+`components/CharacterCreator.tsx` hosts the feature's single stateful hook
+(`useCharacterDraft`) and composes presentational pieces, feeding each one props
+and raising events through hook callbacks:
+
+- `CharacterPreview` — large layered avatar, fed `resolveLayers(draft, LAYER_MAP)`.
+- `OptionCardGroup` (single-select) — reused for **archetype, outfit, accessory,
+  palette, travel style**; raises `onSelect(id)`.
+- `OptionTagGroup` (multi-select) — reused for **interests** and **destinations**;
+  raises `onToggle(id)`.
+- `ActivityPriorityGroup` — multi-select **activities**, each selected activity
+  carrying a `must_have` / `optional` priority (`ActivityDraft`).
+- `PreferenceFields` — budget (numeric), origin, a repeatable hard-constraints
+  list, and one or more availability date ranges.
+- A primary "SAVE CHARACTER" `PixelButton`, disabled while `!canSave` with an
+  explanatory line, and a polite `role="status"` region after a save noting the
+  character is kept for this session only.
+
+### Right column — AdventureSidebar
+
+`components/AdventureSidebar.tsx` is presentational (view model via `adventure`,
+optional live room code via `roomSession`) and composes, in order:
+`SidebarTripHeader`, `SidebarPartyPanel`, two `SidebarPlaceholderPanel`s
+(Destination + Flight "Not selected" empty states), `BudgetPanel`, and
+`AdventureProgress`. On desktop it is a fixed column; on mobile it collapses into
+a drawer driven by `hooks/useAdventureDrawer.ts` (a toggle exposing
+`aria-expanded`). It imports no service and makes no network call — `onInvite` is
+a local no-op.
+
+### Layered character model and LayerMap
+
+The avatar is a data-driven, ordered sprite stack. `lib/characterLayers.ts`
+defines `LAYER_MAP` keyed by `SpriteLayerSlot` (`base`, `archetype`, `outfit`,
+`accessory`), mapping each selection id (reused from `lib/characterOptions.ts`) to
+`{ slot, order, assetKey }`. `resolveLayers(draft, LAYER_MAP)` always includes the
+always-present base layer, adds one layer per set `archetype` / `outfit` /
+`accessory` selection, ignores unknown ids, and returns the stack sorted ascending
+by `order` (base → archetype → outfit → accessory).
+
+- **Extensible:** adding a new archetype/outfit/accessory asset is a one-line
+  `LayerMap` entry — the resolver and preview need no changes.
+- **Palette is not a sprite layer slot.** It is a saved appearance field only, so
+  the `PALETTE` catalog is intentionally absent from `LAYER_MAP`.
+
+### Session-only save seam (no persistence)
+
+`useCharacterDraft.save()` is the single projection seam. It projects the in-memory
+`CharacterDraft` through the pure `toSessionCharacter` (`lib/draft.ts`) into a
+`SessionCharacter` and stores it in in-memory React state **only**. Nothing is
+persisted — no `localStorage`, `sessionStorage`, cookies, or IndexedDB — and
+nothing is sent to any backend or endpoint; the hook imports no service.
+
+`SessionCharacter` mirrors the backend request payload 1:1 (available dates,
+destinations, travel style, budget, interests, activities, hard constraints,
+origin, and `character.{appearance, spriteKey}`), so a future real service can pass
+the saved object straight through without reshaping.
+
+### CharacterSprite extended, not forked
+
+The shared `src/components/CharacterSprite.tsx` primitive was **extended** with an
+optional `layers?: readonly SpriteLayer[]` prop rather than copied into the
+feature. When `layers` is provided and non-empty it renders the layered stack;
+when omitted it renders exactly as before (single box keyed by `spriteKey`), so
+every existing no-`layers` call site (e.g. the roster sprites) is unchanged.

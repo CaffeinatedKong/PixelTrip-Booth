@@ -39,6 +39,20 @@ export const ACCESSORY: readonly CharacterOption[] = [
   { id: "lantern", label: "Lantern" },
 ] as const;
 
+/**
+ * Palette options (single-select).
+ *
+ * NOTE: palette is a travel-identity colour theme, not a sprite layer slot
+ * (`SpriteLayerSlot` is only base/archetype/outfit/accessory). It is intentionally
+ * absent from the `LayerMap` in `characterLayers.ts`.
+ */
+export const PALETTE: readonly CharacterOption[] = [
+  { id: "forest", label: "Forest" },
+  { id: "ocean", label: "Ocean" },
+  { id: "ember", label: "Ember" },
+  { id: "dusk", label: "Dusk" },
+] as const;
+
 /** Travel-style options (single-select). */
 export const TRAVEL_STYLE: readonly CharacterOption[] = [
   { id: "backpacker", label: "Backpacker" },
@@ -56,6 +70,22 @@ export const INTERESTS: readonly CharacterOption[] = [
   { id: "nightlife", label: "Nightlife" },
   { id: "shopping", label: "Shopping" },
   { id: "history", label: "History" },
+] as const;
+
+/**
+ * Suggested destination options (multi-select).
+ *
+ * NOTE: destinations are free-form in the session payload — this is a short list
+ * of SUGGESTIONS surfaced in the UI, not an exhaustive or authoritative catalog.
+ * A party can conceptually travel anywhere; these ids/labels are UI placeholders
+ * only (no backend contract) and exist so the Destinations group has something to
+ * offer out of the box.
+ */
+export const DESTINATIONS: readonly CharacterOption[] = [
+  { id: "tokyo", label: "Tokyo" },
+  { id: "seoul", label: "Seoul" },
+  { id: "bangkok", label: "Bangkok" },
+  { id: "paris", label: "Paris" },
 ] as const;
 
 /** Activity options (multi-select). */

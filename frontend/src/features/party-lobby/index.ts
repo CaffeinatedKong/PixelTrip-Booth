@@ -14,10 +14,8 @@ export type { PartyRoomShellProps } from "./components/PartyRoomShell";
 export { ChatPanel } from "./components/ChatPanel";
 export type { ChatPanelProps, LocalChatMessage } from "./components/ChatPanel";
 export { CharacterCreator } from "./components/CharacterCreator";
-export type {
-  CharacterCreatorProps,
-  CharacterDraft,
-} from "./components/CharacterCreator";
+export type { CharacterCreatorProps } from "./components/CharacterCreator";
+export type { CharacterDraft } from "./types";
 export { RosterPanel } from "./components/RosterPanel";
 export type { RosterPanelProps } from "./components/RosterPanel";
 export { SetupStageContent } from "./components/SetupStageContent";

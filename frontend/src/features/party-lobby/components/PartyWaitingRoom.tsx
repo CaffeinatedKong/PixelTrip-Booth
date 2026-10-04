@@ -37,7 +37,7 @@ export function PartyWaitingRoom({
 }: PartyWaitingRoomProps): ReactElement {
   return (
     <main className="bg-bg text-ink font-body min-h-screen p-24">
-      <div className="mx-auto flex max-w-xl flex-col gap-24">
+      <div className="mx-auto flex max-w-screen-2xl flex-col gap-24">
         <h1 className="font-display text-accent text-center">
           {session.room.name}
         </h1>

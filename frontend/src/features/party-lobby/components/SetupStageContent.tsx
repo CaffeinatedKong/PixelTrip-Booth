@@ -3,11 +3,15 @@
 /**
  * SetupStageContent — the real, working content for the SETUP stage.
  *
- * The room-code share card plus the live roster. Presentational only: data in
- * via props, events out via callbacks, no data fetching. Rendered both by
- * {@link PartyWaitingRoom} (standalone page) and by the stage shell inside the
- * pipeline, so the two never diverge. Contains no page chrome (no `<main>`,
- * heading, or leave button) — the host component supplies those.
+ * A responsive two-column SETUP screen: the left column holds the NPC dialogue,
+ * the room-code share card, and the 8-bit {@link CharacterCreator}; the right
+ * column is the {@link AdventureSidebar} whose PARTY panel reflects the LIVE room
+ * roster (built from `members`). Presentational only: data in via props, events
+ * out via callbacks, no data fetching. Trip name/dates/budget are feature-local
+ * placeholders while the sidebar reads the live room code + roster from props.
+ * Rendered both by {@link PartyWaitingRoom} (standalone page) and by the stage
+ * shell inside the pipeline, so the two never diverge. Contains no page chrome
+ * (no `<main>`, heading, or leave button) — the host component supplies those.
  */
 import { useRef, type ReactElement } from "react";
 
@@ -16,7 +20,9 @@ import { PixelCard } from "@/components/PixelCard";
 import { DialogueBox } from "@/components/DialogueBox";
 import type { RoomMember, RoomSession } from "@/types";
 
-import { RosterPanel } from "./RosterPanel";
+import { CharacterCreator } from "./CharacterCreator";
+import { AdventureSidebar } from "./AdventureSidebar";
+import { buildAdventureView } from "../lib/adventureMocks";
 
 export interface SetupStageContentProps {
   /** The active session (room + the viewer's member record). */
@@ -37,6 +43,9 @@ export function SetupStageContent({
 }: SetupStageContentProps): ReactElement {
   const codeRef = useRef<HTMLSpanElement>(null);
   const isHost = session.member.role === "owner";
+  // Party panel reflects the LIVE roster; trip/budget stay placeholder until a
+  // trip backend exists.
+  const adventure = buildAdventureView(members);
 
   const selectCode = (): void => {
     const node = codeRef.current;
@@ -50,44 +59,46 @@ export function SetupStageContent({
   };
 
   return (
-    <div className="flex flex-col gap-24">
-      <DialogueBox
-        speaker="Travel Guide"
-        text={
-          isHost
-            ? "Your party is forming. Share the code below so others can join the quest."
-            : "You've joined the party. Wait here while the rest of the party gathers."
-        }
-      />
+    <div className="flex flex-col gap-24 lg:grid lg:grid-cols-[2fr_1fr] lg:items-start lg:gap-24">
+      {/* LEFT column: NPC dialogue, room-code share, and the character creator. */}
+      <div className="flex flex-col gap-24">
+        <DialogueBox
+          speaker="Travel Guide"
+          text={
+            isHost
+              ? "Your party is forming. Share the code below so others can join the quest."
+              : "You've joined the party. Build your character while the rest gather."
+          }
+        />
 
-      <PixelCard title="Party code">
-        <p className="font-body mb-8">Share this code with your party:</p>
-        <div className="flex items-center gap-16">
-          <span
-            ref={codeRef}
-            data-testid="room-code"
-            onClick={selectCode}
-            className="font-display text-accent border-2 border-muted px-16 py-8 select-all"
-          >
-            {session.room.roomCode}
-          </span>
-          <PixelButton
-            variant="option"
-            label={copied ? "Copied!" : "Copy"}
-            ariaLabel="Copy party code"
-            onClick={onCopyCode}
-          />
-        </div>
-        <p role="status" aria-live="polite" className="font-body min-h-8 mt-8">
-          {copied ? "Party code copied to clipboard." : ""}
-        </p>
-      </PixelCard>
+        <PixelCard title="Party code">
+          <p className="font-body mb-8">Share this code with your party:</p>
+          <div className="flex items-center gap-16">
+            <span
+              ref={codeRef}
+              data-testid="room-code"
+              onClick={selectCode}
+              className="font-display text-accent border-2 border-muted px-16 py-8 select-all"
+            >
+              {session.room.roomCode}
+            </span>
+            <PixelButton
+              variant="option"
+              label={copied ? "Copied!" : "Copy"}
+              ariaLabel="Copy party code"
+              onClick={onCopyCode}
+            />
+          </div>
+          <p role="status" aria-live="polite" className="font-body min-h-8 mt-8">
+            {copied ? "Party code copied to clipboard." : ""}
+          </p>
+        </PixelCard>
 
-      <RosterPanel
-        members={members}
-        viewerDisplayName={session.member.displayName}
-        viewerIsHost={isHost}
-      />
+        <CharacterCreator viewerDisplayName={session.member.displayName} />
+      </div>
+
+      {/* RIGHT column: the adventure sidebar (party panel = live roster). */}
+      <AdventureSidebar adventure={adventure} roomSession={session} />
     </div>
   );
 }

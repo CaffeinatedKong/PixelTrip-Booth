@@ -57,7 +57,11 @@ export const PixelButton = forwardRef<HTMLButtonElement, PixelButtonProps>(
         disabled={disabled}
         aria-label={ariaLabel}
         aria-pressed={ariaPressed}
-        className={`font-display border-2 border-ink px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg motion-reduce:transition-none ${VARIANT_CLASSES[variant]} disabled:bg-muted disabled:text-bg-alt ${className}`}
+        className={`font-display border-2 px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg motion-reduce:transition-none ${
+          ariaPressed
+            ? "border-accent bg-primary text-bg ring-2 ring-accent ring-offset-2 ring-offset-bg"
+            : `border-ink ${VARIANT_CLASSES[variant]}`
+        } disabled:bg-muted disabled:text-bg-alt disabled:border-ink ${className}`}
       >
         {label}
       </button>

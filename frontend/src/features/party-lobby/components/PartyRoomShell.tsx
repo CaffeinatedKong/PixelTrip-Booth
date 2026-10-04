@@ -20,7 +20,6 @@ import { PixelButton } from "@/components/PixelButton";
 import type { RoomMember, RoomSession } from "@/types";
 
 import { buildStageSteps, isStageStubbed, stageMeta } from "../lib/stages";
-import { CharacterCreator } from "./CharacterCreator";
 import { ChatPanel } from "./ChatPanel";
 import { SetupStageContent } from "./SetupStageContent";
 import { StagePlaceholder } from "./StagePlaceholder";
@@ -51,7 +50,7 @@ export function PartyRoomShell({
 
   return (
     <main className="bg-bg text-ink font-body min-h-screen p-24">
-      <div className="mx-auto flex max-w-xl flex-col gap-24">
+      <div className="mx-auto flex max-w-screen-2xl flex-col gap-24">
         <h1 className="font-display text-accent text-center">
           {session.room.name}
         </h1>
@@ -67,9 +66,6 @@ export function PartyRoomShell({
               members={members}
               copied={copied}
               onCopyCode={onCopyCode}
-            />
-            <CharacterCreator
-              viewerDisplayName={session.member.displayName}
             />
             <ChatPanel viewerDisplayName={session.member.displayName} />
           </>

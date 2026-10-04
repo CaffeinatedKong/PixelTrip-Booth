@@ -1,290 +1,199 @@
 "use client";
 
 /**
- * CharacterCreator — a local-only 8-bit character + travel-preferences creator.
+ * CharacterCreator — the left-panel host of the 8-bit character creator.
  *
- * UI ONLY. There is no character/preferences backend yet, so every selection
- * lives in this component's local state and NOTHING is persisted or synced:
- * "Save character (local)" just stores the current selection in local state and
- * shows an honest confirmation line. No service import, no Supabase, no fetch.
+ * Owns {@link useCharacterDraft} (the feature's single stateful hook) and composes
+ * the already-built feature components into one screen: a layered
+ * {@link CharacterPreview}, five single-select {@link OptionCardGroup}s (Archetype,
+ * Outfit, Accessory, Palette, Travel Style), two multi-select
+ * {@link OptionTagGroup}s (Interests, Destinations), an {@link ActivityPriorityGroup}
+ * for Activities, a {@link PreferenceFields} block, and the primary "SAVE CHARACTER"
+ * {@link PixelButton}.
  *
- * Structured so a real service can be dropped in later: the saved selection is a
- * single typed object ({@link CharacterDraft}) and the Save handler is the one
- * seam a `characterService.save(draft)` call would replace.
+ * Presentational composition only: this component reimplements none of the group
+ * UI and performs no data fetching, persistence, or service calls. All draft state
+ * and the single `save()` projection seam live in the hook. While the save is
+ * gated (`!canSave`) a visible explanatory line lists the still-required
+ * appearance selections; after a successful save a polite `role="status"` live
+ * region announces that the character is kept for this session only and is not
+ * persisted to any server.
  *
- * Presentational + local state only. Click-through option groups use
- * {@link PixelButton} with `aria-pressed`; the {@link CharacterSprite} preview's
- * sprite key reflects the selected appearance id.
+ * Styling uses design-token utility classes only — never raw hex or arbitrary
+ * magic values.
  */
-import { useId, useState, type ReactElement } from "react";
+import { type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
-import { PixelCard } from "@/components/PixelCard";
-import { CharacterSprite } from "@/components/CharacterSprite";
 
+import { ActivityPriorityGroup } from "./ActivityPriorityGroup";
+import { CharacterPreview } from "./CharacterPreview";
+import { OptionCardGroup } from "./OptionCardGroup";
+import { OptionTagGroup } from "./OptionTagGroup";
+import { PreferenceFields } from "./PreferenceFields";
+import { useCharacterDraft } from "../hooks/useCharacterDraft";
+import { LAYER_MAP, resolveLayers } from "../lib/characterLayers";
 import {
   ACCESSORY,
   ACTIVITIES,
   APPEARANCE,
-  DEFAULT_SPRITE_KEY,
+  DESTINATIONS,
   INTERESTS,
   OUTFIT,
+  PALETTE,
   TRAVEL_STYLE,
-  type CharacterOption,
 } from "../lib/characterOptions";
-
-/** The complete local selection, shaped for a future service to consume. */
-export interface CharacterDraft {
-  appearance: string | null;
-  outfit: string | null;
-  accessory: string | null;
-  travelStyle: string | null;
-  interests: string[];
-  activities: string[];
-  budget: number | null;
-  availabilityStart: string;
-  availabilityEnd: string;
-}
 
 export interface CharacterCreatorProps {
   /** The viewer's display name, used to personalise the preview label. */
   viewerDisplayName: string;
 }
 
-/** A single-select row of option buttons. */
-function OptionGroup({
-  legend,
-  options,
-  selected,
-  onSelect,
-}: {
-  legend: string;
-  options: readonly CharacterOption[];
-  selected: string | null;
-  onSelect: (id: string) => void;
-}): ReactElement {
-  return (
-    <fieldset className="flex flex-col gap-8">
-      <legend className="font-display text-ink mb-8">{legend}</legend>
-      <div className="flex flex-wrap gap-8">
-        {options.map((option) => (
-          <PixelButton
-            key={option.id}
-            variant="option"
-            label={option.label}
-            ariaPressed={selected === option.id}
-            onClick={() => onSelect(option.id)}
-          />
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-/** A multi-select row of toggle option buttons. */
-function MultiOptionGroup({
-  legend,
-  options,
-  selected,
-  onToggle,
-}: {
-  legend: string;
-  options: readonly CharacterOption[];
-  selected: string[];
-  onToggle: (id: string) => void;
-}): ReactElement {
-  return (
-    <fieldset className="flex flex-col gap-8">
-      <legend className="font-display text-ink mb-8">{legend}</legend>
-      <div className="flex flex-wrap gap-8">
-        {options.map((option) => (
-          <PixelButton
-            key={option.id}
-            variant="option"
-            label={option.label}
-            ariaPressed={selected.includes(option.id)}
-            onClick={() => onToggle(option.id)}
-          />
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
 export function CharacterCreator({
   viewerDisplayName,
 }: CharacterCreatorProps): ReactElement {
-  const budgetId = useId();
-  const startId = useId();
-  const endId = useId();
+  const {
+    draft,
+    select,
+    toggle,
+    toggleActivity,
+    setActivityPriority,
+    setBudgetText,
+    setOrigin,
+    addConstraint,
+    removeConstraint,
+    setDateRange,
+    addDateRange,
+    removeDateRange,
+    canSave,
+    sessionCharacter,
+    save,
+  } = useCharacterDraft();
 
-  const [appearance, setAppearance] = useState<string | null>(null);
-  const [outfit, setOutfit] = useState<string | null>(null);
-  const [accessory, setAccessory] = useState<string | null>(null);
-  const [travelStyle, setTravelStyle] = useState<string | null>(null);
-  const [interests, setInterests] = useState<string[]>([]);
-  const [activities, setActivities] = useState<string[]>([]);
-  const [budget, setBudget] = useState<string>("");
-  const [availabilityStart, setAvailabilityStart] = useState<string>("");
-  const [availabilityEnd, setAvailabilityEnd] = useState<string>("");
-  const [savedDraft, setSavedDraft] = useState<CharacterDraft | null>(null);
+  const layers = resolveLayers(draft, LAYER_MAP);
 
-  const toggle =
-    (setter: (updater: (prev: string[]) => string[]) => void) =>
-    (id: string): void => {
-      setter((prev) =>
-        prev.includes(id)
-          ? prev.filter((value) => value !== id)
-          : [...prev, id],
-      );
-    };
+  // The appearance core that gates saving (see `canSave` in ../lib/draft).
+  const missingSelections: readonly string[] = [
+    draft.archetype === null ? "archetype" : null,
+    draft.outfit === null ? "outfit" : null,
+    draft.accessory === null ? "accessory" : null,
+  ].filter((label): label is string => label !== null);
 
-  // Save is allowed once the three appearance fields are chosen.
-  const canSave =
-    appearance !== null && outfit !== null && accessory !== null;
-
-  const spriteKey = appearance ?? DEFAULT_SPRITE_KEY;
-
-  // The single persistence seam. A real service would replace this body with a
-  // `characterService.save(draft)` call; the UI above it does not change.
-  const save = (): void => {
-    if (!canSave) return;
-    const parsedBudget = budget.trim() === "" ? null : Number(budget);
-    setSavedDraft({
-      appearance,
-      outfit,
-      accessory,
-      travelStyle,
-      interests,
-      activities,
-      budget:
-        parsedBudget !== null && Number.isFinite(parsedBudget)
-          ? parsedBudget
-          : null,
-      availabilityStart,
-      availabilityEnd,
-    });
-  };
+  // Polite live-region copy. Empty before any successful save so assistive tech
+  // only announces once a session character exists.
+  const saveStatusMessage =
+    sessionCharacter !== null
+      ? "Character saved for this session only — not saved to any server."
+      : "";
 
   return (
-    <PixelCard title="Create your character">
-      <p className="font-body text-muted mb-16">
-        Saved on your screen only — not yet sent to the party/backend.
-      </p>
-
-      <div className="flex items-center gap-16 mb-16">
-        <CharacterSprite
-          spriteKey={spriteKey}
-          label={`${viewerDisplayName}'s character preview`}
-          size="lg"
-        />
-        <p className="font-body">
-          {appearance === null
-            ? "Pick an appearance to preview your character."
-            : "Your character takes shape…"}
+    <section className="flex flex-col gap-24">
+      <header className="flex flex-col gap-8">
+        <h2 className="font-display text-ink">CREATE YOUR CHARACTER</h2>
+        <p className="font-body text-muted">
+          Build your traveller for the adventure.
         </p>
-      </div>
+      </header>
 
-      <div className="flex flex-col gap-24">
-        <OptionGroup
-          legend="Appearance"
-          options={APPEARANCE}
-          selected={appearance}
-          onSelect={setAppearance}
-        />
-        <OptionGroup
-          legend="Outfit"
-          options={OUTFIT}
-          selected={outfit}
-          onSelect={setOutfit}
-        />
-        <OptionGroup
-          legend="Accessory"
-          options={ACCESSORY}
-          selected={accessory}
-          onSelect={setAccessory}
-        />
-        <OptionGroup
-          legend="Travel style"
-          options={TRAVEL_STYLE}
-          selected={travelStyle}
-          onSelect={setTravelStyle}
-        />
-        <MultiOptionGroup
-          legend="Interests"
-          options={INTERESTS}
-          selected={interests}
-          onToggle={toggle(setInterests)}
-        />
-        <MultiOptionGroup
-          legend="Activities"
-          options={ACTIVITIES}
-          selected={activities}
-          onToggle={toggle(setActivities)}
-        />
+      <CharacterPreview
+        layers={layers}
+        palette={draft.palette}
+        travelStyle={draft.travelStyle}
+        label={`${viewerDisplayName}'s character`}
+      />
 
-        <div className="flex flex-col gap-8">
-          <label htmlFor={budgetId} className="font-display text-ink">
-            Budget
-          </label>
-          <input
-            id={budgetId}
-            type="number"
-            min={0}
-            value={budget}
-            onChange={(event) => setBudget(event.target.value)}
-            placeholder="e.g. 1500"
-            className="font-body text-ink bg-bg border-2 border-muted px-16 py-8"
-          />
-        </div>
+      <OptionCardGroup
+        legend="Archetype"
+        options={APPEARANCE}
+        selectedId={draft.archetype}
+        onSelect={(id) => select("archetype", id)}
+      />
+      <OptionCardGroup
+        legend="Outfit"
+        options={OUTFIT}
+        selectedId={draft.outfit}
+        onSelect={(id) => select("outfit", id)}
+      />
+      <OptionCardGroup
+        legend="Accessory"
+        options={ACCESSORY}
+        selectedId={draft.accessory}
+        onSelect={(id) => select("accessory", id)}
+      />
+      <OptionCardGroup
+        legend="Palette"
+        options={PALETTE}
+        selectedId={draft.palette}
+        onSelect={(id) => select("palette", id)}
+      />
+      <OptionCardGroup
+        legend="Travel Style"
+        options={TRAVEL_STYLE}
+        selectedId={draft.travelStyle}
+        onSelect={(id) => select("travelStyle", id)}
+      />
 
-        <div className="flex flex-col gap-8">
-          <label htmlFor={startId} className="font-display text-ink">
-            Available from
-          </label>
-          <input
-            id={startId}
-            type="date"
-            value={availabilityStart}
-            onChange={(event) => setAvailabilityStart(event.target.value)}
-            className="font-body text-ink bg-bg border-2 border-muted px-16 py-8"
-          />
-        </div>
+      <OptionTagGroup
+        legend="Interests"
+        options={INTERESTS}
+        selectedIds={draft.interests}
+        onToggle={(id) => toggle("interests", id)}
+      />
+      <OptionTagGroup
+        legend="Destinations"
+        options={DESTINATIONS}
+        selectedIds={draft.destinations}
+        onToggle={(id) => toggle("destinations", id)}
+      />
 
-        <div className="flex flex-col gap-8">
-          <label htmlFor={endId} className="font-display text-ink">
-            Available until
-          </label>
-          <input
-            id={endId}
-            type="date"
-            value={availabilityEnd}
-            onChange={(event) => setAvailabilityEnd(event.target.value)}
-            className="font-body text-ink bg-bg border-2 border-muted px-16 py-8"
-          />
-        </div>
-      </div>
+      <ActivityPriorityGroup
+        legend="Activities"
+        options={ACTIVITIES}
+        selected={draft.activities}
+        onToggle={(name) => toggleActivity(name)}
+        onPriorityChange={(name, priority) =>
+          setActivityPriority(name, priority)
+        }
+      />
 
-      <div className="flex flex-col gap-8 mt-24">
+      <PreferenceFields
+        budgetText={draft.budgetText}
+        onBudgetChange={setBudgetText}
+        origin={draft.origin}
+        onOriginChange={setOrigin}
+        hardConstraints={draft.hardConstraints}
+        onAddConstraint={addConstraint}
+        onRemoveConstraint={removeConstraint}
+        availableDates={draft.availableDates}
+        onDateRangeChange={setDateRange}
+        onAddDateRange={addDateRange}
+        onRemoveDateRange={removeDateRange}
+      />
+
+      <div className="flex flex-col gap-8">
+        {!canSave ? (
+          <p className="font-body text-muted">
+            {missingSelections.length > 0
+              ? `Still required to save: ${missingSelections.join(", ")}.`
+              : "Choose an archetype, outfit, and accessory to save."}
+          </p>
+        ) : null}
+
         <PixelButton
           variant="primary"
-          label="Save character (local)"
-          ariaLabel="Save character locally"
+          type="button"
+          label="SAVE CHARACTER"
           disabled={!canSave}
           onClick={save}
         />
-        {!canSave ? (
-          <p className="font-body text-muted">
-            Choose an appearance, outfit, and accessory to save your character.
-          </p>
-        ) : null}
-        <p role="status" aria-live="polite" className="font-body min-h-8">
-          {savedDraft
-            ? "Character saved on your screen only — not yet sent to the party/backend."
-            : ""}
+
+        {/* Polite live region: always present so assistive tech picks up the
+            change; empty until a save produces a session character. */}
+        <p role="status" aria-live="polite" className="font-body text-muted">
+          {saveStatusMessage}
         </p>
       </div>
-    </PixelCard>
+    </section>
   );
 }
 
