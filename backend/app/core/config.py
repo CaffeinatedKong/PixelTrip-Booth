@@ -12,6 +12,7 @@ LangGraph/AI configuration is included by design.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
@@ -58,8 +59,15 @@ class Settings(BaseSettings):
 
     # --- External_Tool configuration (spec 03, Requirement 19.4) ---
     external_tool_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    # "generic": GET flight_api_url returning {"options": [...]} directly.
+    # "skyscanner_rapidapi": the Sky Scrapper listing on RapidAPI; flight_api_key is the
+    # RapidAPI key and flight_api_url defaults to https://sky-scrapper.p.rapidapi.com.
+    flight_provider: Literal["generic", "skyscanner_rapidapi"] = Field(default="generic")
     flight_api_url: str = Field(default="")
     flight_api_key: str = Field(default="", repr=False)
+    flight_currency: str = Field(default="SGD", min_length=3, max_length=3)
+    flight_market: str = Field(default="en-US")
+    flight_country_code: str = Field(default="SG", min_length=2, max_length=2)
     places_api_url: str = Field(default="")
     places_api_key: str = Field(default="", repr=False)
     weather_api_url: str = Field(default="")
