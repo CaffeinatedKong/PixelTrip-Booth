@@ -50,6 +50,12 @@ def payload(member_id: str, display_name: str, role: str) -> dict:
             "activities": [],
             "hard_constraints": [],
         },
+        "trip": {
+            "id": "77777777-7777-4777-8777-777777777777",
+            "room_id": ROOM_ID,
+            "title": "Adventure Club",
+            "status": "trip_created",
+        },
     }
 
 
@@ -75,7 +81,7 @@ def test_post_rooms_200(test_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"room", "member", "guest", "character", "travelPreferences"}
+    assert set(body) == {"room", "member", "guest", "character", "travelPreferences", "trip"}
     assert body["room"]["roomCode"] == "ABC123"
     assert body["member"]["role"] == "owner"
     service.create_room.assert_awaited_once()

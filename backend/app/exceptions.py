@@ -38,6 +38,14 @@ class RoomNotFoundError(NotFoundError):
     """No ``party_rooms`` row matches the supplied room code or id."""
 
 
+class VoteSessionNotFoundError(NotFoundError):
+    """No ``vote_sessions`` row matches the supplied id."""
+
+
+class RunNotFoundError(NotFoundError):
+    """No ``agent_runs`` row matches the supplied id."""
+
+
 # --- 409 family: a conflicting state or constraint violation ----------------
 
 

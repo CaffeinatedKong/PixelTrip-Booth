@@ -15,7 +15,7 @@ from app.repositories.base import ROOM_CODE_PATTERN, BaseRepository, require_tex
 
 _TABLE = "party_rooms"
 RPC_CREATE_ROOM = "create_room_with_owner"
-RESULT_KEYS = ("room", "guest", "member", "character", "travel_preferences")
+RESULT_KEYS = ("room", "guest", "member", "character", "travel_preferences", "trip")
 
 
 class RoomRepository(BaseRepository):
@@ -52,11 +52,11 @@ class RoomRepository(BaseRepository):
         owner_display_name: str,
         appearance: dict | None = None,
     ) -> dict:
-        """Create the room, owner guest, owner membership, character, and preferences.
+        """Create the room, owner guest, owner membership, character, preferences, and trip.
 
-        Runs as one database transaction via the RPC: all five records or none. Returns a
+        Runs as one database transaction via the RPC: all six records or none. Returns a
         dict with keys ``room``, ``guest``, ``member``, ``character``,
-        ``travel_preferences``.
+        ``travel_preferences``, ``trip``.
         """
         require_text(name, "name", 100)
         require_text(owner_display_name, "owner_display_name", 50)

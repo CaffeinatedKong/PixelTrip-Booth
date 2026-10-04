@@ -22,7 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, rooms
+from app.api.routes import health, preferences, rooms, trips, votes
 from app.core.config import get_settings
 from app.exceptions import (
     BackendError,
@@ -33,7 +33,9 @@ from app.exceptions import (
     RepositoryError,
     RoomCodeExhaustedError,
     RoomNotFoundError,
+    RunNotFoundError,
     ValidationError,
+    VoteSessionNotFoundError,
 )
 from app.schemas.errors import error_body
 
@@ -53,6 +55,9 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(rooms.router)
+app.include_router(preferences.router)
+app.include_router(votes.router)
+app.include_router(trips.router)
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +80,8 @@ ERROR_CODES: dict[type[BackendError], tuple[int, str]] = {
     # Leaf overrides: the MRO walk finds these before the family default, so the
     # room API keeps its specific codes.
     RoomNotFoundError: (404, "ROOM_NOT_FOUND"),
+    VoteSessionNotFoundError: (404, "VOTE_SESSION_NOT_FOUND"),
+    RunNotFoundError: (404, "RUN_NOT_FOUND"),
     MemberAlreadyExistsError: (409, "MEMBER_ALREADY_EXISTS"),
     InvalidDisplayNameError: (422, "INVALID_DISPLAY_NAME"),
 }
