@@ -1,0 +1,638 @@
+"""Negotiation_Node — REFINE stage itinerary negotiation.
+
+The flow, in order, each step narrowing what the next step has to consider:
+
+1. **Require a base version.** No `itinerary_versions` row at all means there
+   is nothing to refine (Requirement 10.12).
+2. **Require open feedback.** Zero open rows completes the run with nothing
+   written — not a failure, just nothing to do (Requirement 10.13).
+3. **Resolve every open row's target** against the base itinerary, structured
+   (`{day?, itemId?, section?}`) or legacy flat-string, splitting into
+   resolvable and unresolvable (Requirement 10.14-10.15).
+4. **Compute the Affected_Scope** from the resolvable rows: the targeted
+   days/items, same-time-slot neighbours, and immediate adjacents
+   (Requirement 10.2).
+5. **Detect conflicts** between resolvable rows targeting the same day/item
+   with incompatible requested outcomes, deterministically
+   (Requirement 10.8-10.9).
+6. **Regenerate only the Affected_Scope**, applying the (conflict-resolved)
+   winning outcome per target; every day/item outside the scope is carried
+   forward byte-identical (Requirement 10.3).
+7. **Persist through the same optimistic-lock loop** `itinerary_node` uses,
+   with a real applicability check this time — unlike a first build, a
+   refine's lost race genuinely can still be worth retrying.
+8. **Report**: mark addressed rows, narrate any conflict compromise, name
+   whatever is still open, and advance `trips.status`.
+
+**On outcome classification and regeneration, without an LLM.** No LLM client
+exists yet under `app/agents/` — the same documented interim choice every
+other specialist node has made. Outcome classification
+(remove/retain/edit) is a keyword scan over `feedback.comment`, and an "edit"
+appends the comment as a note to the item's description rather than rewriting
+it with real judgment. This keeps every mechanical guarantee this requirement
+makes — Affected_Scope correctness, Unaffected_Scope byte-identity, addressed
+vs still-open bookkeeping, deterministic conflict detection — true today,
+while leaving exactly one function (`_apply_outcome`) to upgrade once real
+generation lands.
+
+**On the prompt-injection requirement (Requirement 10's "SHALL NOT execute...
+any instruction phrased as an agent directive").** Trivially satisfied: this
+interim implementation never passes feedback text to an LLM at all. The
+requirement stays documented here so whoever wires in real generation sees
+it before adding that call.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from langchain_core.runnables import RunnableConfig
+
+from app.agents.errors import NoItineraryToRefineError
+from app.agents.messages import SummaryMessageContent, TextMessageContent, emit_npc_message
+from app.agents.nodes.itinerary import persist_itinerary_version
+from app.agents.proposals import ItineraryModel, RefinementProposal
+from app.services.trip_status_service import advance_trip_status
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from app.agents.state import AgentState, RepositoryBundle
+
+logger = logging.getLogger(__name__)
+
+STAGE = "REFINE"
+
+#: Requirement 10.5: a change summary is 1-500 characters.
+MAX_CHANGE_SUMMARY_LENGTH = 500
+
+#: Keyword scan used to classify a feedback row's requested outcome. Blunt by
+#: design, matching the same bluntness the business guardrail's hard-constraint
+#: scan uses: a false positive here costs nothing worse than an odd-sounding
+#: compromise message, while silently misreading "remove" as "edit" could drop
+#: the wrong thing.
+_REMOVE_KEYWORDS = ("remove", "delete", "cut", "drop")
+_RETAIN_KEYWORDS = ("keep", "retain", "don't remove", "do not remove")
+
+
+@dataclass(frozen=True)
+class ResolvedTarget:
+    """A feedback row's target, resolved against the base itinerary.
+
+    Attributes:
+        day: The day number the target refers to.
+        item_id: The specific item id, or ``None`` when the target names only
+            a day (the whole day is in scope, no single item).
+    """
+
+    day: int
+    item_id: str | None
+
+
+# ---------------------------------------------------------------------------
+# Target resolution (Requirement 10.14-10.15)
+# ---------------------------------------------------------------------------
+
+
+def _index_itinerary(
+    itinerary: dict[str, Any],
+) -> tuple[dict[int, dict[str, Any]], dict[str, tuple[int, int]]]:
+    """Index an itinerary dict by day number and by item id.
+
+    Returns:
+        ``(days_by_number, item_location)`` where ``item_location`` maps an
+        item id to ``(day_number, index_within_day)``.
+    """
+    days_by_number: dict[int, dict[str, Any]] = {}
+    item_location: dict[str, tuple[int, int]] = {}
+    for day in itinerary.get("days") or []:
+        day_num = int(day["day"])
+        days_by_number[day_num] = day
+        for idx, item in enumerate(day.get("items") or []):
+            item_location[item["id"]] = (day_num, idx)
+    return days_by_number, item_location
+
+
+def _resolve_target(
+    target: Any,
+    days_by_number: dict[int, dict[str, Any]],
+    item_location: dict[str, tuple[int, int]],
+) -> ResolvedTarget | None:
+    """Resolve one feedback row's ``target`` against the base itinerary.
+
+    Handles both the structured ``{day?, itemId?, section?}`` shape and a
+    legacy flat string, attempting an exact match against an item id first and
+    a day number second. Returns ``None`` when neither resolves
+    (Requirement 10.14-10.15).
+    """
+    if isinstance(target, dict):
+        item_id = target.get("itemId")
+        if item_id is not None:
+            location = item_location.get(item_id)
+            return None if location is None else ResolvedTarget(day=location[0], item_id=item_id)
+        day_value = target.get("day")
+        if day_value is not None:
+            try:
+                day_num = int(day_value)
+            except (TypeError, ValueError):
+                return None
+            return ResolvedTarget(day=day_num, item_id=None) if day_num in days_by_number else None
+        return None
+
+    if isinstance(target, str):
+        text = target.strip()
+        if not text:
+            return None
+        location = item_location.get(text)
+        if location is not None:
+            return ResolvedTarget(day=location[0], item_id=text)
+        try:
+            day_num = int(text)
+        except ValueError:
+            return None
+        return ResolvedTarget(day=day_num, item_id=None) if day_num in days_by_number else None
+
+    return None
+
+
+def partition_by_target_resolution(
+    feedback_rows: list[dict[str, Any]],
+    base_itinerary: dict[str, Any],
+) -> tuple[list[tuple[dict[str, Any], ResolvedTarget]], list[dict[str, Any]]]:
+    """Split open feedback rows into resolvable and unresolvable.
+
+    Args:
+        feedback_rows: Open ``feedback`` rows, oldest first.
+        base_itinerary: The base version's ``itinerary`` jsonb, as a dict.
+
+    Returns:
+        ``(resolvable, unresolvable)``. ``resolvable`` pairs each row with its
+        :class:`ResolvedTarget`, in the same (creation-time) order the rows
+        arrived in — later conflict and regeneration logic relies on that
+        order to pick a deterministic "first wins" compromise.
+    """
+    days_by_number, item_location = _index_itinerary(base_itinerary)
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]] = []
+    unresolvable: list[dict[str, Any]] = []
+    for row in feedback_rows:
+        resolved = _resolve_target(row.get("target"), days_by_number, item_location)
+        if resolved is None:
+            unresolvable.append(row)
+        else:
+            resolvable.append((row, resolved))
+    return resolvable, unresolvable
+
+
+# ---------------------------------------------------------------------------
+# Affected_Scope (Requirement 10.2)
+# ---------------------------------------------------------------------------
+
+
+def compute_affected_scope(
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    base_itinerary: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute the Affected_Scope: targeted items, time-slot neighbours, adjacents.
+
+    Returns:
+        ``{"whole_days": [day, ...], "items": {day: [item_id, ...]}}``. Agent-
+        internal bookkeeping only — never persisted (see
+        :meth:`~app.agents.proposals.RefinementProposal.to_persistable`).
+    """
+    days_by_number, _item_location = _index_itinerary(base_itinerary)
+    whole_days: set[int] = set()
+    items_by_day: dict[int, set[str]] = {}
+
+    for _row, resolved in resolvable:
+        day = days_by_number.get(resolved.day)
+        if day is None:
+            continue
+        day_items = day.get("items") or []
+
+        if resolved.item_id is None:
+            whole_days.add(resolved.day)
+            for item in day_items:
+                items_by_day.setdefault(resolved.day, set()).add(item["id"])
+            continue
+
+        idx = next((i for i, item in enumerate(day_items) if item["id"] == resolved.item_id), None)
+        if idx is None:
+            continue
+        bucket = items_by_day.setdefault(resolved.day, set())
+        changed_item = day_items[idx]
+        bucket.add(changed_item["id"])
+
+        # Same-day items sharing the changed item's time slot. "Resulting time
+        # range" is read as the item's own `time` field, since no scheduling
+        # engine exists to compute an actual post-change range yet.
+        changed_time = changed_item.get("time")
+        if changed_time:
+            for item in day_items:
+                if item.get("time") == changed_time:
+                    bucket.add(item["id"])
+
+        # The immediately adjacent items in the day's ordered list.
+        if idx > 0:
+            bucket.add(day_items[idx - 1]["id"])
+        if idx < len(day_items) - 1:
+            bucket.add(day_items[idx + 1]["id"])
+
+    return {
+        "whole_days": sorted(whole_days),
+        "items": {day: sorted(ids) for day, ids in items_by_day.items()},
+    }
+
+
+def affected_days(affected_scope: dict[str, Any]) -> set[int]:
+    """Return every day number touched by the Affected_Scope."""
+    days = {int(d) for d in affected_scope.get("whole_days") or []}
+    days.update(int(d) for d in (affected_scope.get("items") or {}))
+    return days
+
+
+# ---------------------------------------------------------------------------
+# Conflict detection (Requirement 10.8-10.9)
+# ---------------------------------------------------------------------------
+
+
+def _classify_outcome(comment: str) -> str:
+    """Classify a feedback comment's requested outcome: remove, retain, or edit."""
+    lowered = (comment or "").strip().lower()
+    if any(keyword in lowered for keyword in _REMOVE_KEYWORDS):
+        return "remove"
+    if any(keyword in lowered for keyword in _RETAIN_KEYWORDS):
+        return "retain"
+    return "edit"
+
+
+def detect_conflicts(
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+) -> list[dict[str, Any]]:
+    """Detect incompatible outcomes requested for the same day/item.
+
+    Deterministic and non-LLM (Requirement 10.9): grouping is by exact target
+    equality, classification is a fixed keyword scan, and the input order
+    (creation-time ascending) is itself deterministic — so the same open
+    `feedback` rows always yield the same conflict set.
+
+    A conflict is removal versus retention of the same target, or two or more
+    distinctly-worded "edit" requests for the same target (Requirement 10.8).
+
+    Returns:
+        One entry per conflicting target, sorted for a stable return order:
+        ``{"day": int, "item_id": str | None, "feedback_ids": [...],
+        "outcomes": [...]}``.
+    """
+    grouped: dict[tuple[int, str | None], list[tuple[dict[str, Any], str]]] = {}
+    for row, resolved in resolvable:
+        key = (resolved.day, resolved.item_id)
+        grouped.setdefault(key, []).append((row, _classify_outcome(row.get("comment", ""))))
+
+    conflicts: list[dict[str, Any]] = []
+    for (day, item_id), entries in grouped.items():
+        if len(entries) < 2:
+            continue
+        outcomes = {outcome for _row, outcome in entries}
+        edit_texts = {
+            row.get("comment", "").strip() for row, outcome in entries if outcome == "edit"
+        }
+        is_conflict = (
+            ("remove" in outcomes and "retain" in outcomes)
+            or ("remove" in outcomes and "edit" in outcomes)
+            or len(edit_texts) > 1
+        )
+        if not is_conflict:
+            continue
+        conflicts.append(
+            {
+                "day": day,
+                "item_id": item_id,
+                "feedback_ids": sorted(row["id"] for row, _outcome in entries),
+                "outcomes": sorted(outcomes),
+            }
+        )
+
+    conflicts.sort(key=lambda c: (c["day"], c["item_id"] or ""))
+    return conflicts
+
+
+def _winning_feedback(
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    conflicts: list[dict[str, Any]],
+) -> dict[tuple[int, str | None], dict[str, Any]]:
+    """Pick the one feedback row whose outcome is actually applied per target.
+
+    For a conflicting target, the oldest row (resolvable rows arrive in
+    creation-time order) wins — deterministic, and favors the party member
+    who raised the issue first. The losing rows stay open; their requested
+    change was not reflected (Requirement 10.6-10.7).
+    """
+    conflict_keys = {(c["day"], c["item_id"]) for c in conflicts}
+    grouped: dict[tuple[int, str | None], list[dict[str, Any]]] = {}
+    for row, resolved in resolvable:
+        grouped.setdefault((resolved.day, resolved.item_id), []).append(row)
+
+    winners: dict[tuple[int, str | None], dict[str, Any]] = {}
+    for key, rows in grouped.items():
+        winners[key] = rows[0] if key in conflict_keys else rows[-1]
+    return winners
+
+
+# ---------------------------------------------------------------------------
+# Regeneration (Requirement 10.3, 10.6)
+# ---------------------------------------------------------------------------
+
+
+def _apply_outcome(item: dict[str, Any], outcome: str, comment: str) -> dict[str, Any] | None:
+    """Apply one winning outcome to an item.
+
+    Returns the (possibly updated) item, or ``None`` to drop it. See the
+    module docstring for why "edit" is a note appended to the description
+    rather than real regeneration.
+    """
+    if outcome == "remove":
+        return None
+    if outcome == "retain":
+        return item
+    note = comment.strip()
+    if not note:
+        return item
+    updated = dict(item)
+    existing = (item.get("description") or "").strip()
+    updated["description"] = f"{existing} (Updated per feedback: {note})".strip()
+    return updated
+
+
+def regenerate_affected_only(
+    base_itinerary: dict[str, Any],
+    affected_scope: dict[str, Any],
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    conflicts: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str]]:
+    """Build the new itinerary dict, touching only the Affected_Scope.
+
+    Every day outside the scope is carried forward as the exact same object
+    (Requirement 10.3). Within an affected day, only the item directly named
+    by a winning feedback row's target is changed; items in scope only because
+    they are a time-slot neighbour or an adjacent item are carried forward
+    unchanged — scope membership permits a change, it does not require one.
+
+    A day-only target (no specific item id) marks its whole day in scope but
+    applies no change: there is nothing in it to concretely act on. Its
+    feedback row therefore stays open rather than being marked addressed,
+    which is the honest answer for an interim implementation with no real
+    generation yet.
+
+    Returns:
+        ``(new_itinerary, addressed_feedback_ids)``.
+    """
+    winners = _winning_feedback(resolvable, conflicts)
+    in_scope_days = affected_days(affected_scope)
+
+    new_days: list[dict[str, Any]] = []
+    addressed_ids: list[str] = []
+
+    for day in base_itinerary.get("days") or []:
+        day_num = int(day["day"])
+        if day_num not in in_scope_days:
+            new_days.append(day)
+            continue
+
+        new_items: list[dict[str, Any]] = []
+        for item in day.get("items") or []:
+            winning_row = winners.get((day_num, item["id"]))
+            if winning_row is None:
+                new_items.append(item)
+                continue
+            outcome = _classify_outcome(winning_row.get("comment", ""))
+            updated = _apply_outcome(item, outcome, winning_row.get("comment", ""))
+            if updated is not None:
+                new_items.append(updated)
+            addressed_ids.append(winning_row["id"])
+
+        new_days.append({**day, "items": new_items})
+
+    return {**base_itinerary, "days": new_days}, addressed_ids
+
+
+def build_change_summary(
+    affected_scope: dict[str, Any],
+    conflicts: list[dict[str, Any]],
+) -> str:
+    """Build a 1-500 character summary naming every affected day/item (Requirement 10.5)."""
+    items_by_day = affected_scope.get("items") or {}
+    parts = []
+    for day in sorted(affected_days(affected_scope)):
+        if items_by_day.get(day):
+            parts.append(f"day {day}: items {', '.join(items_by_day[day])}")
+        else:
+            parts.append(f"day {day}")
+    summary = f"Refined {'; '.join(parts)} per party feedback." if parts else "No changes applied."
+    if conflicts:
+        summary += f" Resolved {len(conflicts)} conflicting request(s)."
+    return summary[:MAX_CHANGE_SUMMARY_LENGTH]
+
+
+# ---------------------------------------------------------------------------
+# Lost-race re-evaluation (Requirement 5.4)
+# ---------------------------------------------------------------------------
+
+
+def _affected_scope_content_differs(
+    base_itinerary: dict[str, Any],
+    refetched_itinerary: dict[str, Any],
+    affected_scope: dict[str, Any],
+) -> bool:
+    """Return ``True`` if any day in scope differs between base and refetched."""
+    base_days = {int(d["day"]): d for d in base_itinerary.get("days") or []}
+    refetched_days = {int(d["day"]): d for d in refetched_itinerary.get("days") or []}
+    return any(
+        base_days.get(day_num) != refetched_days.get(day_num)
+        for day_num in affected_days(affected_scope)
+    )
+
+
+async def _is_still_applicable(
+    repos: RepositoryBundle,
+    state: AgentState,
+    affected_scope: dict[str, Any],
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    latest_row: dict[str, Any],
+) -> bool:
+    """Requirement 5.4: decide whether a lost race's proposal is still worth retrying.
+
+    Inapplicable when any of: the Affected_Scope's content already differs
+    from the base version in the re-fetched row (someone else already made
+    this exact change); every feedback row this proposal addresses is already
+    `addressed`; or either locked selection has changed since generation.
+    """
+    base_context = state.trip_context or {}
+    base_itinerary = (base_context.get("latest_itinerary_version") or {}).get("itinerary") or {}
+    refetched_itinerary = latest_row.get("itinerary") or {}
+    if _affected_scope_content_differs(base_itinerary, refetched_itinerary, affected_scope):
+        return False
+
+    feedback_ids = {row["id"] for row, _resolved in resolvable}
+    if feedback_ids:
+        still_open = await repos.feedback_repo.list_open_by_trip(state.trip_id)
+        still_open_ids = {row["id"] for row in still_open}
+        if not (feedback_ids & still_open_ids):
+            return False
+
+    room_id = base_context.get("room_id")
+    base_selections = base_context.get("selections") or {}
+    if room_id is not None:
+        current_rows = await repos.selection_repo.list_by_room(room_id)
+        current_selections = {s["kind"]: s for s in current_rows}
+        for kind in ("destination", "flight"):
+            current_data = (current_selections.get(kind) or {}).get("data")
+            base_data = (base_selections.get(kind) or {}).get("data")
+            if current_data != base_data:
+                return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
+# The node
+# ---------------------------------------------------------------------------
+
+
+async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentState:
+    """Negotiate open feedback into a new refined itinerary version.
+
+    Raises:
+        NoItineraryToRefineError: If the trip has no itinerary version at all
+            (Requirement 10.12). No write happens on this path.
+        RepeatedVersionContentionError: After a 3rd lost-race collision.
+        ItineraryPersistenceError: If the insert fails for a non-contention
+            reason.
+        TripNotFoundError: If the trip does not exist.
+        StagePreconditionNotMetError: If the room is closed or past this stage.
+    """
+    repos: RepositoryBundle = config["configurable"]["repos"]
+
+    context = await _load_context(state, repos)
+    state = state.with_trip_context(context)
+
+    base_version = context["latest_itinerary_version"]
+    if base_version is None:
+        raise NoItineraryToRefineError()
+
+    open_feedback = context["open_feedback"]
+    if not open_feedback:
+        await emit_npc_message(
+            repos,
+            state.trip_id,
+            "text",
+            TextMessageContent(text="There is no outstanding feedback to negotiate.", stage=STAGE),
+        )
+        return state
+
+    state = state.with_base_version(int(base_version["version"]))
+    base_itinerary = base_version["itinerary"]
+    resolvable, unresolvable = partition_by_target_resolution(open_feedback, base_itinerary)
+
+    if unresolvable:
+        await emit_npc_message(
+            repos,
+            state.trip_id,
+            "text",
+            TextMessageContent(
+                text=(
+                    f"{len(unresolvable)} piece(s) of feedback referenced a part of the "
+                    "plan the guide could not locate."
+                ),
+                stage=STAGE,
+            ),
+        )
+
+    if not resolvable:
+        return state
+
+    affected_scope = compute_affected_scope(resolvable, base_itinerary)
+    conflicts = detect_conflicts(resolvable)
+    new_itinerary_dict, addressed_ids = regenerate_affected_only(
+        base_itinerary, affected_scope, resolvable, conflicts
+    )
+    change_summary = build_change_summary(affected_scope, conflicts)
+
+    proposal = RefinementProposal(
+        itinerary=ItineraryModel(**new_itinerary_dict),
+        change_summary=change_summary,
+        addressed_feedback_ids=addressed_ids,
+        unresolved_feedback_ids=[row["id"] for row in unresolvable],
+        affected_scope=affected_scope,
+        conflicts=conflicts,
+    )
+    state = state.with_proposal(proposal.model_dump(mode="json"))
+
+    async def _applicable(latest_row: dict[str, Any]) -> bool:
+        return await _is_still_applicable(repos, state, affected_scope, resolvable, latest_row)
+
+    row, state = await persist_itinerary_version(
+        state,
+        repos,
+        proposal.to_persistable(),
+        source="refine",
+        change_summary=change_summary,
+        is_still_applicable=_applicable,
+    )
+
+    if row is None:
+        # Requirement 5.6: the party's plan already moved on.
+        await emit_npc_message(
+            repos,
+            state.trip_id,
+            "text",
+            TextMessageContent(
+                text="The party's plan already moved on, so this attempt made no changes.",
+                stage=STAGE,
+            ),
+        )
+        return state
+
+    if addressed_ids:
+        await repos.feedback_repo.mark_addressed(addressed_ids)
+
+    if conflicts:
+        await emit_npc_message(
+            repos,
+            state.trip_id,
+            "summary",
+            SummaryMessageContent(
+                title="A compromise on the plan",
+                text="The party's feedback included conflicting requests; here is the compromise.",
+                stage=STAGE,
+                details={"conflicts": conflicts},
+            ),
+        )
+
+    still_open_targets = [
+        row["target"] for row, _resolved in resolvable if row["id"] not in addressed_ids
+    ] + [row["target"] for row in unresolvable]
+    if still_open_targets:
+        await emit_npc_message(
+            repos,
+            state.trip_id,
+            "summary",
+            SummaryMessageContent(
+                title="Some feedback remains open",
+                text=f"{len(still_open_targets)} piece(s) of feedback are still open.",
+                stage=STAGE,
+                details={"still_open_targets": still_open_targets},
+            ),
+        )
+
+    await advance_trip_status(
+        repos, state.trip_id, "refinement_completed", context["trip"]["status"]
+    )
+
+    return state
+
+
+async def _load_context(state: AgentState, repos: RepositoryBundle) -> dict[str, Any]:
+    """Re-fetch the trip context fresh (Requirement 6.1-6.3)."""
+    from app.agents.state import load_trip_context
+
+    return await load_trip_context(repos, state.trip_id, state.run_type)

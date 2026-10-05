@@ -4,12 +4,11 @@ import re
 
 import hypothesis.strategies as st
 import pytest
-from hypothesis import given, settings
-from pydantic import ValidationError as PydanticValidationError
-
 from app.repositories.member_repository import normalize_display_name
 from app.schemas.room import CreateRoomRequest, JoinRoomRequest
 from app.services.room_service import generate_room_code
+from hypothesis import given, settings
+from pydantic import ValidationError as PydanticValidationError
 
 # Unicode space separators plus ASCII whitespace control characters.
 whitespace = st.text(

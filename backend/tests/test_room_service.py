@@ -7,7 +7,6 @@ its spec, so calling a method that does not exist fails the test.
 import re
 
 import pytest
-
 from app.exceptions import RepositoryError, RoomNotFoundError
 from app.repositories.member_repository import (
     MemberRepository,
@@ -15,6 +14,7 @@ from app.repositories.member_repository import (
 )
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.room_repository import RoomRepository
+from app.repositories.trip_repository import TripRepository
 from app.schemas.room import CreateRoomRequest, CreateRoomResponse, JoinRoomRequest
 from app.services.room_service import RoomService, generate_room_code
 
@@ -48,6 +48,14 @@ PREFS = {
     "interests": [],
     "activities": [],
     "hard_constraints": [],
+}
+
+TRIP = {
+    "id": "66666666-6666-4666-8666-666666666666",
+    "room_id": ROOM_ID,
+    "title": "Adventure Club",
+    "summary": None,
+    "status": "trip_created",
 }
 
 CREATE_METHODS = (
@@ -89,8 +97,15 @@ def repos(room_repo, member_repo, profile_repo):
 
 
 @pytest.fixture
-def room_service(room_repo, member_repo, profile_repo):
-    return RoomService(room_repo, member_repo, profile_repo)
+def trip_repo(mocker):
+    repo = mocker.AsyncMock(spec=TripRepository)
+    repo.get_by_room_id.return_value = TRIP
+    return repo
+
+
+@pytest.fixture
+def room_service(room_repo, member_repo, profile_repo, trip_repo):
+    return RoomService(room_repo, member_repo, profile_repo, trip_repo)
 
 
 def assert_no_create_calls(repos: dict) -> None:
@@ -114,6 +129,7 @@ def rpc_result():
         "member": make_member(role="owner"),
         "character": CHARACTER,
         "travel_preferences": PREFS,
+        "trip": TRIP,
     }
 
 
@@ -279,3 +295,60 @@ def test_normalize_display_name_same_person(name):
 
 def test_normalize_display_name_collapses_inner_whitespace():
     assert normalize_display_name("Mary   Jane") == "mary jane"
+
+
+# --- trip ----------------------------------------------------------------------------
+
+
+async def test_create_room_returns_trip(room_service, room_repo, rpc_result):
+    room_repo.get_room_by_code.return_value = None
+    room_repo.create_room_with_owner.return_value = rpc_result
+
+    response = await room_service.create_room(
+        CreateRoomRequest(name="Adventure Club", owner_display_name="Gerald")
+    )
+
+    assert response.trip.id == TRIP["id"]
+    assert response.trip.status == "trip_created"
+
+
+def _new_member_setup(room_repo, member_repo, profile_repo, members_after_join: int):
+    room_repo.get_room_by_code.return_value = ROOM
+    member_repo.get_member_by_display_name.return_value = None
+    profile_repo.create_guest.return_value = {**GUEST, "display_name": "Priya"}
+    member_repo.create_member.return_value = make_member(display_name="Priya")
+    profile_repo.create_character.return_value = CHARACTER
+    profile_repo.create_preferences.return_value = PREFS
+    member_repo.list_by_room.return_value = [make_member()] * members_after_join
+
+
+async def test_second_member_forms_the_group(
+    room_service, room_repo, member_repo, profile_repo, trip_repo
+):
+    _new_member_setup(room_repo, member_repo, profile_repo, members_after_join=2)
+    trip_repo.update_status.return_value = {**TRIP, "status": "group_formed"}
+
+    response = await room_service.join_room("ABC123", JoinRoomRequest(display_name="Priya"))
+
+    trip_repo.update_status.assert_awaited_once_with(TRIP["id"], "group_formed", "setup")
+    assert response.trip.status == "group_formed"
+
+
+async def test_first_member_does_not_form_the_group(
+    room_service, room_repo, member_repo, profile_repo, trip_repo
+):
+    _new_member_setup(room_repo, member_repo, profile_repo, members_after_join=1)
+
+    response = await room_service.join_room("ABC123", JoinRoomRequest(display_name="Priya"))
+
+    trip_repo.update_status.assert_not_awaited()
+    assert response.trip.status == "trip_created"
+
+
+async def test_join_room_without_trip_is_rejected(room_service, room_repo, trip_repo, repos):
+    room_repo.get_room_by_code.return_value = ROOM
+    trip_repo.get_by_room_id.return_value = None
+
+    with pytest.raises(RoomNotFoundError):
+        await room_service.join_room("ABC123", JoinRoomRequest(display_name="Priya"))
+    assert_no_create_calls(repos)
