@@ -22,12 +22,15 @@ different resource and must not share that budget or its semantics.
   exceptions are deliberately *not* chained (``from None``): their messages can
   carry request URLs, keys, or the completion itself.
 * **A chain of models, not a single point of failure.** ``Settings.llm_model_chain``
-  lists the primary model then its fallbacks. A model that reports it is out of
-  quota or no longer exists is skipped for a few minutes and the next one is
-  tried at once (retrying it would only burn time); a timeout or provider error
-  gets its one retry on that model and then moves on. A malformed answer is the
-  exception: it stops the call, since asking another model is a different
-  decision from trying again.
+  lists the primary model then its fallbacks, tried in order:
+
+  - out of quota, or the model no longer exists: skipped at once (a retry would
+    only burn time) and rested for a few minutes;
+  - overloaded or timing out: one retry on that model, then on to the next; a model
+    that fails both attempts rests for a minute so later calls skip it;
+  - the request is rejected as invalid (HTTP 400): passed over for this call only;
+  - a malformed answer stops the call. Asking another model is a different
+    decision from trying again.
 * **No tool-call-cap interaction.** Do not call ``state.append_tool_response``
   or ``state.with_failed_tool_attempt`` from here. If a future requirement needs
   to bound LLM calls per run, that is a new, separate cap.
@@ -67,6 +70,11 @@ RETRY_DELAY_SECONDS = 3.0
 #: to be exhausted, while still picking it up again once its quota may have reset.
 MODEL_COOLDOWN_SECONDS = 300.0
 
+#: How long a model rests after failing every attempt of a call (overloaded,
+#: timing out). Much shorter than the quota cooldown: such failures are usually
+#: spikes, so it is re-tried soon, but not on every call while it is struggling.
+FAILURE_COOLDOWN_SECONDS = 60.0
+
 #: Sampling temperature. Creative enough for varied suggestions, low enough to
 #: keep structured output well-formed.
 TEMPERATURE = 0.7
@@ -103,6 +111,17 @@ def _is_model_unavailable(exc: BaseException) -> bool:
     if "RateLimit" in name or "ModelNotFound" in name:
         return True
     return "RESOURCE_EXHAUSTED" in str(exc)[:300]
+
+
+def _is_request_rejected(exc: BaseException) -> bool:
+    """Whether the provider refused this *request* as invalid for this model (HTTP 400).
+
+    Some models do not accept every option (a thinking budget, a structured-output
+    schema). Retrying the same request cannot help, but another model may well
+    accept it, and the refusal says nothing about the model's health, so unlike a
+    quota error it does not put the model into cooldown.
+    """
+    return "InvalidRequest" in type(exc).__name__ or "INVALID_ARGUMENT" in str(exc)[:300]
 
 
 def clip_text(text: str | None, limit: int) -> str | None:
@@ -255,6 +274,7 @@ class LLMClient:
                             operation,
                             model_name,
                         )
+                        self._unavailable_until[model_name] = _now() + FAILURE_COOLDOWN_SECONDS
                         break
                     await asyncio.sleep(RETRY_DELAY_SECONDS)
                     continue
@@ -268,6 +288,13 @@ class LLMClient:
                             type(exc).__name__,
                         )
                         break
+                    if _is_request_rejected(exc):
+                        logger.info(
+                            "LLM model '%s' rejected the request (%s); trying the next model",
+                            model_name,
+                            type(exc).__name__,
+                        )
+                        break
                     if attempt == MAX_ATTEMPTS - 1:
                         logger.warning(
                             "LLM call '%s' failed on model '%s' after retry: %s",
@@ -275,6 +302,7 @@ class LLMClient:
                             model_name,
                             type(exc).__name__,
                         )
+                        self._unavailable_until[model_name] = _now() + FAILURE_COOLDOWN_SECONDS
                         break
                     await asyncio.sleep(RETRY_DELAY_SECONDS)
                     continue

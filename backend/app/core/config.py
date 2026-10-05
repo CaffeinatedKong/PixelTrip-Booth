@@ -78,7 +78,9 @@ class Settings(BaseSettings):
     llm_model_name: str = Field(default="gemini-3.8-flash", min_length=1)
     #: Comma-separated models tried, in order, when the primary one is unavailable
     #: (free-tier quotas are per model, so a fallback multiplies the daily budget).
-    llm_fallback_models: str = Field(default="gemini-3.7-flash,gemini-3.5-flash")
+    llm_fallback_models: str = Field(
+        default="gemini-3.7-flash,gemini-3.5-flash,gemini-3.1-flash-lite"
+    )
     llm_timeout_seconds: int = Field(default=30, ge=1, le=120)
     llm_max_output_tokens: int = Field(default=8192, ge=1, le=65536)
     #: Gemini Flash models spend output tokens on hidden "thinking" unless told not

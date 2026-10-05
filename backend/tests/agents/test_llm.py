@@ -322,6 +322,10 @@ class GoogleModelNotFoundError(Exception):
     """Named like the provider SDK's retired-model error."""
 
 
+class GoogleInvalidRequestError(Exception):
+    """Named like the provider SDK's HTTP 400 error."""
+
+
 PRIMARY, SECOND, THIRD = "model-a", "model-b", "model-c"
 CHAIN = f"{SECOND},{THIRD}"
 
@@ -368,6 +372,26 @@ async def test_a_retired_model_also_falls_through(monkeypatch) -> None:
 
     assert await generate(client) == GOOD
     assert models[PRIMARY].call_count == 1
+
+
+async def test_a_rejected_request_skips_the_retry_and_does_not_rest_the_model(
+    monkeypatch,
+) -> None:
+    """A 400 says the model can't take this request, not that it is unhealthy."""
+    client, models = make_chain_client(
+        monkeypatch,
+        {
+            PRIMARY: [GoogleInvalidRequestError("400 INVALID_ARGUMENT"), GOOD],
+            SECOND: [GOOD],
+            THIRD: [],
+        },
+    )
+
+    assert await generate(client) == GOOD  # primary refuses; second answers
+    assert models[PRIMARY].call_count == 1  # no retry of a request that cannot succeed
+
+    assert await generate(client) == GOOD  # no cooldown: primary is tried first again
+    assert models[PRIMARY].call_count == 2
 
 
 async def test_a_quota_error_is_recognised_by_status_text_too(monkeypatch) -> None:
@@ -485,22 +509,60 @@ async def test_with_every_model_cooling_down_no_call_is_attempted(monkeypatch) -
     assert {name: m.call_count for name, m in models.items()} == calls_after_first
 
 
-async def test_a_generic_failure_does_not_put_a_model_into_cooldown(monkeypatch) -> None:
-    """Only quota/retired errors rest a model; a one-off 503 must not."""
+async def test_a_one_off_failure_that_recovers_on_retry_does_not_rest_the_model(
+    monkeypatch,
+) -> None:
+    client, models = make_chain_client(
+        monkeypatch,
+        {PRIMARY: [RuntimeError("503"), GOOD, GOOD], SECOND: [], THIRD: []},
+    )
+
+    await generate(client)  # fails once, then the retry succeeds
+    await generate(client)  # still first in line
+
+    assert models[PRIMARY].call_count == 3
+    assert models[SECOND].call_count == 0
+
+
+async def test_a_model_that_fails_every_attempt_rests_briefly_then_returns(monkeypatch) -> None:
+    """The circuit breaker: later calls skip a struggling model instead of re-trying it."""
+    clock = [1000.0]
+    monkeypatch.setattr(llm_module, "_now", lambda: clock[0])
     client, models = make_chain_client(
         monkeypatch,
         {
             PRIMARY: [RuntimeError("503"), RuntimeError("503"), GOOD],
-            SECOND: [GOOD],
+            SECOND: [GOOD, GOOD],
             THIRD: [],
         },
     )
 
-    await generate(client)  # primary fails twice, second answers
-    await generate(client)  # primary is still first in line, and answers
+    await generate(client)  # primary fails both attempts; second answers
+    await generate(client)  # primary is resting, so this goes straight to second
+    assert models[PRIMARY].call_count == MAX_ATTEMPTS
+    assert models[SECOND].call_count == 2
+
+    clock[0] += llm_module.FAILURE_COOLDOWN_SECONDS + 1
+    await generate(client)  # the rest is over: primary is first in line again
 
     assert models[PRIMARY].call_count == MAX_ATTEMPTS + 1
-    assert models[SECOND].call_count == 1
+
+
+async def test_a_timeout_that_exhausts_the_retry_also_rests_the_model(monkeypatch) -> None:
+    async def _hangs() -> Any:
+        await asyncio.sleep(10)
+
+    clock = [1000.0]
+    monkeypatch.setattr(llm_module, "_now", lambda: clock[0])
+    client, models = make_chain_client(
+        monkeypatch, {PRIMARY: [_hangs, _hangs], SECOND: [GOOD, GOOD], THIRD: []}
+    )
+
+    await generate(client)
+    await generate(client)
+
+    assert models[PRIMARY].call_count == MAX_ATTEMPTS
+    assert models[SECOND].call_count == 2
 
 
 def test_get_model_builds_one_model_per_name_and_reuses_it(monkeypatch) -> None:
