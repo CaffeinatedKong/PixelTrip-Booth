@@ -180,6 +180,43 @@ describe("MockItineraryService", () => {
   });
 });
 
+describe("MockRoomService.subscribeMembers", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("primes the roster, pushes updates over time, and stops after unsubscribe", async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const room = new MockRoomService();
+
+    const unsubscribe = room.subscribeMembers(ROOM_ID, onChange);
+
+    // Priming read resolves on the first microtask flush — contract-shaped roster.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const primed = onChange.mock.calls[0][0];
+    expect(primed.length).toBeGreaterThan(0);
+    expect(primed[0]).toMatchObject({
+      id: expect.any(String),
+      roomId: ROOM_ID,
+      guestId: expect.any(String),
+      displayName: expect.any(String),
+      role: expect.stringMatching(/^(owner|member)$/),
+    });
+
+    // Advance past one interval — another push fires.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(onChange).toHaveBeenCalledTimes(2);
+
+    // Unsubscribe, then advance well past several intervals: no more callbacks.
+    unsubscribe();
+    const callsAfterUnsubscribe = onChange.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(onChange).toHaveBeenCalledTimes(callsAfterUnsubscribe);
+  });
+});
+
 describe("MockChatService.subscribe", () => {
   afterEach(() => {
     vi.useRealTimers();

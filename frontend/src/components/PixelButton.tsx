@@ -1,13 +1,11 @@
 /**
  * PixelButton — placeholder primitive shell (Foundation, Task 5).
  *
- * A blocky 8-bit action button. This is a typed shell only: it renders a minimal
- * <button> styled with design tokens and is NOT the full feature implementation
- * (no pressed/hover animation, no icon slots yet). Filled in later against
- * `pixel-design-system.md`. Styling uses design-token utility classes only —
+ * A blocky 8-bit action button with token-based variants and accessible pressed,
+ * disabled, and focus states. Styling uses design-token utility classes only —
  * never raw hex or arbitrary values.
  */
-import type { ReactElement } from "react";
+import { forwardRef, type ReactElement } from "react";
 
 export type PixelButtonVariant = "primary" | "secondary" | "option" | "danger";
 
@@ -20,6 +18,14 @@ export interface PixelButtonProps {
   onClick?: () => void;
   /** Disables interaction when true. */
   disabled?: boolean;
+  /** Optional accessible name when the visible label needs extra context. */
+  ariaLabel?: string;
+  /** Exposes toggle-like selection state to assistive technology. */
+  ariaPressed?: boolean;
+  /** Button type for forms; defaults to a non-submitting action. */
+  type?: "button" | "submit";
+  /** Optional token-based utility classes for layout composition. */
+  className?: string;
 }
 
 const VARIANT_CLASSES: Record<PixelButtonVariant, string> = {
@@ -29,22 +35,38 @@ const VARIANT_CLASSES: Record<PixelButtonVariant, string> = {
   danger: "bg-danger text-bg",
 };
 
-export function PixelButton({
-  label,
-  variant = "primary",
-  onClick,
-  disabled = false,
-}: PixelButtonProps): ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`font-display px-16 py-8 border-2 border-ink ${VARIANT_CLASSES[variant]} disabled:bg-muted disabled:text-bg-alt`}
-    >
-      {label}
-    </button>
-  );
-}
+export const PixelButton = forwardRef<HTMLButtonElement, PixelButtonProps>(
+  function PixelButton(
+    {
+      label,
+      variant = "primary",
+      onClick,
+      disabled = false,
+      ariaLabel,
+      ariaPressed,
+      className = "",
+      type = "button",
+    },
+    ref,
+  ): ReactElement {
+    return (
+      <button
+        ref={ref}
+        type={type}
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-pressed={ariaPressed}
+        className={`font-display border-2 px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg motion-reduce:transition-none ${
+          ariaPressed
+            ? "border-accent bg-primary text-bg ring-2 ring-accent ring-offset-2 ring-offset-bg"
+            : `border-ink ${VARIANT_CLASSES[variant]}`
+        } disabled:bg-muted disabled:text-bg-alt disabled:border-ink ${className}`}
+      >
+        {label}
+      </button>
+    );
+  },
+);
 
 export default PixelButton;

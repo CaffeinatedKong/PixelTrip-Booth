@@ -6,12 +6,19 @@
  *   `api-contracts.md`).
  * - `getRoom` / `listMembers` are approved direct anon-key Supabase reads (see
  *   `docs/SUPABASE_ACCESS_BOUNDARY.md`).
+ * - `subscribeMembers` is an approved anon-key Supabase Realtime subscription on
+ *   `room_members`; on any change it re-reads via `listMembers`.
  *
  * Failures surface as `ApiError`.
  */
 import { getApiClient } from "@/lib/apiClient";
 import { getSupabaseClient } from "@/lib/supabaseClient";
-import type { PartyRoom, RoomMember, RoomSession } from "@/types";
+import type {
+  PartyRoom,
+  RoomMember,
+  RoomSession,
+  Unsubscribe,
+} from "@/types";
 
 import type {
   CreateRoomInput,
@@ -74,6 +81,50 @@ class RoomApiService implements RoomService {
       throw supabaseReadError("room_members");
     }
     return (data ?? []).map(toRoomMember);
+  }
+
+  // Direct Supabase access (approved: Realtime subscription + read-only reads).
+  // Subscribes to postgres_changes on room_members for this room and, on any
+  // INSERT/UPDATE/DELETE, re-runs listMembers and pushes the full mapped roster
+  // (simplest correct approach — avoids mapping partial change payloads). Primes
+  // the roster once immediately. Read failures are swallowed so the UI keeps the
+  // last known roster and never sees a throw.
+  subscribeMembers(
+    roomId: string,
+    onChange: (members: RoomMember[]) => void,
+  ): Unsubscribe {
+    const supabase = getSupabaseClient();
+
+    const pushRoster = async (): Promise<void> => {
+      try {
+        onChange(await this.listMembers(roomId));
+      } catch {
+        // Keep the last known roster; never throw into the UI.
+      }
+    };
+
+    // Prime immediately so the roster is populated before the first change.
+    void pushRoster();
+
+    const channel = supabase
+      .channel(`room_members:${roomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "room_members",
+          filter: `room_id=eq.${roomId}`,
+        },
+        () => {
+          void pushRoster();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
   }
 }
 
