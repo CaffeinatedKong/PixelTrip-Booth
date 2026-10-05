@@ -22,7 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, preferences, rooms, trips, votes
+from app.api.routes import dev, health, preferences, rooms, trips, votes
 from app.core.config import get_settings
 from app.exceptions import (
     BackendError,
@@ -58,6 +58,9 @@ app.include_router(rooms.router)
 app.include_router(preferences.router)
 app.include_router(votes.router)
 app.include_router(trips.router)
+if settings.enable_dev_endpoints:
+    # Testing-only routes (lock a test flight, add feedback); absent unless explicitly enabled.
+    app.include_router(dev.router)
 
 
 # ---------------------------------------------------------------------------

@@ -166,7 +166,8 @@ fi
 
 if [ "$RUN_BACKEND" -eq 1 ]; then
   info "Starting backend on :$BACKEND_PORT"
-  (cd "$BACKEND" && exec .venv/bin/python -m uvicorn app.main:app --reload --port "$BACKEND_PORT") >"$LOGS/backend.log" 2>&1 &
+  # ENABLE_DEV_ENDPOINTS mounts the testing-only /dev routes the test console uses.
+  (cd "$BACKEND" && ENABLE_DEV_ENDPOINTS=true exec .venv/bin/python -m uvicorn app.main:app --reload --port "$BACKEND_PORT") >"$LOGS/backend.log" 2>&1 &
   PIDS+=($!)
   if wait_for_url "http://localhost:$BACKEND_PORT/health" 30; then
     ok "Backend up"
@@ -178,7 +179,8 @@ fi
 
 if [ "$RUN_FRONTEND" -eq 1 ]; then
   info "Starting frontend on :$FRONTEND_PORT (service mode: $MODE)"
-  (cd "$FRONTEND" && NEXT_PUBLIC_SERVICE_MODE="$MODE" NEXT_PUBLIC_API_BASE_URL="http://localhost:$BACKEND_PORT" exec node_modules/.bin/next dev -p "$FRONTEND_PORT") >"$LOGS/frontend.log" 2>&1 &
+  # NEXT_PUBLIC_ENABLE_DEV_CONSOLE reveals the /dev/run test console (a 404 without it).
+  (cd "$FRONTEND" && NEXT_PUBLIC_SERVICE_MODE="$MODE" NEXT_PUBLIC_API_BASE_URL="http://localhost:$BACKEND_PORT" NEXT_PUBLIC_ENABLE_DEV_CONSOLE=true exec node_modules/.bin/next dev -p "$FRONTEND_PORT") >"$LOGS/frontend.log" 2>&1 &
   PIDS+=($!)
   if wait_for_url "http://localhost:$FRONTEND_PORT" 60; then
     ok "Frontend up"
@@ -191,6 +193,7 @@ fi
 echo
 echo "${B}PixelTrip Booth is running${N}"
 [ "$RUN_FRONTEND" -eq 1 ] && echo "  Frontend     http://localhost:$FRONTEND_PORT"
+[ "$RUN_FRONTEND" -eq 1 ] && [ "$RUN_BACKEND" -eq 1 ] && echo "  AI test console  http://localhost:$FRONTEND_PORT/dev/run   <- create a room and run the AI agents"
 if [ "$RUN_BACKEND" -eq 1 ]; then
   echo "  Backend      http://localhost:$BACKEND_PORT/health"
   echo "  API docs     http://localhost:$BACKEND_PORT/docs   <- try POST /rooms and /rooms/{room_code}/join here"

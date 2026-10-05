@@ -20,6 +20,7 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000";
 export interface ApiClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body: unknown): Promise<T>;
+  put<T>(path: string, body: unknown): Promise<T>;
 }
 
 function apiBaseUrl(): string {
@@ -47,7 +48,7 @@ function parseErrorEnvelope(
 }
 
 async function request<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -99,6 +100,7 @@ async function request<T>(
 const apiClient: ApiClient = {
   get: (path) => request("GET", path),
   post: (path, body) => request("POST", path, body),
+  put: (path, body) => request("PUT", path, body),
 };
 
 /** Return the FastAPI HTTP client bound to `NEXT_PUBLIC_API_BASE_URL`. */

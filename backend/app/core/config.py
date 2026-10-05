@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # --- Application metadata (safe defaults; not secret) ---
     app_name: str = Field(default="PixelArt Trip Planner API")
     environment: str = Field(default="development")
+    #: Mounts the ``/dev`` routes that exist only to test the AI agents by hand (lock a
+    #: test flight, add feedback). Off unless explicitly enabled; never set in production.
+    enable_dev_endpoints: bool = Field(default=False)
 
     # --- Supabase (service-role; backend only) ---
     # Required: the backend cannot serve any data operation without these.
