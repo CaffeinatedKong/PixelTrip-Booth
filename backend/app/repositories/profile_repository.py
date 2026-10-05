@@ -8,6 +8,7 @@ and ``guests`` supplies the display name that ``room_members`` does not carry.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from app.repositories.base import BaseRepository, require_text, require_uuid
@@ -142,3 +143,45 @@ class ProfileRepository(BaseRepository):
             "hard_constraints": hard_constraints or [],
         }
         return await self._insert_one(_PREFERENCES, data)
+
+    async def save_preferences(self, member_id: str, fields: dict[str, Any]) -> dict:
+        """Replace the member's preferences with ``fields`` and mark them submitted.
+
+        Updates the member's existing row (created on join). If the row is missing,
+        it is created instead, so a save never silently does nothing.
+        """
+        require_uuid(member_id, "member_id")
+        data = {**fields, "submitted_at": datetime.now(UTC).isoformat()}
+        try:
+            response = (
+                await self._client.table(_PREFERENCES)
+                .update(data)
+                .eq("member_id", member_id)
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="save_preferences", table=_PREFERENCES)
+        row = self._first_row(response)
+        if row is not None:
+            return row
+        return await self._insert_one(_PREFERENCES, {"member_id": member_id, **data})
+
+    async def save_character(
+        self, member_id: str, appearance: dict[str, Any], sprite_key: str | None
+    ) -> dict:
+        """Replace the member's character (created on join); create it if missing."""
+        require_uuid(member_id, "member_id")
+        data = {"appearance": appearance, "sprite_key": sprite_key}
+        try:
+            response = (
+                await self._client.table(_CHARACTERS)
+                .update(data)
+                .eq("member_id", member_id)
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="save_character", table=_CHARACTERS)
+        row = self._first_row(response)
+        if row is not None:
+            return row
+        return await self._insert_one(_CHARACTERS, {"member_id": member_id, **data})

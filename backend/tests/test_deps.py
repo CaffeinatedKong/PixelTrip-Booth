@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import inspect
 import typing
+from typing import Annotated
 
 import pytest
 from app.agents.llm import LLMClient
@@ -30,6 +31,9 @@ from app.repositories.selection_repository import SelectionRepository
 from app.repositories.trip_repository import TripRepository
 from app.repositories.vote_repository import VoteRepository
 from app.repositories.vote_session_repository import VoteSessionRepository
+from app.services.run_endpoint_service import RunEndpointService
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
 
 
 class _StubClient:
@@ -195,3 +199,43 @@ def test_agent_run_service_annotations_resolve_at_runtime() -> None:
     hints = typing.get_type_hints(deps.get_agent_run_service, include_extras=True)
 
     assert "llm_client" in hints
+
+
+def _probe_app(llm: LLMClient) -> TestClient:
+    """A tiny app over the *real* dependency graph, with only the edges stubbed.
+
+    Only the Supabase client and the LLM client are overridden, so every provider in
+    between (bundle, repositories, services) is the production one. This is what
+    proves the model actually reaches an agent run started over HTTP; the planning
+    API tests mock the whole service and cannot.
+    """
+    probe = FastAPI()
+
+    @probe.get("/run-service-llm")
+    async def run_service_llm(
+        service: Annotated[RunEndpointService, Depends(deps.get_run_endpoint_service)],
+    ) -> dict[str, bool]:
+        return {"carries_llm": service._bundle().llm is llm}
+
+    @probe.get("/bundle-llm")
+    async def bundle_llm(repos: deps.Repos) -> dict[str, bool]:
+        return {"carries_llm": repos.llm is llm}
+
+    probe.dependency_overrides[deps.get_supabase_client] = lambda: _StubClient()
+    probe.dependency_overrides[deps.get_llm_client] = lambda: llm
+    return TestClient(probe)
+
+
+def test_a_run_started_over_http_carries_the_llm_client() -> None:
+    """Without this wiring the model is silently never called and nodes always fall back."""
+    llm = LLMClient()
+
+    with _probe_app(llm) as client:
+        assert client.get("/run-service-llm").json() == {"carries_llm": True}
+
+
+def test_the_shared_repository_bundle_carries_the_llm_client() -> None:
+    llm = LLMClient()
+
+    with _probe_app(llm) as client:
+        assert client.get("/bundle-llm").json() == {"carries_llm": True}

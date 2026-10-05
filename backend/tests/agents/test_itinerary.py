@@ -712,3 +712,18 @@ async def test_the_drafted_itinerary_still_passes_through_the_normal_write_path(
     assert insert_call.payload["version"] == 1
     assert insert_call.payload["source"] == "build"
     assert insert_call.payload["change_summary"] is None
+
+
+async def test_a_destination_carrying_only_a_label_is_named_in_the_prompt_and_the_itinerary() -> (
+    None
+):
+    """Vote options carry ``label``, so a locked selection may have no ``title``."""
+    llm = llm_double(six_day_draft())
+    client = FakeSupabaseClient()
+    selections = [destination_row(data={"label": "Kyoto, Japan"}), flight_row()]
+
+    await build_with_llm(client, llm, selections=selections)
+
+    assert "Destination: Kyoto, Japan" in llm.generate_structured.await_args.kwargs["user_prompt"]
+    insert_call = next(c for c in client.calls_for("itinerary_versions") if c.op == "insert")
+    assert insert_call.payload["itinerary"]["title"] == "The Kyoto, Japan Quest"

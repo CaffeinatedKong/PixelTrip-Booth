@@ -165,6 +165,9 @@ def _build_proposal(options: list[FlightOption]) -> dict[str, Any]:
                 "price": option.price,
                 "duration_minutes": option.duration_minutes,
                 "stops": option.stops,
+                # The itinerary sizes the trip from depart_at / return_at.
+                "return_at": option.return_depart_at,
+                "return_arrive_at": option.return_arrive_at,
             },
         }
         for option in options[:MAX_RECOMMENDATION_ITEMS]
@@ -220,7 +223,9 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
         )
         return state
 
-    destination_name = (destination_selection.get("data") or {}).get("title", "")
+    destination_data = destination_selection.get("data") or {}
+    # Vote options (and so the locked selection) carry "label"; accept "title" too.
+    destination_name = destination_data.get("title") or destination_data.get("label") or ""
     search_params = {
         "origin": origin,
         "destination": destination_name,

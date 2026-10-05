@@ -1,9 +1,14 @@
 """Flight search, backed by the configured flight data provider.
 
-The provider itself is unspecified by the contracts — ``Settings.flight_api_url``
-points at whatever Dev C wires up for the deployment. This client only owns the
-HTTP shape (query params in, JSON out) and leaves validation to
-:class:`~app.agents.tools.base.FlightSearchResponse` in the base class.
+Two providers, chosen by ``Settings.flight_provider``:
+
+* ``generic`` (default): ``GET flight_api_url`` with the query params, returning the
+  ``{"options": [...]}`` shape directly. Used by the tests and by any adapter service.
+* ``skyscanner_rapidapi``: the Sky Scrapper listing on RapidAPI, translated by
+  :mod:`app.agents.tools.skyscanner_rapidapi`.
+
+Either way, validation is left to :class:`~app.agents.tools.base.FlightSearchResponse`
+in the base class.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from typing import Any
 import httpx
 
 from app.agents.tools.base import ExternalTool, FlightSearchResponse
+from app.agents.tools.skyscanner_rapidapi import SkyscannerRapidApiClient
 
 
 class FlightSearchTool(ExternalTool):
@@ -32,6 +38,9 @@ class FlightSearchTool(ExternalTool):
         Returns:
             The raw JSON response body.
         """
+        if self._settings.flight_provider == "skyscanner_rapidapi":
+            return await SkyscannerRapidApiClient(self._settings).search(**params)
+
         timeout = self._settings.external_tool_timeout_seconds
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(

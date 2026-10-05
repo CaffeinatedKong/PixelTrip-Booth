@@ -69,13 +69,38 @@ class CharacterSchema(_Base):
 class TravelPreferencesSchema(_Base):
     id: str = Field(examples=["2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"])
     member_id: str = Field(examples=[_MEMBER_ID])
-    available_dates: list = Field(examples=[["2025-12-20", "2025-12-27"]])
+    available_dates: list = Field(examples=[[{"start": "2026-12-20", "end": "2026-12-27"}]])
     destinations: list = Field(examples=[["Tokyo"]])
     travel_style: str | None = Field(default=None, examples=["relaxed"])
     budget: float | None = Field(default=None, ge=0, examples=[1500.0])
     interests: list = Field(examples=[["food", "museums"]])
     activities: list = Field(examples=[["hiking"]])
     hard_constraints: list = Field(examples=[["no red-eye flights"]])
+    origin: str | None = Field(default=None, examples=["SIN"])
+    submitted_at: str | None = Field(
+        default=None,
+        description="When the member last saved preferences; null until they first do.",
+        examples=["2026-10-04T09:30:00+00:00"],
+    )
+
+
+class TripSchema(_Base):
+    id: str = Field(examples=["8e7d6c5b-4a39-4281-9f0e-1d2c3b4a5f6e"])
+    room_id: str = Field(examples=[_ROOM_ID])
+    title: str = Field(examples=["Adventure Club Trip 2025"])
+    summary: str | None = Field(default=None, examples=[None])
+    status: Literal[
+        "trip_created",
+        "group_formed",
+        "preferences_collected",
+        "destination_selected",
+        "flight_selected",
+        "itinerary_generated",
+        "feedback_collected",
+        "refinement_completed",
+        "trip_approved",
+        "trip_exported",
+    ] = Field(examples=["trip_created"])
 
 
 # --- Requests -------------------------------------------------------------------------
@@ -101,6 +126,7 @@ class _RoomPayload(_Base):
     guest: GuestSchema
     character: CharacterSchema
     travel_preferences: TravelPreferencesSchema
+    trip: TripSchema
 
 
 class CreateRoomResponse(_RoomPayload):

@@ -127,6 +127,28 @@ def pick_winner(
     return winning_option, tie
 
 
+def selection_data(
+    winning_option: dict[str, Any], message: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Build the locked selection's ``data``: the winning option plus its full details.
+
+    Vote options carry only ``{id, label}``. The details later stages need — a
+    destination's title, a flight's ``depart_at`` / ``return_at`` / price — live on the
+    matching item of the linked recommendation message, so they are merged in here.
+    ``meta`` fields come first so the option's own ``id`` and ``label`` always win.
+    """
+    items = ((message or {}).get("content") or {}).get("items") or []
+    item = next((i for i in items if i.get("id") == winning_option.get("id")), None)
+    if item is None:
+        return dict(winning_option)
+    data = dict(item.get("meta") or {})
+    for key in ("title", "description", "imageUrl", "spriteKey"):
+        if item.get(key) is not None:
+            data[key] = item[key]
+    data.update(winning_option)
+    return data
+
+
 async def resolve_vote_session(
     repos: RepositoryBundle,
     vote_session: dict[str, Any],
@@ -166,7 +188,7 @@ async def resolve_vote_session(
     selection = await repos.selection_repo.upsert(
         room_id=vote_session["room_id"],
         kind=kind,
-        data=winning_option,
+        data=selection_data(winning_option, message),
         vote_session_id=vote_session["id"],
     )
     closed_session = await repos.vote_session_repo.close(vote_session["id"])

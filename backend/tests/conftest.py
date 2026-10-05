@@ -42,6 +42,13 @@ _TEST_ENV = {
 for _key, _value in _TEST_ENV.items():
     os.environ.setdefault(_key, _value)
 
+# Never read the developer's real backend/.env during tests: anything not pinned above
+# (e.g. FLIGHT_PROVIDER, EXTERNAL_TOOL_TIMEOUT_SECONDS) would otherwise leak in and make
+# results depend on whose machine runs them.
+from app.core.config import Settings  # noqa: E402
+
+Settings.model_config["env_file"] = None
+
 
 @pytest.fixture
 def anyio_backend():

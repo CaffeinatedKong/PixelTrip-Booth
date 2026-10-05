@@ -32,6 +32,7 @@ from fastapi import Depends
 from supabase import AsyncClient
 
 from app.agents.llm import LLMClient
+from app.agents.state import RepositoryBundle
 from app.db.supabase_client import create_supabase_client
 from app.repositories.agent_run_repository import AgentRunRepository
 from app.repositories.feedback_repository import FeedbackRepository
@@ -45,7 +46,11 @@ from app.repositories.trip_repository import TripRepository
 from app.repositories.vote_repository import VoteRepository
 from app.repositories.vote_session_repository import VoteSessionRepository
 from app.services.agent_run_service import AgentRunService
+from app.services.itinerary_service import ItineraryService
+from app.services.preference_service import PreferenceService
 from app.services.room_service import RoomService
+from app.services.run_endpoint_service import RunEndpointService
+from app.services.voting_endpoint_service import VotingEndpointService
 
 
 async def get_supabase_client() -> AsyncClient:
@@ -180,6 +185,83 @@ def get_room_service(
     room_repo: Annotated[RoomRepository, Depends(get_room_repo)],
     member_repo: Annotated[MemberRepository, Depends(get_member_repo)],
     profile_repo: Annotated[ProfileRepository, Depends(get_profile_repo)],
+    trip_repo: Annotated[TripRepository, Depends(get_trip_repo)],
 ) -> RoomService:
-    """Compose the room service from its three repositories."""
-    return RoomService(room_repo, member_repo, profile_repo)
+    """Compose the room service from its repositories."""
+    return RoomService(room_repo, member_repo, profile_repo, trip_repo)
+
+
+# --- Week-1 planning endpoint services ---------------------------------------
+
+
+def get_repository_bundle(
+    agent_run_repo: Annotated[AgentRunRepository, Depends(get_agent_run_repo)],
+    trip_repo: Annotated[TripRepository, Depends(get_trip_repo)],
+    room_repo: Annotated[RoomRepository, Depends(get_room_repo)],
+    message_repo: Annotated[MessageRepository, Depends(get_message_repo)],
+    member_repo: Annotated[MemberRepository, Depends(get_member_repo)],
+    profile_repo: Annotated[ProfileRepository, Depends(get_profile_repo)],
+    itinerary_version_repo: Annotated[
+        ItineraryVersionRepository, Depends(get_itinerary_version_repo)
+    ],
+    selection_repo: Annotated[SelectionRepository, Depends(get_selection_repo)],
+    feedback_repo: Annotated[FeedbackRepository, Depends(get_feedback_repo)],
+    vote_session_repo: Annotated[VoteSessionRepository, Depends(get_vote_session_repo)],
+    vote_repo: Annotated[VoteRepository, Depends(get_vote_repo)],
+    llm_client: Annotated[LLMClient, Depends(get_llm_client)],
+) -> RepositoryBundle:
+    """Provide the agent layer's bundle: all repositories on one client, plus the LLM."""
+    return RepositoryBundle(
+        trip_repo=trip_repo,
+        room_repo=room_repo,
+        message_repo=message_repo,
+        vote_session_repo=vote_session_repo,
+        vote_repo=vote_repo,
+        selection_repo=selection_repo,
+        itinerary_version_repo=itinerary_version_repo,
+        feedback_repo=feedback_repo,
+        agent_run_repo=agent_run_repo,
+        member_repo=member_repo,
+        profile_repo=profile_repo,
+        llm=llm_client,
+    )
+
+
+Repos = Annotated[RepositoryBundle, Depends(get_repository_bundle)]
+
+
+def get_preference_service(repos: Repos) -> PreferenceService:
+    """Provide the :class:`PreferenceService`."""
+    return PreferenceService(
+        repos.room_repo, repos.member_repo, repos.profile_repo, repos.trip_repo
+    )
+
+
+def get_voting_endpoint_service(repos: Repos) -> VotingEndpointService:
+    """Provide the :class:`VotingEndpointService`."""
+    return VotingEndpointService(repos)
+
+
+def get_run_endpoint_service(repos: Repos) -> RunEndpointService:
+    """Provide the :class:`RunEndpointService` (agent runs started from HTTP)."""
+    return RunEndpointService(
+        agent_run_repo=repos.agent_run_repo,
+        trip_repo=repos.trip_repo,
+        room_repo=repos.room_repo,
+        message_repo=repos.message_repo,
+        member_repo=repos.member_repo,
+        profile_repo=repos.profile_repo,
+        itinerary_version_repo=repos.itinerary_version_repo,
+        selection_repo=repos.selection_repo,
+        feedback_repo=repos.feedback_repo,
+        vote_session_repo=repos.vote_session_repo,
+        vote_repo=repos.vote_repo,
+        # Without this, runs started over HTTP would never call the model and
+        # silently take every node's deterministic fallback.
+        llm_client=repos.llm,
+    )
+
+
+def get_itinerary_service(repos: Repos) -> ItineraryService:
+    """Provide the :class:`ItineraryService`."""
+    return ItineraryService(repos.trip_repo, repos.itinerary_version_repo)

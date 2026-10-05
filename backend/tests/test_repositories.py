@@ -93,7 +93,9 @@ async def test_input_guards_reject_before_database_call(call):
 
 
 async def test_create_room_calls_rpc_once():
-    result = {key: {} for key in ("room", "guest", "member", "character", "travel_preferences")}
+    result = {
+        key: {} for key in ("room", "guest", "member", "character", "travel_preferences", "trip")
+    }
     client = fake_client(data=result)
 
     assert await RoomRepository(client).create_room_with_owner("Trip", "ABC123", "Gerald") == result

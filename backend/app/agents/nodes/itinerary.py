@@ -417,6 +417,17 @@ async def _draft_days_with_llm(
     return drafted
 
 
+def _destination_title(destination_selection: dict[str, Any]) -> str:
+    """Name the locked destination.
+
+    Vote options (and so the locked selection) carry ``label``; ``title`` is
+    accepted too. Used for both the itinerary itself and the model prompt, so the
+    two can never disagree about where the party is going.
+    """
+    data = destination_selection.get("data") or {}
+    return str(data.get("title") or data.get("label") or "the destination")
+
+
 def _build_itinerary(
     trip_id: str,
     room_id: str,
@@ -430,8 +441,7 @@ def _build_itinerary(
     ``drafted_items`` holds the LLM's validated items by day number; any day
     absent from it gets the deterministic placeholder.
     """
-    destination_data = destination_selection.get("data") or {}
-    destination_title = destination_data.get("title", "the destination")
+    destination_title = _destination_title(destination_selection)
     drafted_items = drafted_items or {}
 
     days = [
@@ -507,10 +517,10 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
         overlap = profile.get("availability_overlap") or []
         outbound = _parse_date(overlap[0]["start"]) if overlap else date.today()
 
-    destination_title = (destination_selection.get("data") or {}).get("title", "the destination")
+    destination_title = _destination_title(destination_selection)
     drafted_items = await _draft_days_with_llm(
         repos.llm,
-        destination=str(destination_title),
+        destination=destination_title,
         outbound=outbound,
         day_count=day_count,
         group_profile=profile,

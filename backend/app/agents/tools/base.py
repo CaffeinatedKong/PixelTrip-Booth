@@ -100,6 +100,10 @@ class FlightOption(_StrictModel):
     price: float = Field(ge=0)
     duration_minutes: int = Field(ge=0)
     stops: int = Field(ge=0)
+    #: Return leg of a round trip, when the provider searched one. ``price`` is then
+    #: the round-trip total; ``duration_minutes`` and ``stops`` describe the outbound leg.
+    return_depart_at: str | None = None
+    return_arrive_at: str | None = None
 
 
 class FlightSearchResponse(_StrictModel):
