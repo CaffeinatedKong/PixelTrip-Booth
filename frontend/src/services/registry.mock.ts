@@ -14,6 +14,7 @@ import { MockRoomService } from "./room.mock";
 import { MockChatService } from "./chat.mock";
 import { MockVoteService } from "./vote.mock";
 import { MockItineraryService } from "./itinerary.mock";
+import { MockPreferencesService } from "./preferences.mock";
 
 export function buildMockRegistry(): ServiceRegistry {
   return {
@@ -22,5 +23,6 @@ export function buildMockRegistry(): ServiceRegistry {
     chat: new MockChatService(),
     vote: new MockVoteService(),
     itinerary: new MockItineraryService(),
+    preferences: new MockPreferencesService(),
   };
 }

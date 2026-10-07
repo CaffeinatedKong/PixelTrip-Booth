@@ -94,7 +94,7 @@ export function SetupStageContent({
           </p>
         </PixelCard>
 
-        <CharacterCreator viewerDisplayName={session.member.displayName} />
+        <CharacterCreator session={session} />
       </div>
 
       {/* RIGHT column: the adventure sidebar (party panel = live roster). */}

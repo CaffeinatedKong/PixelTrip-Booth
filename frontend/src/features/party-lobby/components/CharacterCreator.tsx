@@ -10,14 +10,17 @@
  *
  * Steps: budget tier -> group role -> trip priorities -> destinations ->
  * activities -> adventure funds -> availability -> save. Origin is
- * always Singapore and is never requested. Owns {@link useCharacterDraft}; the
- * single `save()` seam keeps the character in in-memory React state only (no
- * persistence, no backend).
+ * always Singapore and is never requested. Owns {@link useCharacterDraft} for the
+ * in-memory draft, and on save submits the preferences + character to the backend
+ * via the preferences service (PUT .../preferences) through `getServices()`.
  */
 import { useState, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
 import { PixelCard } from "@/components/PixelCard";
+import { getServices } from "@/services";
+import { ApiError } from "@/lib/errors";
+import type { RoomSession } from "@/types";
 
 import { CharacterPreview } from "./CharacterPreview";
 import { OptionCardGroup } from "./OptionCardGroup";
@@ -31,11 +34,12 @@ import {
   GROUP_ROLES,
   TRIP_PRIORITIES,
 } from "../lib/characterOptions";
-import type { BudgetTier, DateRange, GroupRole } from "../types";
+import { FIXED_ORIGIN, type BudgetTier, type DateRange, type GroupRole } from "../types";
+import { toSessionCharacter } from "../lib/draft";
 
 export interface CharacterCreatorProps {
-  /** The viewer's display name, used to personalise the preview label. */
-  viewerDisplayName: string;
+  /** The active room session (supplies the room code + member id for saving). */
+  session: RoomSession;
 }
 
 const INPUT_CLASSES =
@@ -55,8 +59,9 @@ const PRIORITY_EMOJI: Readonly<Record<string, string>> = {
 };
 
 export function CharacterCreator({
-  viewerDisplayName,
+  session,
 }: CharacterCreatorProps): ReactElement {
+  const viewerDisplayName = session.member.displayName;
   const {
     draft,
     setBudgetTier,
@@ -71,11 +76,59 @@ export function CharacterCreator({
     save,
   } = useCharacterDraft();
 
-  // UI-only hint of whether the user has saved at least once this session.
+  // Submission state for the backend save (explicit loading + error handling).
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [savedOnce, setSavedOnce] = useState(false);
-  const handleSave = (): void => {
+
+  const handleSave = async (): Promise<void> => {
+    if (!canSave || submitting) {
+      return;
+    }
+    // Keep the in-memory session character in sync for the preview/sidebar.
     save();
-    setSavedOnce(true);
+
+    const character = toSessionCharacter(draft);
+    if (character === null) {
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await getServices().preferences.savePreferences({
+        roomCode: session.room.roomCode,
+        memberId: session.member.id,
+        // Payload-shaped preferences. tripPriorities map onto the contract's
+        // `interests`; activities are sent as plain name tags; origin is always
+        // Singapore and is never asked of the user.
+        availableDates: character.availableDates,
+        destinations: character.destinations,
+        travelStyle: null,
+        budget: character.budget,
+        interests: character.tripPriorities,
+        activities: character.activities,
+        hardConstraints: [],
+        origin: FIXED_ORIGIN,
+        character: {
+          appearance: {
+            role: character.groupRole,
+            budgetTier: character.budgetTier,
+            tripPriorities: character.tripPriorities,
+          },
+          spriteKey: character.character.spriteKey,
+        },
+      });
+      setSavedOnce(true);
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Could not save your traveller. Please try again.";
+      setSubmitError(message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const layers = resolveLayers(draft, LAYER_MAP);
@@ -253,13 +306,20 @@ export function CharacterCreator({
         <PixelButton
           variant="primary"
           type="button"
-          label="SAVE CHARACTER"
-          disabled={!canSave}
-          onClick={handleSave}
+          label={submitting ? "SAVING…" : "SAVE CHARACTER"}
+          disabled={!canSave || submitting}
+          onClick={() => {
+            void handleSave();
+          }}
         />
+        {submitError !== null ? (
+          <p role="alert" className="font-body text-danger">
+            {submitError}
+          </p>
+        ) : null}
         <p role="status" aria-live="polite" className="font-body text-muted">
           {savedOnce && sessionCharacter !== null
-            ? "Traveller saved for this session only — not saved to any server."
+            ? "Traveller saved and shared with your party."
             : ""}
         </p>
       </div>

@@ -15,6 +15,7 @@ import type { RoomService } from "./room.contract";
 import type { ChatService } from "./chat.contract";
 import type { VoteService } from "./vote.contract";
 import type { ItineraryService } from "./itinerary.contract";
+import type { PreferencesService } from "./preferences.contract";
 
 import { ConfigError } from "@/lib/errors";
 
@@ -42,6 +43,7 @@ export interface ServiceRegistry {
   chat: ChatService;
   vote: VoteService;
   itinerary: ItineraryService;
+  preferences: PreferencesService;
 }
 
 /** Re-exported so callers keep importing it from the service selector. */
