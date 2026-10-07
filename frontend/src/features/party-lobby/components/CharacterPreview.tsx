@@ -26,27 +26,18 @@ export interface CharacterPreviewProps {
   layers: readonly SpriteLayer[];
   /** Describes the character for the sprite's data/label (not an accessible name). */
   label: string;
-  /** Selected palette id, forwarded to tint the character's cloth pixels. */
-  palette?: string | null;
-  /** Selected travel-style id; rendered as an aura/effect around the character. */
-  travelStyle?: string | null;
 }
 
 export function CharacterPreview({
   layers,
   label,
-  palette = null,
-  travelStyle = null,
 }: CharacterPreviewProps): ReactElement {
-  const extraKeys = travelStyle ? [`style:${travelStyle}`] : undefined;
   return (
     <div className="flex items-center justify-center bg-bg-alt border-2 border-ink p-16">
       <CharacterSprite
         spriteKey="preview"
         label={label}
         layers={layers}
-        palette={palette}
-        extraKeys={extraKeys}
         size="lg"
         decorative
       />

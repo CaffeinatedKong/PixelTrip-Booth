@@ -4,7 +4,7 @@
  * Presentational only: renders a `fieldset`/`legend` with one shared `PixelButton`
  * (`variant="option"`) per option. Selection membership is reflected through
  * `aria-pressed`, and toggles are raised to the parent via `onToggle`. No data
- * fetching, no persistence. Reused for Interests and Destinations.
+ * fetching, no persistence. Reused for trip priorities, destinations, and activities.
  *
  * Token styling only — spacing and layout utilities map to design-system tokens;
  * no raw hex or arbitrary magic values.

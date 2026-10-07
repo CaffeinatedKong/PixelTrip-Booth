@@ -20,6 +20,7 @@ import { PixelCard } from "@/components/PixelCard";
 import { PixelButton } from "@/components/PixelButton";
 import { CharacterSprite } from "@/components/CharacterSprite";
 import type { PartyMemberView } from "../types";
+import { BASE_LAYER } from "../lib/characterLayers";
 
 export interface SidebarPartyPanelProps {
   /** The party members currently in the room. */
@@ -52,6 +53,7 @@ export function SidebarPartyPanel({
             <CharacterSprite
               spriteKey={member.spriteKey}
               label={`${member.displayName}'s character`}
+              layers={[BASE_LAYER]}
               size="sm"
               decorative
             />

@@ -1,67 +1,68 @@
 "use client";
 
 /**
- * CharacterCreator — the left-panel host of the 8-bit character creator.
+ * CharacterCreator — the RPG-style character/preference questionnaire (left panel).
  *
- * Owns {@link useCharacterDraft} (the feature's single stateful hook) and composes
- * the already-built feature components into one screen: a layered
- * {@link CharacterPreview}, five single-select {@link OptionCardGroup}s (Archetype,
- * Outfit, Accessory, Palette, Travel Style), two multi-select
- * {@link OptionTagGroup}s (Interests, Destinations), an {@link ActivityPriorityGroup}
- * for Activities, a {@link PreferenceFields} block, and the primary "SAVE CHARACTER"
- * {@link PixelButton}.
+ * The user builds a travel PERSONALITY rather than a detailed avatar. A polished
+ * 8-bit chibi sits at the top and reflects the chosen group-trip role; everything
+ * below is a concise, pixel-styled questionnaire whose answers are stored as
+ * structured trip-planning data (not encoded on the sprite).
  *
- * Presentational composition only: this component reimplements none of the group
- * UI and performs no data fetching, persistence, or service calls. All draft state
- * and the single `save()` projection seam live in the hook. While the save is
- * gated (`!canSave`) a visible explanatory line lists the still-required
- * appearance selections; after a successful save a polite `role="status"` live
- * region announces that the character is kept for this session only and is not
- * persisted to any server.
- *
- * Styling uses design-token utility classes only — never raw hex or arbitrary
- * magic values.
+ * Steps: budget tier -> group role -> trip priorities -> destinations ->
+ * activities -> adventure funds -> availability -> save. Origin is
+ * always Singapore and is never requested. Owns {@link useCharacterDraft}; the
+ * single `save()` seam keeps the character in in-memory React state only (no
+ * persistence, no backend).
  */
-import { type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
+import { PixelCard } from "@/components/PixelCard";
 
-import { ActivityPriorityGroup } from "./ActivityPriorityGroup";
 import { CharacterPreview } from "./CharacterPreview";
 import { OptionCardGroup } from "./OptionCardGroup";
 import { OptionTagGroup } from "./OptionTagGroup";
-import { PreferenceFields } from "./PreferenceFields";
 import { useCharacterDraft } from "../hooks/useCharacterDraft";
 import { LAYER_MAP, resolveLayers } from "../lib/characterLayers";
 import {
-  ACCESSORY,
   ACTIVITIES,
-  APPEARANCE,
+  BUDGET_TIERS,
   DESTINATIONS,
-  INTERESTS,
-  OUTFIT,
-  PALETTE,
-  TRAVEL_STYLE,
+  GROUP_ROLES,
+  TRIP_PRIORITIES,
 } from "../lib/characterOptions";
+import type { BudgetTier, DateRange, GroupRole } from "../types";
 
 export interface CharacterCreatorProps {
   /** The viewer's display name, used to personalise the preview label. */
   viewerDisplayName: string;
 }
 
+const INPUT_CLASSES =
+  "font-body text-ink bg-bg border-2 border-muted px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
+
+/** Emoji shown under the character for each selected trip priority. */
+const PRIORITY_EMOJI: Readonly<Record<string, string>> = {
+  food: "🍜",
+  scenery: "🏞️",
+  adventure: "🧗",
+  shopping: "🛍️",
+  nightlife: "🌃",
+  culture: "🏛️",
+  relaxation: "🧖",
+  "hidden-gems": "💎",
+  flexibility: "🔀",
+};
+
 export function CharacterCreator({
   viewerDisplayName,
 }: CharacterCreatorProps): ReactElement {
   const {
     draft,
-    select,
+    setBudgetTier,
+    setGroupRole,
     toggle,
-    toggleActivity,
-    setActivityPriority,
     setBudgetText,
-    setOrigin,
-    addConstraint,
-    removeConstraint,
     setDateRange,
     addDateRange,
     removeDateRange,
@@ -70,75 +71,89 @@ export function CharacterCreator({
     save,
   } = useCharacterDraft();
 
+  // UI-only hint of whether the user has saved at least once this session.
+  const [savedOnce, setSavedOnce] = useState(false);
+  const handleSave = (): void => {
+    save();
+    setSavedOnce(true);
+  };
+
   const layers = resolveLayers(draft, LAYER_MAP);
-
-  // The appearance core that gates saving (see `canSave` in ../lib/draft).
-  const missingSelections: readonly string[] = [
-    draft.archetype === null ? "archetype" : null,
-    draft.outfit === null ? "outfit" : null,
-    draft.accessory === null ? "accessory" : null,
-  ].filter((label): label is string => label !== null);
-
-  // Polite live-region copy. Empty before any successful save so assistive tech
-  // only announces once a session character exists.
-  const saveStatusMessage =
-    sessionCharacter !== null
-      ? "Character saved for this session only — not saved to any server."
-      : "";
+  const canRemoveRange = draft.availableDates.length > 1;
 
   return (
     <section className="flex flex-col gap-24">
       <header className="flex flex-col gap-8">
-        <h2 className="font-display text-ink">CREATE YOUR CHARACTER</h2>
+        <h2 className="font-display text-ink">CREATE YOUR TRAVELLER</h2>
         <p className="font-body text-muted">
-          Build your traveller for the adventure.
+          Answer a few quests to shape your travel personality.
         </p>
       </header>
 
-      <CharacterPreview
-        layers={layers}
-        palette={draft.palette}
-        travelStyle={draft.travelStyle}
-        label={`${viewerDisplayName}'s character`}
+      {/* 1. Character preview — reflects the chosen group role, with a row of
+          trip-priority emoji beneath it. */}
+      <PixelCard title="Your traveller">
+        <div className="flex flex-col items-center gap-16">
+          <CharacterPreview
+            layers={layers}
+            label={`${viewerDisplayName}'s traveller`}
+          />
+
+          {/* Trip-priority emoji badges under the character. */}
+          <div
+            className="flex min-h-8 flex-wrap items-center justify-center gap-8"
+            aria-label="Selected trip priorities"
+          >
+            {draft.tripPriorities.length > 0 ? (
+              draft.tripPriorities.map((id) => (
+                <span
+                  key={id}
+                  title={id}
+                  className="text-xl leading-none"
+                >
+                  {PRIORITY_EMOJI[id] ?? "⭐"}
+                </span>
+              ))
+            ) : (
+              <span className="font-body text-muted">
+                Pick trip priorities to show what you are after.
+              </span>
+            )}
+          </div>
+
+          <p className="font-body text-muted">
+            {draft.groupRole === null
+              ? "Choose your group role to bring your traveller to life."
+              : "This is you in the party."}
+          </p>
+        </div>
+      </PixelCard>
+
+      {/* 2. Budget tier (single-select). */}
+      <OptionCardGroup
+        legend="Choose your budget"
+        options={BUDGET_TIERS}
+        selectedId={draft.budgetTier}
+        onSelect={(id) => setBudgetTier(id as BudgetTier)}
       />
 
+      {/* 3. Group role (single-select) — drives the character. */}
       <OptionCardGroup
-        legend="Archetype"
-        options={APPEARANCE}
-        selectedId={draft.archetype}
-        onSelect={(id) => select("archetype", id)}
-      />
-      <OptionCardGroup
-        legend="Outfit"
-        options={OUTFIT}
-        selectedId={draft.outfit}
-        onSelect={(id) => select("outfit", id)}
-      />
-      <OptionCardGroup
-        legend="Accessory"
-        options={ACCESSORY}
-        selectedId={draft.accessory}
-        onSelect={(id) => select("accessory", id)}
-      />
-      <OptionCardGroup
-        legend="Palette"
-        options={PALETTE}
-        selectedId={draft.palette}
-        onSelect={(id) => select("palette", id)}
-      />
-      <OptionCardGroup
-        legend="Travel Style"
-        options={TRAVEL_STYLE}
-        selectedId={draft.travelStyle}
-        onSelect={(id) => select("travelStyle", id)}
+        legend="What role do you play in a group trip?"
+        options={GROUP_ROLES}
+        selectedId={draft.groupRole}
+        onSelect={(id) => setGroupRole(id as GroupRole)}
       />
 
+      {/* 4. Trip priorities (multi-select). */}
       <OptionTagGroup
-        legend="Interests"
-        options={INTERESTS}
-        selectedIds={draft.interests}
-        onToggle={(id) => toggle("interests", id)}
+        legend="What do you want most from this trip?"
+        options={TRIP_PRIORITIES}
+        selectedIds={draft.tripPriorities}
+        onToggle={(id) => toggle("tripPriorities", id)}
       />
+
+      {/* 5. Destinations (multi-select). */}
       <OptionTagGroup
         legend="Destinations"
         options={DESTINATIONS}
@@ -146,51 +161,106 @@ export function CharacterCreator({
         onToggle={(id) => toggle("destinations", id)}
       />
 
-      <ActivityPriorityGroup
+      {/* 7. Activities (multi-select tags). */}
+      <OptionTagGroup
         legend="Activities"
         options={ACTIVITIES}
-        selected={draft.activities}
-        onToggle={(name) => toggleActivity(name)}
-        onPriorityChange={(name, priority) =>
-          setActivityPriority(name, priority)
-        }
+        selectedIds={draft.activities}
+        onToggle={(id) => toggle("activities", id)}
       />
 
-      <PreferenceFields
-        budgetText={draft.budgetText}
-        onBudgetChange={setBudgetText}
-        origin={draft.origin}
-        onOriginChange={setOrigin}
-        hardConstraints={draft.hardConstraints}
-        onAddConstraint={addConstraint}
-        onRemoveConstraint={removeConstraint}
-        availableDates={draft.availableDates}
-        onDateRangeChange={setDateRange}
-        onAddDateRange={addDateRange}
-        onRemoveDateRange={removeDateRange}
-      />
+      {/* 8. Adventure funds (numeric). */}
+      <div className="flex flex-col gap-8">
+        <label htmlFor="pref-budget" className="font-display text-ink">
+          ADVENTURE FUNDS
+        </label>
+        <input
+          id="pref-budget"
+          type="number"
+          min={0}
+          value={draft.budgetText}
+          onChange={(event) => setBudgetText(event.target.value)}
+          placeholder="1500"
+          className={INPUT_CLASSES}
+        />
+      </div>
 
+      {/* 9. Availability dates. */}
+      <fieldset className="flex flex-col gap-16">
+        <legend className="font-display text-ink mb-8">AVAILABLE DATES</legend>
+        {draft.availableDates.map((range: DateRange, index: number) => {
+          const fromId = `avail-from-${index}`;
+          const untilId = `avail-until-${index}`;
+          return (
+            <div
+              key={index}
+              className="flex flex-col gap-8 border-2 border-muted px-16 py-8"
+            >
+              <div className="flex flex-col gap-8">
+                <label htmlFor={fromId} className="font-display text-ink">
+                  Available From
+                </label>
+                <input
+                  id={fromId}
+                  type="date"
+                  value={range.start}
+                  onChange={(event) =>
+                    setDateRange(index, { ...range, start: event.target.value })
+                  }
+                  className={INPUT_CLASSES}
+                />
+              </div>
+              <div className="flex flex-col gap-8">
+                <label htmlFor={untilId} className="font-display text-ink">
+                  Available Until
+                </label>
+                <input
+                  id={untilId}
+                  type="date"
+                  value={range.end}
+                  onChange={(event) =>
+                    setDateRange(index, { ...range, end: event.target.value })
+                  }
+                  className={INPUT_CLASSES}
+                />
+              </div>
+              {canRemoveRange ? (
+                <PixelButton
+                  variant="danger"
+                  label="Remove range"
+                  ariaLabel={`Remove availability range ${index + 1}`}
+                  onClick={() => removeDateRange(index)}
+                />
+              ) : null}
+            </div>
+          );
+        })}
+        <PixelButton
+          variant="secondary"
+          label="Add range"
+          ariaLabel="Add availability range"
+          onClick={addDateRange}
+        />
+      </fieldset>
+
+      {/* 10. Save. */}
       <div className="flex flex-col gap-8">
         {!canSave ? (
           <p className="font-body text-muted">
-            {missingSelections.length > 0
-              ? `Still required to save: ${missingSelections.join(", ")}.`
-              : "Choose an archetype, outfit, and accessory to save."}
+            Choose a budget and a group role to save your traveller.
           </p>
         ) : null}
-
         <PixelButton
           variant="primary"
           type="button"
           label="SAVE CHARACTER"
           disabled={!canSave}
-          onClick={save}
+          onClick={handleSave}
         />
-
-        {/* Polite live region: always present so assistive tech picks up the
-            change; empty until a save produces a session character. */}
         <p role="status" aria-live="polite" className="font-body text-muted">
-          {saveStatusMessage}
+          {savedOnce && sessionCharacter !== null
+            ? "Traveller saved for this session only — not saved to any server."
+            : ""}
         </p>
       </div>
     </section>

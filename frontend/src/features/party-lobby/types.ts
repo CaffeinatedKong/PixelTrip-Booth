@@ -1,22 +1,23 @@
 /**
  * Feature-local type definitions for the Lobby / Character Creation screen.
  *
- * These models are intentionally scoped to the `party-lobby` feature and MUST NOT
- * modify the shared contract types in `src/types`. They stay compatible *in spirit*
- * with the shared `Character` / `TravelPreferences` shapes so a real service could
- * later map between them, and `SessionCharacter` mirrors the backend request payload
- * 1:1 so a future service can pass it straight through.
+ * Scoped to the `party-lobby` feature; MUST NOT modify the shared contract types
+ * in `src/types`. `SessionCharacter` mirrors the backend request payload so a
+ * future service can pass it straight through. The feature is frontend-only and
+ * session-only: nothing here is persisted or sent while it remains in-memory.
  *
- * This feature is frontend-only and session-only: nothing defined here is persisted
- * or sent anywhere while the feature remains in-memory.
+ * The character creation experience is an RPG-style questionnaire: the user picks
+ * a budget tier, a group-trip ROLE (which drives the 8-bit character's identity),
+ * trip priorities, destinations, activities, adventure funds, and
+ * availability. Origin is always Singapore and is never requested from the user.
  */
 
 // ---------------------------------------------------------------------------
-// Composable layered avatar
+// Composable layered avatar (simplified: base + role only)
 // ---------------------------------------------------------------------------
 
-/** The named slots that make up a composable 8-bit character, back to front. */
-export type SpriteLayerSlot = "base" | "archetype" | "outfit" | "accessory";
+/** The named slots that make up the composable 8-bit character, back to front. */
+export type SpriteLayerSlot = "base" | "role";
 
 /** A single stacked visual layer for the composable avatar. */
 export interface SpriteLayer {
@@ -40,14 +41,23 @@ export type LayerMap = Readonly<
 >;
 
 // ---------------------------------------------------------------------------
-// Character draft (in-memory, not-yet-saved selection set)
+// Preference enums
 // ---------------------------------------------------------------------------
 
-/** A selected activity together with its party priority. */
-export interface ActivityDraft {
-  name: string;
-  priority: "must_have" | "optional";
-}
+/** Budget tier chosen in step 1 (coarse preference, not an exact amount). */
+export type BudgetTier = "low" | "medium" | "high";
+
+/** The group-trip role chosen in step 2; drives the character's visual identity. */
+export type GroupRole =
+  | "leader"
+  | "planner"
+  | "follower"
+  | "chill"
+  | "adventurer";
+
+// ---------------------------------------------------------------------------
+// Character draft (in-memory, not-yet-saved selection set)
+// ---------------------------------------------------------------------------
 
 /** A single availability range as ISO 8601 date strings. */
 export interface DateRange {
@@ -57,62 +67,59 @@ export interface DateRange {
 
 /** The in-memory, not-yet-saved selection set driving the left panel. */
 export interface CharacterDraft {
-  // Appearance selections.
-  archetype: string | null;
-  outfit: string | null;
-  accessory: string | null;
-  palette: string | null;
-  // Travel preferences.
-  travelStyle: string | null;
+  /** Step 1 — coarse budget tier. */
+  budgetTier: BudgetTier | null;
+  /** Step 2 — group-trip role; the primary personality/archetype input. */
+  groupRole: GroupRole | null;
+  /** Step 3 — what the user wants most from the trip (multi-select). */
+  tripPriorities: readonly string[];
+  /** Destination preferences (multi-select). */
   destinations: readonly string[];
-  interests: readonly string[];
-  activities: readonly ActivityDraft[];
-  hardConstraints: readonly string[];
-  origin: string;
-  /** Raw input text; parsed to a number for the model. */
+  /** Activities (multi-select tags). */
+  activities: readonly string[];
+  /** Raw adventure-funds input text; parsed to a number for the model. */
   budgetText: string;
   /** One or more availability ranges; UI starts with a single range. */
   availableDates: readonly DateRange[];
 }
 
 // ---------------------------------------------------------------------------
-// Session character (saved, session-only; payload-shaped 1:1)
+// Session character (saved, session-only; payload-shaped)
 // ---------------------------------------------------------------------------
 
-/** The appearance block of the saved character. */
-export interface SessionCharacterAppearance {
-  accessory: string;
-  outfit: string;
-  palette: string;
-}
+/** The fixed departure origin for every user (never requested). */
+export const FIXED_ORIGIN = "SIN";
 
 /**
- * The saved, session-only character. Shaped to match the request payload 1:1 so a
- * future service can pass it straight through (still never persisted here).
+ * The saved, session-only character. Shaped for the trip-planning backend. The
+ * character's visual identity is captured by `groupRole` + a derived `spriteKey`;
+ * travel preferences are structured data, not encoded on the sprite.
  */
 export interface SessionCharacter {
-  availableDates: readonly DateRange[];
-  destinations: readonly string[];
-  travelStyle: string | null;
-  budget: number | null;
-  interests: readonly string[];
-  activities: readonly ActivityDraft[];
-  hardConstraints: readonly string[];
+  /** Always "SIN" — all users depart from Singapore. */
   origin: string;
+  budgetTier: BudgetTier;
+  groupRole: GroupRole;
+  tripPriorities: readonly string[];
+  destinations: readonly string[];
+  activities: readonly string[];
+  budget: number | null;
+  availableDates: readonly DateRange[];
   character: {
-    appearance: SessionCharacterAppearance;
+    /** Sprite key derived from the group role (e.g. "role-leader"). */
     spriteKey: string;
   };
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar view models (from feature-local mock + optional RoomSession)
+// Sidebar view models
 // ---------------------------------------------------------------------------
 
 /** A single party member as shown in the adventure sidebar. */
 export interface PartyMemberView {
   id: string;
   displayName: string;
+  /** A short role/label line under the name. */
   archetypeLabel: string;
   spriteKey: string;
 }
