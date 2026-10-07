@@ -12,6 +12,7 @@ from app.exceptions import InvalidDisplayNameError, RoomCodeExhaustedError, Room
 from app.repositories.member_repository import MemberRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.room_repository import RoomRepository
+from app.repositories.trip_repository import TripRepository
 from app.schemas.room import (
     CharacterSchema,
     CreateRoomRequest,
@@ -22,10 +23,16 @@ from app.schemas.room import (
     PartyRoomSchema,
     RoomMemberSchema,
     TravelPreferencesSchema,
+    TripSchema,
 )
+from app.services.trip_progress import advance_trip, require_room_trip
 
 ROOM_CODE_ALPHABET = string.ascii_uppercase + string.digits
 ROOM_CODE_ATTEMPTS = 10
+
+#: A party counts as formed once this many members are in the room (spec 03,
+#: Assumptions 14).
+GROUP_FORMED_MEMBER_COUNT = 2
 
 
 def generate_room_code(length: int = 6) -> str:
@@ -41,10 +48,12 @@ class RoomService:
         room_repo: RoomRepository,
         member_repo: MemberRepository,
         profile_repo: ProfileRepository,
+        trip_repo: TripRepository,
     ) -> None:
         self._room_repo = room_repo
         self._member_repo = member_repo
         self._profile_repo = profile_repo
+        self._trip_repo = trip_repo
 
     async def create_room(self, request: CreateRoomRequest) -> CreateRoomResponse:
         """Create a room with the caller as owner, in one atomic database call."""
@@ -61,6 +70,7 @@ class RoomService:
             guest=GuestSchema.model_validate(result["guest"]),
             character=CharacterSchema.model_validate(result["character"]),
             travel_preferences=TravelPreferencesSchema.model_validate(result["travel_preferences"]),
+            trip=TripSchema.model_validate(result["trip"]),
         )
 
     async def join_room(self, room_code: str, request: JoinRoomRequest) -> JoinRoomResponse:
@@ -73,8 +83,9 @@ class RoomService:
         member = await self._member_repo.get_member_by_display_name(
             room_id=room["id"], display_name=request.display_name
         )
+        trip = await require_room_trip(self._trip_repo, room["id"])
         if member is not None:
-            return await self._resume_member(room, member)
+            return await self._resume_member(room, member, trip)
 
         if not request.display_name.strip():
             raise InvalidDisplayNameError("Display name must not be empty or whitespace-only.")
@@ -90,15 +101,19 @@ class RoomService:
         character = await self._profile_repo.create_character(member_id=member["id"], appearance={})
         prefs = await self._profile_repo.create_preferences(member_id=member["id"])
 
+        if len(await self._member_repo.list_by_room(room["id"])) >= GROUP_FORMED_MEMBER_COUNT:
+            trip = await advance_trip(self._trip_repo, trip, "group_formed")
+
         return JoinRoomResponse(
             room=PartyRoomSchema.model_validate(room),
             member=RoomMemberSchema.model_validate(member),
             guest=GuestSchema.model_validate(guest),
             character=CharacterSchema.model_validate(character),
             travel_preferences=TravelPreferencesSchema.model_validate(prefs),
+            trip=TripSchema.model_validate(trip),
         )
 
-    async def _resume_member(self, room: dict, member: dict) -> JoinRoomResponse:
+    async def _resume_member(self, room: dict, member: dict, trip: dict) -> JoinRoomResponse:
         """Return the existing member's records without creating anything."""
         guest = await self._profile_repo.get_guest_by_id(member["guest_id"])
         character = await self._profile_repo.get_character_by_member_id(member["id"])
@@ -109,6 +124,7 @@ class RoomService:
             guest=GuestSchema.model_validate(guest),
             character=CharacterSchema.model_validate(character) if character else None,
             travel_preferences=TravelPreferencesSchema.model_validate(prefs) if prefs else None,
+            trip=TripSchema.model_validate(trip),
         )
 
     async def _find_unused_room_code(self) -> str:

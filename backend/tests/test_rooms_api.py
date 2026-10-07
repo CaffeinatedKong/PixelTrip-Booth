@@ -5,13 +5,12 @@ exercise routing, validation, serialization, and error handling without Supabase
 """
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.api.deps import get_room_service
 from app.exceptions import MemberAlreadyExistsError, RepositoryError, RoomNotFoundError
 from app.main import app
 from app.schemas.room import CreateRoomResponse, JoinRoomResponse
 from app.services.room_service import RoomService
+from fastapi.testclient import TestClient
 
 ROOM_ID = "11111111-1111-4111-8111-111111111111"
 GUEST_ID = "22222222-2222-4222-8222-222222222222"
@@ -51,6 +50,12 @@ def payload(member_id: str, display_name: str, role: str) -> dict:
             "activities": [],
             "hard_constraints": [],
         },
+        "trip": {
+            "id": "77777777-7777-4777-8777-777777777777",
+            "room_id": ROOM_ID,
+            "title": "Adventure Club",
+            "status": "trip_created",
+        },
     }
 
 
@@ -76,7 +81,7 @@ def test_post_rooms_200(test_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"room", "member", "guest", "character", "travelPreferences"}
+    assert set(body) == {"room", "member", "guest", "character", "travelPreferences", "trip"}
     assert body["room"]["roomCode"] == "ABC123"
     assert body["member"]["role"] == "owner"
     service.create_room.assert_awaited_once()

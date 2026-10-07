@@ -1,39 +1,90 @@
-"""Member repository: room membership and case-insensitive identity lookup.
+"""Room-member data access.
 
-Identity rule: ``room_id + normalized display name`` -> room member, so "Gerald",
-"gerald", "GERald", and "  Gerald  " are the same member. The database enforces this with
-the generated ``room_members.normalized_name`` column and
-``UNIQUE(room_id, normalized_name)``; ``normalize_display_name`` applies the same rule in
-Python for lookups.
+Spec 03's agent layer uses this repository read-only: the Discovery node loads the
+party roster, ``AgentRunService`` resolves a triggering member's identity against
+it before trusting a client-supplied id (Requirement 22.2), and vote tallying
+restricts counts to members still present in the room (Requirement 17.6).
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from app.exceptions import MemberAlreadyExistsError, ValidationError
-from app.repositories.base import BaseRepository, require_text, require_uuid
+from app.repositories.base import (
+    BaseRepository,
+    is_unique_violation,
+    require_text,
+    require_uuid,
+)
 
-TABLE = "room_members"
-UNIQUE_VIOLATION = "23505"
+_TABLE = "room_members"
 ROLES = ("owner", "member")
 
 
 def normalize_display_name(name: str) -> str:
     """Trim, collapse internal whitespace to one space, and lower-case.
 
-    Must match the database column:
-    ``lower(btrim(regexp_replace(display_name, '\\s+', ' ', 'g')))``.
+    Identity rule: ``room_id + normalized display name`` -> room member, so "Gerald",
+    "gerald", "GERald", and "  Gerald  " are the same member. Must match the database
+    column: ``lower(btrim(regexp_replace(display_name, '\\s+', ' ', 'g')))``.
     """
     return " ".join(name.split()).lower()
 
 
-def _is_unique_violation(exc: Exception) -> bool:
-    return getattr(exc, "code", None) == UNIQUE_VIOLATION or UNIQUE_VIOLATION in str(exc)
-
-
 class MemberRepository(BaseRepository):
-    """Owns ``room_members`` operations."""
+    """Reads and writes ``room_members`` rows, including case-insensitive identity."""
+
+    async def get_by_id(self, member_id: str) -> dict[str, Any] | None:
+        """Return the member row for ``member_id``, or ``None`` if absent.
+
+        This is the resolution step Requirement 22.2 requires before any
+        client-supplied identity is persisted as authoritative.
+        """
+        try:
+            response = (
+                await self._client.table(_TABLE).select("*").eq("id", member_id).limit(1).execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="get_by_id", table=_TABLE)
+        return self._first_row(response)
+
+    async def list_by_room(self, room_id: str) -> list[dict[str, Any]]:
+        """Return every member row for ``room_id``, oldest first."""
+        try:
+            response = (
+                await self._client.table(_TABLE)
+                .select("*")
+                .eq("room_id", room_id)
+                .order("created_at")
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="list_by_room", table=_TABLE)
+        return self._rows(response)
+
+    async def count_by_room(self, room_id: str) -> int:
+        """Return the number of members in ``room_id``."""
+        return len(await self.list_by_room(room_id))
+
+    async def get_owner(self, room_id: str) -> dict[str, Any] | None:
+        """Return the room's ``role = 'owner'`` member row, or ``None``.
+
+        Used to authorize owner-triggered vote-session closure
+        (Requirement 17.12).
+        """
+        try:
+            response = (
+                await self._client.table(_TABLE)
+                .select("*")
+                .eq("room_id", room_id)
+                .eq("role", "owner")
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="get_owner", table=_TABLE)
+        return self._first_row(response)
 
     async def create_member(
         self,
@@ -60,16 +111,16 @@ class MemberRepository(BaseRepository):
             "role": role,
         }
         try:
-            response = await self._client.table(TABLE).insert(data).execute()
+            response = await self._client.table(_TABLE).insert(data).execute()
         except Exception as exc:
-            if _is_unique_violation(exc):
+            if is_unique_violation(exc):
                 raise MemberAlreadyExistsError(
                     "A member with that name already exists in this room."
                 ) from exc
-            self._handle_error(exc, operation="create_member", table=TABLE)
+            self._handle_error(exc, operation="create_member", table=_TABLE)
         if not response.data:
             self._handle_error(
-                ValueError("No data returned"), operation="create_member", table=TABLE
+                ValueError("No data returned"), operation="create_member", table=_TABLE
             )
         return response.data[0]
 
@@ -78,19 +129,19 @@ class MemberRepository(BaseRepository):
         require_uuid(room_id, "room_id")
         require_text(display_name, "display_name", 50)
         return await self._select_one(
-            TABLE, room_id=room_id, normalized_name=normalize_display_name(display_name)
+            _TABLE, room_id=room_id, normalized_name=normalize_display_name(display_name)
         )
 
     async def get_member_by_id(self, member_id: str) -> dict | None:
-        """Return the member with this id, or ``None``."""
+        """Return the member with this id, or ``None`` (rejects malformed ids)."""
         require_uuid(member_id, "member_id")
-        return await self._select_one(TABLE, id=member_id)
+        return await self._select_one(_TABLE, id=member_id)
 
     async def list_members_by_room(self, room_id: str) -> list[dict]:
-        """Return all members of the room (possibly empty)."""
+        """Return all members of the room (possibly empty; rejects malformed ids)."""
         require_uuid(room_id, "room_id")
         try:
-            response = await self._client.table(TABLE).select("*").eq("room_id", room_id).execute()
+            response = await self._client.table(_TABLE).select("*").eq("room_id", room_id).execute()
         except Exception as exc:
-            self._handle_error(exc, operation="list_members_by_room", table=TABLE)
+            self._handle_error(exc, operation="list_members_by_room", table=_TABLE)
         return response.data or []

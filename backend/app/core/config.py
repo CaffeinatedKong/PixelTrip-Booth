@@ -12,6 +12,7 @@ LangGraph/AI configuration is included by design.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
@@ -25,9 +26,11 @@ class ConfigError(RuntimeError):
 class Settings(BaseSettings):
     """Environment-driven application settings.
 
-    Add required fields (no default) as real integrations land; a missing
-    required value will raise a validation error surfaced via
-    :func:`get_settings` as a clear startup ``ConfigError``.
+    Required fields carry no default; a missing value raises a validation error
+    surfaced via :func:`get_settings` as a clear startup ``ConfigError``.
+
+    Secret-bearing fields are declared ``repr=False`` so they are omitted from
+    ``repr(settings)`` and any logging that stringifies the settings object.
     """
 
     model_config = SettingsConfigDict(
@@ -41,21 +44,71 @@ class Settings(BaseSettings):
     app_name: str = Field(default="PixelArt Trip Planner API")
     environment: str = Field(default="development")
 
-    # --- Supabase (required: no defaults, so a missing value fails fast) ---
-    supabase_url: str = Field(min_length=1)
-    # repr=False keeps the key out of str(settings), repr(settings), and logs.
-    supabase_service_role_key: str = Field(min_length=1, repr=False)
+    # --- Supabase (service-role; backend only) ---
+    # Required: the backend cannot serve any data operation without these.
+    supabase_url: str
+    supabase_service_role_key: str = Field(repr=False)
 
     # --- CORS ---
     frontend_url: str = Field(default="http://localhost:3000")
 
+    # --- Agent layer caps (spec 03, Requirement 12.10) ---
+    # Read through Settings rather than embedded as literals in node code.
+    iteration_cap: int = Field(default=3, ge=1, le=10)
+    tool_call_cap: int = Field(default=10, ge=1, le=50)
+
+    # --- External_Tool configuration (spec 03, Requirement 19.4) ---
+    external_tool_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    # "generic": GET flight_api_url returning {"options": [...]} directly.
+    # "skyscanner_rapidapi": the Sky Scrapper listing on RapidAPI; flight_api_key is the
+    # RapidAPI key and flight_api_url defaults to https://sky-scrapper.p.rapidapi.com.
+    flight_provider: Literal["generic", "skyscanner_rapidapi"] = Field(default="generic")
+    flight_api_url: str = Field(default="")
+    flight_api_key: str = Field(default="", repr=False)
+    flight_currency: str = Field(default="SGD", min_length=3, max_length=3)
+    flight_market: str = Field(default="en-US")
+    flight_country_code: str = Field(default="SG", min_length=2, max_length=2)
+    places_api_url: str = Field(default="")
+    places_api_key: str = Field(default="", repr=False)
+    weather_api_url: str = Field(default="")
+    weather_api_key: str = Field(default="", repr=False)
+
+    # --- LLM provider (spec 03) ---
+    ai_provider_api_key: str = Field(default="", repr=False)
+
     @field_validator("supabase_url")
     @classmethod
-    def _validate_supabase_url(cls, value: str) -> str:
-        parsed = urlparse(value)
+    def _validate_supabase_url(cls, v: str) -> str:
+        """Reject a URL missing a scheme or host so misconfiguration fails fast."""
+        parsed = urlparse(v)
         if not parsed.scheme or not parsed.netloc:
             raise ValueError("SUPABASE_URL must be a valid URL with a scheme and host")
-        return value
+        return v
+
+    @field_validator("supabase_service_role_key")
+    @classmethod
+    def _validate_service_role_key(cls, v: str) -> str:
+        """Reject an empty or whitespace-only service-role key."""
+        if not v.strip():
+            raise ValueError("SUPABASE_SERVICE_ROLE_KEY must not be empty")
+        return v
+
+    def secret_values(self) -> tuple[str, ...]:
+        """Return every configured secret value, for redaction checks.
+
+        Used by the agent layer's log/error redaction helpers and by the test
+        suite's secret-non-disclosure assertions (Requirement 20.5, 21.12).
+        Empty values are excluded so an unset optional credential never turns
+        into a vacuous ``"" in text`` match.
+        """
+        candidates = (
+            self.supabase_service_role_key,
+            self.flight_api_key,
+            self.places_api_key,
+            self.weather_api_key,
+            self.ai_provider_api_key,
+        )
+        return tuple(value for value in candidates if value.strip())
 
 
 @lru_cache

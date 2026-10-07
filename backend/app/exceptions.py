@@ -1,51 +1,86 @@
 """Domain exceptions for the PixelArt Trip Planner backend.
 
-Architecture rule: the backend owns all business mutations and all error translation.
-Repositories and services raise these exceptions; the handlers registered in
-``app/main.py`` are the only place that turns them into HTTP responses, and every error
-response uses the ``API_Error_Response`` envelope
-(``{"error": {"code": ..., "message": ...}}``). The frontend may only read/subscribe
-via the Supabase anon key.
+Every exception the backend raises for an expected, describable failure derives
+from :class:`BackendError`. Each subclass maps to exactly one HTTP status and one
+machine-readable error code; that mapping lives in ``app/main.py`` so routes and
+services never construct HTTP responses themselves.
 
-Messages passed to these exceptions must be safe, developer-authored text. Never pass raw
-Supabase payloads, SQL, constraint names, or secrets. ``RepositoryError`` messages are for
-internal logs only; its handler always returns a fixed message.
+Two rules hold for every exception in this module and its agent-layer extension
+(``app/agents/errors.py``):
 
-Note: ``ValidationError`` here is our repository input-guard error, not Pydantic's.
-Where both are needed, import Pydantic's as ``PydanticValidationError``.
+1. The message is developer-authored and display-safe. It never embeds a
+   service-role key, a raw Supabase payload, SQL text, LLM prompt or completion
+   text, or a Python traceback.
+2. Nothing here subclasses ``HTTPException``. Translation to HTTP is the
+   exception handlers' job alone.
 """
+
+from __future__ import annotations
 
 
 class BackendError(Exception):
-    """Base class for all domain errors."""
+    """Base class for every expected backend failure.
 
-
-class RoomNotFoundError(BackendError):
-    """No room matches the given room code. Maps to HTTP 404 ``ROOM_NOT_FOUND``."""
-
-
-class MemberAlreadyExistsError(BackendError):
-    """A member with the same name already exists in the room (concurrent join).
-
-    Maps to HTTP 409 ``MEMBER_ALREADY_EXISTS``.
+    Subclasses are grouped into HTTP status families by the handler registry in
+    ``app/main.py``. The agent layer extends this hierarchy rather than defining
+    a parallel one (spec 03, Requirement 20.7).
     """
 
 
-class InvalidDisplayNameError(BackendError):
-    """Display name is empty or whitespace-only. Maps to HTTP 422 ``INVALID_DISPLAY_NAME``."""
+# --- 404 family: a referenced record does not exist -------------------------
 
 
-class RepositoryError(BackendError):
-    """An unexpected Supabase/database failure. Maps to HTTP 503 ``DATABASE_ERROR``."""
+class NotFoundError(BackendError):
+    """Base for "the thing you named does not exist" failures (HTTP 404)."""
 
 
-class RoomCodeExhaustedError(BackendError):
-    """No unused room code was found after all retries. Maps to HTTP 500
-    ``ROOM_CODE_EXHAUSTED``."""
+class RoomNotFoundError(NotFoundError):
+    """No ``party_rooms`` row matches the supplied room code or id."""
+
+
+class VoteSessionNotFoundError(NotFoundError):
+    """No ``vote_sessions`` row matches the supplied id."""
+
+
+class RunNotFoundError(NotFoundError):
+    """No ``agent_runs`` row matches the supplied id."""
+
+
+# --- 409 family: a conflicting state or constraint violation ----------------
+
+
+class ConflictError(BackendError):
+    """Base for "this conflicts with existing state" failures (HTTP 409)."""
+
+
+class MemberAlreadyExistsError(ConflictError):
+    """A member with that display name already exists in the room."""
+
+
+# --- 422 family: the request or derived state is invalid --------------------
 
 
 class ValidationError(BackendError):
-    """A repository input guard rejected an argument before any database call.
+    """A value failed a domain guard before any database call (HTTP 422)."""
 
-    Maps to HTTP 422 ``VALIDATION_ERROR``.
+
+class InvalidDisplayNameError(ValidationError):
+    """A display name was empty, whitespace-only, or over the length limit."""
+
+
+# --- 503 family: a dependency is unavailable -------------------------------
+
+
+class RepositoryError(BackendError):
+    """A Supabase operation failed unexpectedly (HTTP 503).
+
+    The message names the operation and table for internal logs only. The HTTP
+    handler substitutes a fixed safe message so no database detail escapes.
     """
+
+
+# --- 500 family: internal invariants ---------------------------------------
+
+
+class RoomCodeExhaustedError(BackendError):
+    """Unique room-code generation exhausted its retry budget (HTTP 500)."""

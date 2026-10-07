@@ -23,7 +23,7 @@ Notes:
 There is no sign-up / sign-in. Identity is room-scoped: `room + normalized display name →
 room member` (see `supabase-architecture.md`).
 - Join input: `{ roomCode, displayName }`.
-- Join result: `{ room, member, guest, character, travelPreferences }` (shapes below). If a
+- Join result: `{ room, member, guest, character, travelPreferences, trip }` (shapes below). If a
   member with the same normalized display name (trimmed, case-insensitive) already exists in
   the room, that member is resumed instead of a new one being created. See "HTTP API" for
   the exact requests.
@@ -43,8 +43,13 @@ Shapes:
 - Character: `{ id, memberId, appearance, spriteKey? }` — `appearance` is a free-form
   object.
 - Travel preferences: `{ id, memberId, availableDates, destinations, travelStyle?,
-  budget?, interests, activities, hardConstraints }` — list fields are arrays (empty when
-  new); `budget` is a number ≥ 0.
+  budget?, interests, activities, hardConstraints, origin?, submittedAt? }` — list fields
+  are arrays (empty when new); `availableDates` is a list of `{ start, end }` date ranges;
+  `budget` is a number ≥ 0; `origin` is the departure city or
+  IATA code for flight search; `submittedAt` is null until the member first saves.
+- Trip: `{ id, roomId, title, summary?, status }` — one per room, created with it.
+  `status` is the trip state (see "Stage & State"); the `tripId` is what AI-run and
+  itinerary endpoints take.
 
 ## HTTP API (FastAPI)
 
@@ -89,7 +94,10 @@ Request:
   "character": { "id": "…", "memberId": "…", "appearance": {}, "spriteKey": null },
   "travelPreferences": { "id": "…", "memberId": "…", "availableDates": [],
                          "destinations": [], "travelStyle": null, "budget": null,
-                         "interests": [], "activities": [], "hardConstraints": [] }
+                         "interests": [], "activities": [], "hardConstraints": [],
+                         "origin": null, "submittedAt": null },
+  "trip": { "id": "…", "roomId": "…", "title": "Adventure Club Trip", "summary": null,
+            "status": "trip_created" }
 }
 ```
 
@@ -112,11 +120,153 @@ Request:
 - `displayName`: 1–50 characters, not blank.
 
 `200` response: same shape as `POST /rooms`. On resume, `character` and
-`travelPreferences` may be `null` if those records do not exist.
+`travelPreferences` may be `null` if those records do not exist. When a new member makes the
+room 2+ members, `trip.status` advances to `group_formed`.
 
 Errors: `404 ROOM_NOT_FOUND`, `409 MEMBER_ALREADY_EXISTS` (two people joined with the same
 name at the same moment — retrying the join resumes that member), `422 VALIDATION_ERROR`,
 `503 DATABASE_ERROR`.
+
+### `PUT /rooms/{roomCode}/members/{memberId}/preferences` — save preferences and character
+
+Replaces the member's preferences, and optionally their pixel character, in one call. All
+preference fields are optional; anything omitted is saved as empty (`[]` or `null`), so
+always send the full set. `character` is different: omit it to leave the character as it
+is, or send it to replace it.
+
+```json
+{
+  "availableDates": [{ "start": "2026-12-20", "end": "2026-12-27" }],
+  "destinations": ["Tokyo", "Seoul"],
+  "travelStyle": "relaxed",
+  "budget": 1500,
+  "interests": ["food", "museums"],
+  "activities": [{ "name": "hiking", "priority": "must_have" }, { "name": "spa", "priority": "optional" }],
+  "hardConstraints": ["no red-eye flights"],
+  "origin": "SIN",
+  "character": {
+    "appearance": { "outfit": "explorer", "palette": "forest", "accessory": "backpack" },
+    "spriteKey": "explorer-01"
+  }
+}
+```
+
+- `availableDates`: up to 20 inclusive date ranges `{ start, end }` (ISO `YYYY-MM-DD`,
+  `end` ≥ `start`). The AI plans for the dates where every member's ranges overlap.
+- `budget`: number ≥ 0 or `null`. The AI treats the lowest member budget as the party's
+  ceiling.
+- `travelStyle` (≤ 50 chars) and `origin` (≤ 100 chars): blank becomes `null`.
+- `activities`: objects with `"priority": "must_have"` (or `"required": true`) mark
+  must-haves; any other priority is treated as optional.
+- `origin`: also copied into `hardConstraints` as `{ "type": "departure_origin", "value": … }`,
+  which is where the AI's flight search currently reads it. Don't send that entry yourself.
+
+- `character.appearance`: free-form object from the character creator (up to 50 keys).
+  `character.spriteKey`: which sprite to draw (≤ 100 chars), or `null` for the default.
+
+`200` response: `{ "travelPreferences": { … }, "character": { … }, "trip": { … } }`
+(`character` is `null` only if the member has none). When this was the last
+member to save, `trip.status` is now `preferences_collected` (stage `discover`), and the
+party can start a `discovery` run.
+
+Errors: `404 ROOM_NOT_FOUND`, `422 MEMBER_NOT_RESOLVED` (member is not in this room),
+`422 VALIDATION_ERROR`, `503 DATABASE_ERROR`.
+
+### `POST /votes/{voteSessionId}/cast` — cast or change a vote
+
+Vote sessions are opened by the AI (a `discovery` run opens the destination vote, a
+`logistics` run the flight vote) and arrive as `kind: "vote"` messages; the frontend never
+opens one. Voting again replaces the member's previous choice.
+
+```json
+{ "memberId": "…", "optionId": "opt-tokyo" }
+```
+
+`200` response:
+
+```json
+{ "voteSessionId": "…", "memberId": "…", "optionId": "opt-tokyo", "sessionStatus": "open" }
+```
+
+When the last member votes, the session closes and resolves in the same call
+(`sessionStatus: "closed"`): the winner is saved as the destination or flight selection and
+`trip.status` advances to `destination_selected` or `flight_selected`. Ties go to the
+option listed first.
+
+Errors: `404 VOTE_SESSION_NOT_FOUND`, `422 VOTE_SESSION_CLOSED`, `422 MEMBER_NOT_RESOLVED`
+(member is not in the vote's room), `422 VALIDATION_ERROR` (including an `optionId` that is
+not one of the session's options), `503 DATABASE_ERROR`.
+
+### `POST /votes/{voteSessionId}/close` — close a vote early (owner only)
+
+```json
+{ "memberId": "…" }
+```
+
+Closes with the votes cast so far. `200` response:
+
+```json
+{
+  "voteSessionId": "…",
+  "category": "destination",
+  "winningOption": { "id": "opt-tokyo", "title": "Tokyo" },
+  "tie": null,
+  "selectionId": "…"
+}
+```
+
+`tie` is `{ "tiedOptionIds": [...], "tiedCount": 2 }` when a tie was broken by option order.
+
+Errors: as for cast; `422 MEMBER_NOT_RESOLVED` also means "not the room owner".
+
+### `POST /trips/{tripId}/runs` — start an AI run
+
+```json
+{ "runType": "discovery", "memberId": "…", "idempotencyKey": "discover-1" }
+```
+
+- `runType`: `"discovery" | "logistics" | "itinerary" | "refinement"`.
+- `idempotencyKey` (optional, 1–200 chars): send the same key on a retry to get the same
+  run back.
+
+`202` response: the run (see "AI Runs"), normally with `status: "pending"`. The AI works in
+the background, which can take a minute or more. If a run of this type is already in
+progress for the trip, or the key was used before, that existing run is returned instead.
+
+Follow progress through Realtime rather than waiting on the request: the AI posts a
+`text` message with `progress: true` when it starts, then its output (recommendation + vote,
+or a new itinerary version), or a `text` message if it failed. Poll `GET /runs/{runId}` if
+you need the final status.
+
+Errors: `404 TRIP_NOT_FOUND`, `409 IDEMPOTENCY_KEY_CONFLICT` (key already used for a
+different trip or run type), `422 MEMBER_NOT_RESOLVED`, `422 INVALID_IDEMPOTENCY_KEY`,
+`422 VALIDATION_ERROR`, `503 DATABASE_ERROR`. Failures inside the AI run itself do not
+fail this request; they show up as the run's `status: "failed"` with a safe `error`.
+
+### `GET /runs/{runId}` — AI run status
+
+`200` response: the run. Errors: `404 RUN_NOT_FOUND`, `503 DATABASE_ERROR`.
+
+### `GET /trips/{tripId}/itinerary/versions` — list itinerary versions
+
+`200` response: every version, oldest first (see "Itinerary Versioning"):
+
+```json
+[
+  { "id": "…", "tripId": "…", "version": 1, "source": "build", "status": "proposed",
+    "itinerary": { … }, "changeSummary": null }
+]
+```
+
+Errors: `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
+
+### Reading live data directly
+
+Writes always go through the endpoints above. For reads and live updates the frontend may
+use Supabase directly with the anon key (see `docs/SUPABASE_ACCESS_BOUNDARY.md`):
+`party_rooms`, `room_members`, `guests`, `characters`, `trips`, `messages`,
+`vote_sessions`, `votes`, `selections`, `itinerary_versions`, `feedback`.
+`travel_preferences` and `agent_runs` are backend-only.
 
 ### Errors
 
@@ -131,9 +281,16 @@ Branch on `code`, not `message`. `message` is safe to log; it is not tuned for d
 | Status | `code` | Meaning |
 |---|---|---|
 | 404 | `ROOM_NOT_FOUND` | No room with that code. |
+| 404 | `TRIP_NOT_FOUND` | No trip with that id. |
+| 404 | `VOTE_SESSION_NOT_FOUND` | No vote session with that id. |
+| 404 | `RUN_NOT_FOUND` | No AI run with that id. |
+| 409 | `IDEMPOTENCY_KEY_CONFLICT` | Key already used for a different trip or run type. |
 | 409 | `MEMBER_ALREADY_EXISTS` | Name taken in a race; retry the join. |
 | 422 | `VALIDATION_ERROR` | Bad body or path; `message` names the fields. |
 | 422 | `INVALID_DISPLAY_NAME` | Display name is blank. |
+| 422 | `MEMBER_NOT_RESOLVED` | `memberId` is not a member of this room (or not the owner, when closing a vote). |
+| 422 | `VOTE_SESSION_CLOSED` | The vote has already closed. |
+| 422 | `INVALID_IDEMPOTENCY_KEY` | Idempotency key is blank or too long. |
 | 500 | `ROOM_CODE_EXHAUSTED` | Could not find a free room code; retry. |
 | 500 | `INTERNAL_ERROR` | Unexpected server error. |
 | 503 | `DATABASE_ERROR` | Database unavailable or failed; retry later. |
@@ -159,6 +316,9 @@ An AI turn returns one or more messages sharing the envelope above. Common field
 - `text`: NPC dialogue string.
 - `options?`: array of `{ id, label }` for quick single-choice replies.
 - `stage?`: current planning stage indicator (drives progress UI).
+- `progress?`: `true` on the single "the guide is thinking" message an AI run posts when it
+  starts. Render it as a transient in-progress state, not a permanent chat line; it is
+  superseded by the run's output or failure message.
 
 ## Recommendation Response Structure
 
