@@ -1,29 +1,22 @@
 "use client";
 
 /**
- * SetupStageContent — the real, working content for the SETUP stage.
+ * SetupStageContent — SETUP as a chatbot-style flow (left column only; the shell
+ * owns the persistent sidebar).
  *
- * A responsive two-column SETUP screen: the left column holds the NPC dialogue,
- * the room-code share card, and the 8-bit {@link CharacterCreator}; the right
- * column is the {@link AdventureSidebar} whose PARTY panel reflects the LIVE room
- * roster (built from `members`). Presentational only: data in via props, events
- * out via callbacks, no data fetching. Trip name/dates/budget are feature-local
- * placeholders while the sidebar reads the live room code + roster from props.
- * Rendered both by {@link PartyWaitingRoom} (standalone page) and by the stage
- * shell inside the pipeline, so the two never diverge. Contains no page chrome
- * (no `<main>`, heading, or leave button) — the host component supplies those.
+ * MILO (the NPC guide) frames the stage in chat bubbles: share the room code,
+ * then build your travel character. The {@link CharacterCreator} lives inside a
+ * guide bubble; once the viewer saves, it swaps to the "waiting for the party"
+ * panel. Presentational: data in via props, events out via callbacks.
  */
 import { useRef, useState, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
-import { PixelCard } from "@/components/PixelCard";
-import { DialogueBox } from "@/components/DialogueBox";
 import type { RoomMember, RoomSession } from "@/types";
 
 import { CharacterCreator } from "./CharacterCreator";
-import { AdventureSidebar } from "./AdventureSidebar";
 import { WaitingForParty } from "./WaitingForParty";
-import { buildAdventureView } from "../lib/adventureMocks";
+import { StageChat, GuideSay, GuideMessage } from "./StageChat";
 
 export interface SetupStageContentProps {
   /** The active session (room + the viewer's member record). */
@@ -44,13 +37,7 @@ export function SetupStageContent({
 }: SetupStageContentProps): ReactElement {
   const codeRef = useRef<HTMLSpanElement>(null);
   const isHost = session.member.role === "owner";
-  // Party panel reflects the LIVE roster; trip/budget stay placeholder until a
-  // trip backend exists.
-  const adventure = buildAdventureView(members);
 
-  // The viewer is done with SETUP once they save; the authoritative signal is
-  // their own `stageReady` on the live roster, with a local flag for the instant
-  // right after save (before the roster round-trips).
   const [savedLocally, setSavedLocally] = useState(false);
   const viewer = members.find((m) => m.id === session.member.id);
   const viewerReady = savedLocally || viewer?.stageReady === true;
@@ -67,20 +54,19 @@ export function SetupStageContent({
   };
 
   return (
-    <div className="flex flex-col gap-24 lg:grid lg:grid-cols-[2fr_1fr] lg:items-start lg:gap-24">
-      {/* LEFT column: NPC dialogue, room-code share, and the character creator. */}
-      <div className="flex flex-col gap-24">
-        <DialogueBox
-          speaker="Travel Guide"
-          text={
-            isHost
-              ? "Your party is forming. Share the code below so others can join the quest."
-              : "You've joined the party. Build your character while the rest gather."
-          }
-        />
+    <StageChat>
+      <GuideSay
+        text={
+          isHost
+            ? "Welcome, host! Share your room code so the party can gather."
+            : "Welcome to the party! Build your travel character while the rest gather."
+        }
+      />
 
-        <PixelCard title="Party code">
-          <p className="font-body mb-8">Share this code with your party:</p>
+      {/* Room-code share lives in a guide bubble. */}
+      <GuideMessage>
+        <div className="flex flex-col gap-8">
+          <p className="font-body">Share this code with your party:</p>
           <div className="flex items-center gap-16">
             <span
               ref={codeRef}
@@ -100,21 +86,24 @@ export function SetupStageContent({
           <p role="status" aria-live="polite" className="font-body min-h-8 mt-8">
             {copied ? "Party code copied to clipboard." : ""}
           </p>
-        </PixelCard>
+        </div>
+      </GuideMessage>
 
-        {viewerReady ? (
+      <GuideSay text="Build your travel character. Your budget and interests shape where we go." />
+
+      {viewerReady ? (
+        <GuideMessage>
           <WaitingForParty members={members} what="character" />
-        ) : (
+        </GuideMessage>
+      ) : (
+        <GuideMessage>
           <CharacterCreator
             session={session}
             onSaved={() => setSavedLocally(true)}
           />
-        )}
-      </div>
-
-      {/* RIGHT column: the adventure sidebar (party panel = live roster). */}
-      <AdventureSidebar adventure={adventure} roomSession={session} />
-    </div>
+        </GuideMessage>
+      )}
+    </StageChat>
   );
 }
 

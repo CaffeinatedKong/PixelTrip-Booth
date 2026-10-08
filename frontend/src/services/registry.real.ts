@@ -18,6 +18,7 @@ import { chatApiService } from "./chat.api";
 import { voteApiService } from "./vote.api";
 import { itineraryApiService } from "./itinerary.api";
 import { preferencesApiService } from "./preferences.api";
+import { destinationApiService } from "./destination.api";
 
 export function buildRealRegistry(): ServiceRegistry {
   return {
@@ -27,5 +28,6 @@ export function buildRealRegistry(): ServiceRegistry {
     vote: voteApiService,
     itinerary: itineraryApiService,
     preferences: preferencesApiService,
+    destination: destinationApiService,
   };
 }

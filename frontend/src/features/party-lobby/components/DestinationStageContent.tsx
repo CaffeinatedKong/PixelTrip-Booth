@@ -1,35 +1,29 @@
 "use client";
 
 /**
- * DestinationStageContent — the DISCOVER stage: choose a destination.
+ * DestinationStageContent — DISCOVER as a chatbot-style flow (left column only;
+ * the shell owns the persistent sidebar).
  *
- * The AI will recommend destinations from the party's combined preferences; until
- * that backend lands this screen uses mock recommendation cards. The flow mirrors
- * SETUP: the viewer picks a destination, their choice locks, and we show
- * "waiting for other party members" (driven by the live roster `stageReady`) until
- * everyone has chosen and the party advances.
- *
- * Presentational: data in via props, no data fetching. The right column reuses the
- * {@link AdventureSidebar}; the left shows the destination picker or the waiting
- * panel. (Casting a real vote + advancing is wired when the voting backend is
- * connected here.)
+ * MILO (the NPC guide) frames the stage in chat bubbles, then presents the AI's
+ * destination matches as rich cards (fit score, why-it-fits, tags, trade-off).
+ * The owner's entry starts the discovery run; recommendations + the vote arrive
+ * live via Supabase Realtime through the destination service. Members pick one
+ * and submit a vote; after voting they see the waiting panel.
  */
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
-import { DialogueBox } from "@/components/DialogueBox";
-import { PixelCard } from "@/components/PixelCard";
+import { PixelButton } from "@/components/PixelButton";
+import { getServices } from "@/services";
+import { ApiError } from "@/lib/errors";
+import type { DiscoverState } from "@/services/destination.contract";
 import type { RoomMember, RoomSession } from "@/types";
 
-import { AdventureSidebar } from "./AdventureSidebar";
 import { WaitingForParty } from "./WaitingForParty";
-import { VibeCardGroup } from "./VibeCardGroup";
-import { buildAdventureView } from "../lib/adventureMocks";
-import { MOCK_DESTINATION_OPTIONS } from "../lib/destinationMocks";
+import { DestinationMatchCard } from "./DestinationMatchCard";
+import { StageChat, GuideSay, GuideMessage } from "./StageChat";
 
 export interface DestinationStageContentProps {
-  /** The active session (room + the viewer's member record). */
   session: RoomSession;
-  /** Live roster of members in the room. */
   members: RoomMember[];
 }
 
@@ -37,55 +31,146 @@ export function DestinationStageContent({
   session,
   members,
 }: DestinationStageContentProps): ReactElement {
-  const adventure = buildAdventureView(members);
+  const isOwner = session.member.role === "owner";
+  const roomId = session.room.id;
+  const memberId = session.member.id;
 
-  // Local single-pick (the backend vote/advance is wired later). Once the viewer
-  // confirms, their choice locks and the waiting panel is shown.
+  const [discover, setDiscover] = useState<DiscoverState>({
+    loading: true,
+    options: [],
+    vote: null,
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [voting, setVoting] = useState(false);
+  const [voted, setVoted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const viewer = members.find((m) => m.id === session.member.id);
-  const viewerReady = confirmed || viewer?.stageReady === true;
+  useEffect(() => {
+    let cancelled = false;
+    const service = getServices().destination;
+
+    const kickOff = async (): Promise<void> => {
+      if (!isOwner) return;
+      try {
+        const tripId = await service.getTripId(roomId);
+        if (tripId && !cancelled) {
+          await service.startDiscovery({ tripId, memberId });
+        }
+      } catch {
+        // Subscription still surfaces whatever the AI posts.
+      }
+    };
+    void kickOff();
+
+    const unsubscribe = service.subscribeDiscover(roomId, (state) => {
+      if (!cancelled) setDiscover(state);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [roomId, memberId, isOwner]);
+
+  const vote = discover.vote;
+  const viewer = members.find((m) => m.id === memberId);
+  const viewerReady = voted || viewer?.stageReady === true;
+
+  const handleVote = async (): Promise<void> => {
+    if (!vote || selectedId === null || voting) return;
+    setVoting(true);
+    setError(null);
+    try {
+      await getServices().destination.castVote({
+        voteSessionId: vote.voteSessionId,
+        memberId,
+        optionId: selectedId,
+      });
+      setVoted(true);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not cast your vote. Please try again.",
+      );
+    } finally {
+      setVoting(false);
+    }
+  };
+
+  // Prefer rich recommendation items (carry description/meta); fall back to the
+  // vote options (id + label only) if the recommendation message is not in yet.
+  const matches =
+    discover.options.length > 0
+      ? discover.options.map((o) => ({
+          id: o.id,
+          title: o.title,
+          description: o.description,
+          meta: o.meta,
+        }))
+      : (vote?.options ?? []).map((o) => ({ id: o.id, title: o.label }));
+
+  const hasMatches = matches.length > 0;
 
   return (
-    <div className="flex flex-col gap-24 lg:grid lg:grid-cols-[2fr_1fr] lg:items-start lg:gap-24">
-      {/* LEFT column: NPC prompt + destination picker (or waiting panel). */}
-      <div className="flex flex-col gap-24">
-        <DialogueBox
-          speaker="Travel Guide"
-          text="The party is formed! Where shall our journey begin? Cast your vote, adventurer."
-        />
+    <StageChat>
+      <GuideSay text="The party is formed! Let's find where your journey begins." />
+      <GuideSay text="Putting your group's preferences together — this takes a moment." />
 
-        {viewerReady ? (
-          <WaitingForParty members={members} what="destination pick" />
-        ) : (
-          <PixelCard title="Choose your destination">
-            <VibeCardGroup
-              legend="Where should the party go?"
-              mode="single"
-              options={MOCK_DESTINATION_OPTIONS}
-              selectedIds={selectedId ? [selectedId] : []}
-              onToggle={(id) =>
-                setSelectedId((prev) => (prev === id ? null : id))
-              }
-            />
-            <div className="mt-16">
-              <button
+      {viewerReady ? (
+        <GuideMessage>
+          <WaitingForParty members={members} what="destination vote" />
+        </GuideMessage>
+      ) : (
+        <GuideMessage>
+          <div className="flex flex-col gap-16">
+            <p className="font-body">
+              Here are your best destination matches. Pick the one that excites
+              you most, then lock in your vote.
+            </p>
+
+            {!hasMatches ? (
+              <div className="border-2 border-dashed border-muted p-16">
+                <p className="font-body text-muted">
+                  No destinations generated yet
+                  {discover.loading ? " — the guide is still thinking…" : "."}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-16">
+                {matches.map((option) => (
+                  <DestinationMatchCard
+                    key={option.id}
+                    option={option}
+                    selected={selectedId === option.id}
+                    onToggle={(id) =>
+                      setSelectedId((prev) => (prev === id ? null : id))
+                    }
+                  />
+                ))}
+              </div>
+            )}
+
+            {error !== null ? (
+              <p role="alert" className="font-body text-danger">
+                {error}
+              </p>
+            ) : null}
+
+            {hasMatches ? (
+              <PixelButton
+                variant="primary"
                 type="button"
-                disabled={selectedId === null}
-                onClick={() => setConfirmed(true)}
-                className="font-display border-2 border-ink px-16 py-8 bg-primary text-bg disabled:bg-muted disabled:text-bg-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-              >
-                LOCK IN VOTE
-              </button>
-            </div>
-          </PixelCard>
-        )}
-      </div>
-
-      {/* RIGHT column: the adventure sidebar (party panel = live roster). */}
-      <AdventureSidebar adventure={adventure} roomSession={session} />
-    </div>
+                label={voting ? "CASTING…" : "LOCK IN VOTE"}
+                disabled={selectedId === null || voting || vote === null}
+                onClick={() => {
+                  void handleVote();
+                }}
+              />
+            ) : null}
+          </div>
+        </GuideMessage>
+      )}
+    </StageChat>
   );
 }
 

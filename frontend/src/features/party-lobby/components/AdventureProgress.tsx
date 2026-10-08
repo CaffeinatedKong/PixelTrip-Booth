@@ -11,10 +11,10 @@
  * The current stage is distinguished from complete / upcoming stages by a text
  * status label and an `aria-current="step"` marker IN ADDITION TO a theme-token
  * color — color is never the only signal (Req 16.4). Its list is labelled
- * "Quest progress", not "Planning stages": the sidebar renders alongside the
- * shell's own `StageStepper` in the SETUP stage, and two lists sharing one
- * accessible name are indistinguishable to assistive tech. Built from the shared
- * {@link PixelCard} primitive; styling uses design-token utility classes only.
+ * "Quest progress" so assistive tech can address it distinctly. It is the only
+ * six-stage progress display on the screen (the sidebar is persistent across
+ * stages). Built from the shared {@link PixelCard} primitive; styling uses
+ * design-token utility classes only.
  */
 import type { ReactElement } from "react";
 

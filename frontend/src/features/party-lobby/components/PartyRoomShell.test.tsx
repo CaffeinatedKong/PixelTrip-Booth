@@ -1,10 +1,12 @@
 /**
- * Render tests for PartyRoomShell (the honest 6-stage pipeline shell).
+ * Render tests for PartyRoomShell (the room screen).
  *
- * Verifies the stepper lists all six stages, that the SETUP stage renders the
- * real waiting-room content (room code + roster) with SETUP marked current, and
- * that a non-SETUP planningStage renders the honest placeholder instead of any
- * setup content. Purely presentational — no service layer involved.
+ * The shell is a chatbot-style stage column on the left plus the persistent
+ * "YOUR ADVENTURE" sidebar on the right. There is no separate top stepper and no
+ * bottom party chat. These tests verify: SETUP renders the room code + character
+ * creator and the sidebar's six-stage quest progress; DISCOVER swaps the left
+ * column to the destination flow while the sidebar stays; the Leave action is
+ * always present.
  */
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -42,7 +44,7 @@ function makeSession(planningStage: PlanningStage): RoomSession {
 }
 
 describe("PartyRoomShell", () => {
-  it("renders the six-stage stepper with SETUP current and shows the real setup content", () => {
+  it("renders SETUP content plus the persistent sidebar quest progress", () => {
     render(
       <PartyRoomShell
         session={makeSession("setup")}
@@ -53,54 +55,29 @@ describe("PartyRoomShell", () => {
       />,
     );
 
-    // All six stages are listed.
-    const stepper = screen.getByRole("list", { name: "Planning stages" });
-    expect(within(stepper).getAllByRole("listitem")).toHaveLength(6);
-
-    // SETUP is the current step.
-    const current = within(stepper).getByText("Gather the party").closest("li");
-    expect(current).toHaveAttribute("aria-current", "step");
-
-    // Real setup content is shown: the room code and the live roster.
+    // Room code + character creator are the SETUP content.
     expect(screen.getByTestId("room-code")).toHaveTextContent("ABC123");
-    const roster = screen.getByRole("list", { name: "Party members" });
-    expect(within(roster).getByText("Aria")).toBeInTheDocument();
-
-    // No placeholder for the real stage.
-    expect(screen.queryByTestId("stage-placeholder")).not.toBeInTheDocument();
-
-    // The local-only character creator and chat panel render alongside setup.
-    expect(
-      screen.getByRole("list", { name: "Party chat messages" }),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /save character/i }),
     ).toBeInTheDocument();
-  });
 
-  it("gives the sidebar's quest progress its own name, distinct from the stepper", () => {
-    render(
-      <PartyRoomShell
-        session={makeSession("setup")}
-        members={[makeMember()]}
-        copied={false}
-        onCopyCode={vi.fn()}
-        onLeave={vi.fn()}
-      />,
-    );
-
-    // Both six-stage lists are on screen in SETUP; each must be addressable by name.
-    const stepper = screen.getByRole("list", { name: "Planning stages" });
+    // The sidebar quest progress is the only six-stage list (no top stepper).
     const sidebar = screen.getByRole("list", { name: "Quest progress" });
-
-    expect(stepper).not.toBe(sidebar);
     expect(within(sidebar).getAllByRole("listitem")).toHaveLength(6);
     expect(
       within(sidebar).getByText("Gather the party").closest("li"),
     ).toHaveAttribute("aria-current", "step");
+    expect(
+      screen.queryByRole("list", { name: "Planning stages" }),
+    ).not.toBeInTheDocument();
+
+    // Leave action present.
+    expect(
+      screen.getByRole("button", { name: /leave party/i }),
+    ).toBeInTheDocument();
   });
 
-  it("renders an honest placeholder for a non-setup stage and no setup content", () => {
+  it("swaps the left column to the destination flow in DISCOVER, sidebar stays", () => {
     render(
       <PartyRoomShell
         session={makeSession("discover")}
@@ -111,30 +88,16 @@ describe("PartyRoomShell", () => {
       />,
     );
 
-    // The placeholder is shown for the stubbed stage.
-    const placeholder = screen.getByTestId("stage-placeholder");
-    expect(placeholder).toBeInTheDocument();
-    expect(placeholder).toHaveTextContent(/isn't open yet/i);
-
-    // No real setup content leaks through.
+    // SETUP content is gone.
     expect(screen.queryByTestId("room-code")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("list", { name: "Party members" }),
-    ).not.toBeInTheDocument();
-
-    // Neither the chat panel nor the character creator render off-setup.
-    expect(
-      screen.queryByRole("list", { name: "Party chat messages" }),
-    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /save character/i }),
     ).not.toBeInTheDocument();
 
-    // DISCOVER is marked current in the stepper.
-    const stepper = screen.getByRole("list", { name: "Planning stages" });
-    const current = within(stepper)
-      .getByText("Choose the destination")
-      .closest("li");
-    expect(current).toHaveAttribute("aria-current", "step");
+    // The sidebar's quest progress still renders, with DISCOVER current.
+    const sidebar = screen.getByRole("list", { name: "Quest progress" });
+    expect(
+      within(sidebar).getByText("Choose the destination").closest("li"),
+    ).toHaveAttribute("aria-current", "step");
   });
 });
