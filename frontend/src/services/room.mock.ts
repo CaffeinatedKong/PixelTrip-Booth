@@ -161,6 +161,19 @@ export class MockRoomService implements RoomService {
     };
   }
 
+  // Minimal stub: emits the fixture room once (mock mode has no live stage
+  // changes). The real implementation subscribes to party_rooms over Realtime.
+  subscribeRoom(
+    roomId: string,
+    onChange: (room: PartyRoom) => void,
+  ): Unsubscribe {
+    const room = this.rooms.get(roomId);
+    if (room) onChange(room);
+    return () => {
+      // no-op
+    };
+  }
+
   private addMember(
     room: PartyRoom,
     displayName: string,
@@ -177,6 +190,7 @@ export class MockRoomService implements RoomService {
       guestId: guest.id,
       displayName,
       role,
+      stageReady: false,
     };
     const character = newCharacter(member.id);
     const travelPreferences = newPreferences(member.id);

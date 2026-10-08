@@ -19,9 +19,10 @@ import type { ReactElement } from "react";
 import { PixelButton } from "@/components/PixelButton";
 import type { RoomMember, RoomSession } from "@/types";
 
-import { buildStageSteps, isStageStubbed, stageMeta } from "../lib/stages";
+import { buildStageSteps, stageMeta } from "../lib/stages";
 import { ChatPanel } from "./ChatPanel";
 import { SetupStageContent } from "./SetupStageContent";
+import { DestinationStageContent } from "./DestinationStageContent";
 import { StagePlaceholder } from "./StagePlaceholder";
 import { StageStepper } from "./StageStepper";
 
@@ -57,9 +58,7 @@ export function PartyRoomShell({
 
         <StageStepper steps={steps} />
 
-        {isStageStubbed(activeStage) ? (
-          <StagePlaceholder stage={stageMeta(activeStage)} />
-        ) : (
+        {activeStage === "setup" ? (
           <>
             <SetupStageContent
               session={session}
@@ -69,6 +68,13 @@ export function PartyRoomShell({
             />
             <ChatPanel viewerDisplayName={session.member.displayName} />
           </>
+        ) : activeStage === "discover" ? (
+          <>
+            <DestinationStageContent session={session} members={members} />
+            <ChatPanel viewerDisplayName={session.member.displayName} />
+          </>
+        ) : (
+          <StagePlaceholder stage={stageMeta(activeStage)} />
         )}
 
         <PixelButton variant="danger" label="Leave party" onClick={onLeave} />

@@ -47,4 +47,17 @@ export interface RoomService {
     roomId: string,
     onChange: (members: RoomMember[]) => void,
   ): Unsubscribe;
+  /**
+   * Live updates to the room row itself (notably `planningStage`). Calls
+   * `onChange` with the full {@link PartyRoom} whenever it changes, and once
+   * immediately to prime it. Returns an {@link Unsubscribe}.
+   *
+   * The mock polls on an interval; the real implementation uses a Supabase
+   * Realtime channel on `party_rooms`. Read failures are swallowed (the last
+   * known room is kept) — this never throws into the UI.
+   */
+  subscribeRoom(
+    roomId: string,
+    onChange: (room: PartyRoom) => void,
+  ): Unsubscribe;
 }

@@ -20,6 +20,7 @@ function makeMember(overrides: Partial<RoomMember> = {}): RoomMember {
     guestId: "guest-1",
     displayName: "Aria",
     role: "owner",
+    stageReady: false,
     ...overrides,
   };
 }

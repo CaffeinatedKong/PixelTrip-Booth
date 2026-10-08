@@ -23,8 +23,6 @@ import { ApiError } from "@/lib/errors";
 import type { RoomSession } from "@/types";
 
 import { CharacterPreview } from "./CharacterPreview";
-import { OptionCardGroup } from "./OptionCardGroup";
-import { OptionTagGroup } from "./OptionTagGroup";
 import { VibeCardGroup } from "./VibeCardGroup";
 import { useCharacterDraft } from "../hooks/useCharacterDraft";
 import { LAYER_MAP, resolveLayers } from "../lib/characterLayers";
@@ -41,6 +39,8 @@ import { toSessionCharacter } from "../lib/draft";
 export interface CharacterCreatorProps {
   /** The active room session (supplies the room code + member id for saving). */
   session: RoomSession;
+  /** Called after the character is successfully saved to the backend. */
+  onSaved?: () => void;
 }
 
 const INPUT_CLASSES =
@@ -61,6 +61,7 @@ const PRIORITY_EMOJI: Readonly<Record<string, string>> = {
 
 export function CharacterCreator({
   session,
+  onSaved,
 }: CharacterCreatorProps): ReactElement {
   const viewerDisplayName = session.member.displayName;
   const {
@@ -122,6 +123,7 @@ export function CharacterCreator({
         },
       });
       setSavedOnce(true);
+      onSaved?.();
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -185,23 +187,25 @@ export function CharacterCreator({
       </PixelCard>
 
       {/* 2. Budget tier (single-select). */}
-      <OptionCardGroup
+      <VibeCardGroup
         legend="Choose your budget"
+        mode="single"
         options={BUDGET_TIERS}
-        selectedId={draft.budgetTier}
-        onSelect={(id) => setBudgetTier(id as BudgetTier)}
+        selectedIds={draft.budgetTier ? [draft.budgetTier] : []}
+        onToggle={(id) => setBudgetTier(id as BudgetTier)}
       />
 
       {/* 3. Group role (single-select) — drives the character. */}
-      <OptionCardGroup
+      <VibeCardGroup
         legend="What role do you play in a group trip?"
+        mode="single"
         options={GROUP_ROLES}
-        selectedId={draft.groupRole}
-        onSelect={(id) => setGroupRole(id as GroupRole)}
+        selectedIds={draft.groupRole ? [draft.groupRole] : []}
+        onToggle={(id) => setGroupRole(id as GroupRole)}
       />
 
       {/* 4. Trip priorities (multi-select). */}
-      <OptionTagGroup
+      <VibeCardGroup
         legend="What do you want most from this trip?"
         options={TRIP_PRIORITIES}
         selectedIds={draft.tripPriorities}
@@ -216,8 +220,8 @@ export function CharacterCreator({
         onToggle={(id) => toggle("destinations", id)}
       />
 
-      {/* 7. Activities (multi-select tags). */}
-      <OptionTagGroup
+      {/* 7. Activities (multi-select). */}
+      <VibeCardGroup
         legend="Activities"
         options={ACTIVITIES}
         selectedIds={draft.activities}

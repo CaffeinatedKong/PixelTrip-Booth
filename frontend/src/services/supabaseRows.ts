@@ -10,7 +10,8 @@ import type { Guest, PartyRoom, RoomMember } from "@/types";
 
 /** Columns selected for each table — exactly the contract fields. */
 export const ROOM_COLUMNS = "id, room_code, name, status, planning_stage";
-export const MEMBER_COLUMNS = "id, room_id, guest_id, display_name, role";
+export const MEMBER_COLUMNS =
+  "id, room_id, guest_id, display_name, role, stage_ready";
 export const GUEST_COLUMNS = "id, display_name, avatar_url";
 
 export interface RoomRow {
@@ -27,6 +28,7 @@ export interface MemberRow {
   guest_id: string;
   display_name: string;
   role: RoomMember["role"];
+  stage_ready: boolean | null;
 }
 
 export interface GuestRow {
@@ -52,6 +54,7 @@ export function toRoomMember(row: MemberRow): RoomMember {
     guestId: row.guest_id,
     displayName: row.display_name,
     role: row.role,
+    stageReady: row.stage_ready ?? false,
   };
 }
 

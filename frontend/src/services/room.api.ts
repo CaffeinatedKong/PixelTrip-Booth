@@ -126,6 +126,49 @@ class RoomApiService implements RoomService {
       void supabase.removeChannel(channel);
     };
   }
+
+  // Direct Supabase access (approved: Realtime subscription + read-only reads).
+  // Subscribes to postgres_changes on party_rooms for this room and, on any
+  // change (e.g. planning_stage advancing), re-reads via getRoom and pushes the
+  // full mapped room. Primes once immediately. Read failures are swallowed so the
+  // UI keeps the last known room and never sees a throw.
+  subscribeRoom(
+    roomId: string,
+    onChange: (room: PartyRoom) => void,
+  ): Unsubscribe {
+    const supabase = getSupabaseClient();
+
+    const pushRoom = async (): Promise<void> => {
+      try {
+        const room = await this.getRoom(roomId);
+        if (room) onChange(room);
+      } catch {
+        // Keep the last known room; never throw into the UI.
+      }
+    };
+
+    void pushRoom();
+
+    const channel = supabase
+      .channel(`party_rooms:${roomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "party_rooms",
+          filter: `id=eq.${roomId}`,
+        },
+        () => {
+          void pushRoom();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }
 }
 
 /** Singleton real Room service. */

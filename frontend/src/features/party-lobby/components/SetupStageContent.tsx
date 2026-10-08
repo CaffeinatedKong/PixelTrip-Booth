@@ -13,7 +13,7 @@
  * shell inside the pipeline, so the two never diverge. Contains no page chrome
  * (no `<main>`, heading, or leave button) — the host component supplies those.
  */
-import { useRef, type ReactElement } from "react";
+import { useRef, useState, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
 import { PixelCard } from "@/components/PixelCard";
@@ -22,6 +22,7 @@ import type { RoomMember, RoomSession } from "@/types";
 
 import { CharacterCreator } from "./CharacterCreator";
 import { AdventureSidebar } from "./AdventureSidebar";
+import { WaitingForParty } from "./WaitingForParty";
 import { buildAdventureView } from "../lib/adventureMocks";
 
 export interface SetupStageContentProps {
@@ -46,6 +47,13 @@ export function SetupStageContent({
   // Party panel reflects the LIVE roster; trip/budget stay placeholder until a
   // trip backend exists.
   const adventure = buildAdventureView(members);
+
+  // The viewer is done with SETUP once they save; the authoritative signal is
+  // their own `stageReady` on the live roster, with a local flag for the instant
+  // right after save (before the roster round-trips).
+  const [savedLocally, setSavedLocally] = useState(false);
+  const viewer = members.find((m) => m.id === session.member.id);
+  const viewerReady = savedLocally || viewer?.stageReady === true;
 
   const selectCode = (): void => {
     const node = codeRef.current;
@@ -94,7 +102,14 @@ export function SetupStageContent({
           </p>
         </PixelCard>
 
-        <CharacterCreator session={session} />
+        {viewerReady ? (
+          <WaitingForParty members={members} what="character" />
+        ) : (
+          <CharacterCreator
+            session={session}
+            onSaved={() => setSavedLocally(true)}
+          />
+        )}
       </div>
 
       {/* RIGHT column: the adventure sidebar (party panel = live roster). */}

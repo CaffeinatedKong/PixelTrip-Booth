@@ -31,6 +31,7 @@ export const mockRoomMembers: readonly RoomMember[] = [
     guestId: mockGuest.id,
     displayName: mockGuest.displayName,
     role: "owner",
+    stageReady: false,
   },
   {
     id: "55555555-5555-4555-8555-555555555555",
@@ -38,6 +39,7 @@ export const mockRoomMembers: readonly RoomMember[] = [
     guestId: mockGuest2.id,
     displayName: mockGuest2.displayName,
     role: "member",
+    stageReady: false,
   },
 ];
 

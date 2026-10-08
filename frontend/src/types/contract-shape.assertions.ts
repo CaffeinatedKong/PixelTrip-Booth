@@ -109,6 +109,7 @@ const _roomMember = {
   guestId: "",
   displayName: "",
   role: "member",
+  stageReady: false,
 } satisfies RoomMember;
 type _MemberRole = Expect<Equal<MemberRole, "owner" | "member">>;
 

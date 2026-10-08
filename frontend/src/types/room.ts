@@ -42,6 +42,13 @@ export interface RoomMember {
   /** The name as first entered, even when resumed with different casing. */
   displayName: string;
   role: MemberRole;
+  /**
+   * Whether this member has completed the party's current planning stage (saved
+   * their character in SETUP, picked a destination in DISCOVER, ...). Mirrored by
+   * the backend onto this anon-readable row so readiness streams live over
+   * Realtime. Defaults to false.
+   */
+  stageReady: boolean;
 }
 
 /**

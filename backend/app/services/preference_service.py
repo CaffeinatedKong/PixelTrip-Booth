@@ -75,9 +75,17 @@ class PreferenceService:
         else:
             character = await self._profile_repo.get_character_by_member_id(member_id)
 
+        # Mirror this member's SETUP completion onto the anon-readable room_members row
+        # so every client sees "ready" live over Realtime (travel_preferences stays
+        # backend-only). See 20261005000000_stage_readiness.sql.
+        await self._member_repo.set_stage_ready(member_id, True)
+
         trip = await require_room_trip(self._trip_repo, room["id"])
         if await self._everyone_submitted(room["id"]):
             trip = await advance_trip(self._trip_repo, trip, "preferences_collected")
+            # The party moved on to DISCOVER; clear readiness so the next stage starts
+            # with everyone not-ready.
+            await self._member_repo.reset_stage_ready_for_room(room["id"])
 
         return SavePreferencesResponse(
             travel_preferences=TravelPreferencesSchema.model_validate(saved),

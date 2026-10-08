@@ -135,12 +135,15 @@ export function usePartyLobby(): PartyLobbyState {
   // roster (primed once immediately, then on every change); we only forward it
   // to state while still mounted and still waiting. Unsubscribe on cleanup —
   // which also covers leaving "waiting" and unmount.
+  const roomId = session?.room.id;
   useEffect(() => {
-    if (view !== "waiting" || !session) return;
+    if (view !== "waiting" || !roomId) return;
 
     let cancelled = false;
-    const unsubscribe = getServices().room.subscribeMembers(
-      session.room.id,
+    const services = getServices();
+
+    const unsubscribeMembers = services.room.subscribeMembers(
+      roomId,
       (next) => {
         if (!cancelled && mountedRef.current) {
           setMembers(next);
@@ -148,11 +151,22 @@ export function usePartyLobby(): PartyLobbyState {
       },
     );
 
+    // Live room updates (notably planningStage advancing SETUP -> DISCOVER). Merge
+    // the fresh room into the session so the shell renders the active stage.
+    const unsubscribeRoom = services.room.subscribeRoom(
+      roomId,
+      (room) => {
+        if (cancelled || !mountedRef.current) return;
+        setSession((prev) => (prev ? { ...prev, room } : prev));
+      },
+    );
+
     return () => {
       cancelled = true;
-      unsubscribe();
+      unsubscribeMembers();
+      unsubscribeRoom();
     };
-  }, [view, session]);
+  }, [view, roomId]);
 
   const copyCode = useCallback(async (): Promise<void> => {
     if (!session) return;
