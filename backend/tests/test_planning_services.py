@@ -288,6 +288,19 @@ async def test_cast_vote_reports_the_session_closing(monkeypatch):
     cast.assert_awaited_once_with(r, SESSION_ID, M1, "opt-b")
     assert response.session_status == "closed"
     assert response.option_id == "opt-b"
+    # The vote moved the party on; readiness belongs to the new stage, so not set here.
+    r.member_repo.set_stage_ready.assert_not_awaited()
+
+
+async def test_cast_vote_marks_the_voter_ready_while_the_vote_is_open(monkeypatch):
+    r = bundle()
+    r.vote_session_repo.get_by_id.side_effect = [SESSION, SESSION]
+    monkeypatch.setattr(voting_endpoint_service, "cast_vote", AsyncMock())
+
+    response = await VotingEndpointService(r).cast(SESSION_ID, M1, "opt-a")
+
+    assert response.session_status == "open"
+    r.member_repo.set_stage_ready.assert_awaited_once_with(M1, True)
 
 
 async def test_close_vote_maps_the_resolution(monkeypatch):

@@ -163,21 +163,3 @@ class MemberRepository(BaseRepository):
             )
         except Exception as exc:
             self._handle_error(exc, operation="set_stage_ready", table=_TABLE)
-
-    async def reset_stage_ready_for_room(self, room_id: str) -> None:
-        """Clear ``stage_ready`` for every member of a room (service-role write).
-
-        Called when the trip advances to the next stage so the new stage starts with
-        everyone not-ready.
-        """
-        require_uuid(room_id, "room_id")
-        try:
-            await (
-                self._client.table(_TABLE)
-                .update({"stage_ready": False})
-                .eq("room_id", room_id)
-                .execute()
-            )
-        except Exception as exc:
-            self._handle_error(exc, operation="reset_stage_ready_for_room", table=_TABLE)
-

@@ -61,10 +61,13 @@ Example:
 // Shape: { id, room_id, guest_id, display_name, role, created_at }
 ```
 
-> **Current state:** the anon key can read `party_rooms`, `room_members`, `guests`, and
-> `characters` (migration `20260926000000_anon_room_read_policies.sql`). Every other table,
-> including `travel_preferences`, returns no rows to the anon key until a policy is added
-> for it. The anon key cannot write to the core tables at all.
+> **Current state:** the anon key can read `party_rooms`, `room_members` (including
+> `stage_ready`), `guests`, `characters`, `trips`, `messages`, `vote_sessions`, `votes`,
+> `selections`, `itinerary_versions`, and `feedback`. All of them except `guests` and
+> `characters` also stream changes over Realtime.
+> `travel_preferences` (budget) and `agent_runs` stay backend-only, and the anon key cannot
+> write to any of them. See the migrations `20260926000000_anon_room_read_policies.sql`,
+> `20261004000000_week1_endpoints.sql`, and `20261005000000_stage_readiness.sql`.
 
 ## Keys
 

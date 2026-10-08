@@ -57,6 +57,11 @@ class RoomMemberSchema(_Base):
     guest_id: str = Field(examples=[_GUEST_ID])
     display_name: str = Field(min_length=1, max_length=50, examples=["Gerald"])
     role: Literal["owner", "member"] = Field(examples=["owner"])
+    stage_ready: bool = Field(
+        default=False,
+        description="True once the member has done their part in the current stage.",
+        examples=[False],
+    )
 
 
 class CharacterSchema(_Base):

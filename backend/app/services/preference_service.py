@@ -82,10 +82,9 @@ class PreferenceService:
 
         trip = await require_room_trip(self._trip_repo, room["id"])
         if await self._everyone_submitted(room["id"]):
+            # Moving to DISCOVER clears everyone's stage_ready (a database trigger on
+            # planning_stage; see 20261008000000_stage_ready_reset.sql).
             trip = await advance_trip(self._trip_repo, trip, "preferences_collected")
-            # The party moved on to DISCOVER; clear readiness so the next stage starts
-            # with everyone not-ready.
-            await self._member_repo.reset_stage_ready_for_room(room["id"])
 
         return SavePreferencesResponse(
             travel_preferences=TravelPreferencesSchema.model_validate(saved),

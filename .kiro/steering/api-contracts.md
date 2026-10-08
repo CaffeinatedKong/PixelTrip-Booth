@@ -38,8 +38,10 @@ Shapes:
 - Guest: `{ id, displayName, avatarUrl? }`.
 - Party room: `{ id, roomCode, name, status: "active" | "finalised" | "cancelled",
   planningStage }`.
-- Room member: `{ id, roomId, guestId, displayName, role: "owner" | "member" }`.
+- Room member: `{ id, roomId, guestId, displayName, role: "owner" | "member", stageReady }`.
   `displayName` is the name as first entered, even when resumed with different casing.
+  `stageReady` is `true` once the member has done their part in the current stage (see
+  "Stage readiness").
 - Character: `{ id, memberId, appearance, spriteKey? }` — `appearance` is a free-form
   object.
 - Travel preferences: `{ id, memberId, availableDates, destinations, travelStyle?,
@@ -89,7 +91,7 @@ Request:
   "room": { "id": "…", "roomCode": "1HSM6S", "name": "Adventure Club Trip",
             "status": "active", "planningStage": "setup" },
   "member": { "id": "…", "roomId": "…", "guestId": "…",
-              "displayName": "Gerald", "role": "owner" },
+              "displayName": "Gerald", "role": "owner", "stageReady": false },
   "guest": { "id": "…", "displayName": "Gerald", "avatarUrl": null },
   "character": { "id": "…", "memberId": "…", "appearance": {}, "spriteKey": null },
   "travelPreferences": { "id": "…", "memberId": "…", "availableDates": [],
@@ -267,6 +269,28 @@ use Supabase directly with the anon key (see `docs/SUPABASE_ACCESS_BOUNDARY.md`)
 `party_rooms`, `room_members`, `guests`, `characters`, `trips`, `messages`,
 `vote_sessions`, `votes`, `selections`, `itinerary_versions`, `feedback`.
 `travel_preferences` and `agent_runs` are backend-only.
+
+These stream changes over Realtime: `party_rooms` (watch `planningStage` to move every
+screen to the next stage together), `room_members` (roster and `stageReady`), `trips`
+(watch `status`), `messages`, `vote_sessions`, `votes`, `selections`,
+`itinerary_versions`, and `feedback`. `guests` and `characters` are readable but do not
+stream; re-read them when the roster changes.
+
+### Stage readiness
+
+`room_members.stage_ready` drives "waiting for X of N party members". The backend is its
+only writer:
+
+| Stage | A member becomes ready when they… |
+|---|---|
+| SETUP | save their preferences (`PUT …/preferences`) |
+| DISCOVER, LOGISTICS | cast a vote that does not close it (`POST /votes/{id}/cast`) |
+| BUILD, REFINE, WRAP | (not used yet) |
+
+Whenever the room's `planningStage` changes, every member's `stageReady` resets to
+`false`, so each stage starts fresh. The party usually moves on by itself (the last member
+to submit or vote advances the trip), so the waiting count is for display, not a gate the
+frontend enforces.
 
 ### Errors
 

@@ -34,11 +34,17 @@ class VotingEndpointService:
         await cast_vote(self._repos, vote_session_id, member_id, option_id)
 
         after = await self._repos.vote_session_repo.get_by_id(vote_session_id)
+        status = (after or session).get("status", "open")
+        if status == "open":
+            # Voting is this member's part of the current stage. When the vote instead
+            # closed (this was the last vote), the party has moved to the next stage and
+            # readiness was reset for it, so the member is not marked ready there.
+            await self._repos.member_repo.set_stage_ready(member_id, True)
         return CastVoteResponse(
             vote_session_id=vote_session_id,
             member_id=member_id,
             option_id=option_id,
-            session_status=(after or session).get("status", "open"),
+            session_status=status,
         )
 
     async def close(self, vote_session_id: str, member_id: str) -> VoteResolutionResponse:

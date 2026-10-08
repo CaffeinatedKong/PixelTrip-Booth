@@ -110,7 +110,7 @@ def test_post_rooms_join_new_member_200(test_client):
 
     assert response.status_code == 200
     member = response.json()["member"]
-    assert set(member) == {"id", "roomId", "guestId", "displayName", "role"}
+    assert set(member) == {"id", "roomId", "guestId", "displayName", "role", "stageReady"}
     assert member["role"] == "member"
 
 
