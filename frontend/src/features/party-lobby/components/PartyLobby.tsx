@@ -3,17 +3,18 @@
 /**
  * PartyLobby — the entry screen where an adventurer creates or joins a party.
  *
- * Presentational only: it receives all data via props and raises events via
- * callbacks (no service imports, no data fetching). RPG framing comes from the
- * shared {@link DialogueBox} NPC guide. Both forms submit on Enter, show pending
- * states, surface safe error/validation messages via an `aria-live` region, and
- * keep visible focus from the shared primitives.
+ * A single centred card with a Create Room / Join Room tab toggle, a shared
+ * "Display name" field, a contextual second field (party name when creating, room
+ * code when joining), and one primary action button. Branded with the PixelTrip
+ * mark + tagline.
+ *
+ * Presentational only: data in via props, events out via callbacks (no service
+ * imports, no data fetching). Submits on Enter, shows pending states, and surfaces
+ * safe error/validation messages via an `aria-live` region. Token styling only.
  */
 import { useState, type FormEvent, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
-import { PixelCard } from "@/components/PixelCard";
-import { DialogueBox } from "@/components/DialogueBox";
 
 import type { LobbyView } from "../hooks/usePartyLobby";
 
@@ -30,6 +31,11 @@ export interface PartyLobbyProps {
   onJoinParty: (roomCode: string, displayName: string) => void;
 }
 
+type Tab = "create" | "join";
+
+const INPUT_CLASSES =
+  "font-body text-ink bg-bg border-2 border-muted w-full px-16 py-8 focus-visible:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
+
 export function PartyLobby({
   view,
   errorMessage,
@@ -37,7 +43,8 @@ export function PartyLobby({
   onCreateParty,
   onJoinParty,
 }: PartyLobbyProps): ReactElement {
-  const [adventurerName, setAdventurerName] = useState("");
+  const [tab, setTab] = useState<Tab>("create");
+  const [displayName, setDisplayName] = useState("");
   const [roomName, setRoomName] = useState("");
   const [roomCode, setRoomCode] = useState("");
 
@@ -45,102 +52,147 @@ export function PartyLobby({
   const joining = view === "joining";
   const busy = creating || joining;
 
-  const handleCreate = (event: FormEvent): void => {
+  const handleSubmit = (event: FormEvent): void => {
     event.preventDefault();
-    onCreateParty(roomName, adventurerName);
-  };
-
-  const handleJoin = (event: FormEvent): void => {
-    event.preventDefault();
-    onJoinParty(roomCode, adventurerName);
+    if (tab === "create") {
+      onCreateParty(roomName, displayName);
+    } else {
+      onJoinParty(roomCode, displayName);
+    }
   };
 
   const status = errorMessage ?? validationMessage;
 
+  const tabClass = (active: boolean): string =>
+    `font-display flex-1 border-2 px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
+      active ? "border-primary bg-primary text-bg" : "border-ink bg-bg-alt text-ink"
+    }`;
+
+  const buttonLabel =
+    tab === "create"
+      ? creating
+        ? "Creating room…"
+        : "Create room"
+      : joining
+        ? "Joining room…"
+        : "Join room";
+
   return (
-    <main className="bg-bg text-ink font-body min-h-screen p-24">
-      <div className="mx-auto flex max-w-xl flex-col gap-24">
-        <h1 className="font-display text-accent text-center">
-          PixelArt Trip Planner
-        </h1>
+    <main className="bg-bg text-ink font-body flex min-h-screen items-center justify-center p-24">
+      <div className="flex w-full max-w-md flex-col items-center gap-24">
+        {/* Branding */}
+        <div className="flex flex-col items-center gap-8 text-center">
+          <span aria-hidden className="text-4xl leading-none">
+            🎮
+          </span>
+          <h1 className="font-display text-primary">PixelTrip</h1>
+          <p className="font-body text-muted">
+            Collaborative AI travel planning with 8-bit personas.
+          </p>
+        </div>
 
-        <DialogueBox
-          speaker="Travel Guide"
-          text="Welcome, adventurer! Name yourself, then start a new quest or join your party by its code."
-        />
-
-        {/* Shared adventurer-name field used by both actions. */}
-        <PixelCard title="Your adventurer">
-          <label className="font-display mb-8 block" htmlFor="adventurer-name">
-            Adventurer name
-          </label>
-          <input
-            id="adventurer-name"
-            name="adventurer-name"
-            type="text"
-            autoComplete="off"
-            value={adventurerName}
-            onChange={(event) => setAdventurerName(event.target.value)}
-            disabled={busy}
-            className="bg-bg text-ink border-2 border-muted focus-visible:border-accent w-full p-8 focus-visible:outline-none"
-          />
-        </PixelCard>
-
-        <PixelCard title="Start a new quest">
-          <form onSubmit={handleCreate} className="flex flex-col gap-16">
-            <label className="font-display block" htmlFor="room-name">
-              Party name
-            </label>
-            <input
-              id="room-name"
-              name="room-name"
-              type="text"
-              autoComplete="off"
-              value={roomName}
-              onChange={(event) => setRoomName(event.target.value)}
+        {/* Single card with the tab toggle + form */}
+        <section className="bg-bg-alt border-2 border-ink w-full p-24">
+          {/* Tab toggle */}
+          <div
+            className="mb-24 flex gap-8"
+            role="tablist"
+            aria-label="Create or join a room"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "create"}
+              onClick={() => setTab("create")}
               disabled={busy}
-              className="bg-bg text-ink border-2 border-muted focus-visible:border-accent w-full p-8 focus-visible:outline-none"
-            />
+              className={tabClass(tab === "create")}
+            >
+              Create Room
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "join"}
+              onClick={() => setTab("join")}
+              disabled={busy}
+              className={tabClass(tab === "join")}
+            >
+              Join Room
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="flex flex-col gap-24">
+            {/* Shared display name */}
+            <div className="flex flex-col gap-8">
+              <label htmlFor="display-name" className="font-display text-ink">
+                Display name
+              </label>
+              <input
+                id="display-name"
+                name="display-name"
+                type="text"
+                autoComplete="off"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                disabled={busy}
+                className={INPUT_CLASSES}
+              />
+            </div>
+
+            {/* Contextual second field */}
+            {tab === "create" ? (
+              <div className="flex flex-col gap-8">
+                <label htmlFor="room-name" className="font-display text-ink">
+                  Room name
+                </label>
+                <input
+                  id="room-name"
+                  name="room-name"
+                  type="text"
+                  autoComplete="off"
+                  value={roomName}
+                  onChange={(event) => setRoomName(event.target.value)}
+                  disabled={busy}
+                  placeholder="THE WANDERING PARTY"
+                  className={INPUT_CLASSES}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-8">
+                <label htmlFor="room-code" className="font-display text-ink">
+                  Room code
+                </label>
+                <input
+                  id="room-code"
+                  name="room-code"
+                  type="text"
+                  autoComplete="off"
+                  value={roomCode}
+                  onChange={(event) => setRoomCode(event.target.value)}
+                  disabled={busy}
+                  placeholder="E.G. AB12CD"
+                  className={INPUT_CLASSES}
+                />
+              </div>
+            )}
+
             <PixelButton
               type="submit"
-              variant="primary"
-              label={creating ? "Creating party..." : "Create Party"}
+              variant="option"
+              label={buttonLabel}
               disabled={busy}
+              className="w-full"
             />
           </form>
-        </PixelCard>
+        </section>
 
-        <PixelCard title="Join your party">
-          <form onSubmit={handleJoin} className="flex flex-col gap-16">
-            <label className="font-display block" htmlFor="room-code">
-              Party code
-            </label>
-            <input
-              id="room-code"
-              name="room-code"
-              type="text"
-              autoComplete="off"
-              value={roomCode}
-              onChange={(event) => setRoomCode(event.target.value)}
-              disabled={busy}
-              className="bg-bg text-ink border-2 border-muted focus-visible:border-accent w-full p-8 focus-visible:outline-none"
-            />
-            <PixelButton
-              type="submit"
-              variant="secondary"
-              label={joining ? "Joining party..." : "Join Party"}
-              disabled={busy}
-            />
-          </form>
-        </PixelCard>
-
-        {/* Status region: errors and validation messages are announced politely. */}
+        {/* Status region: errors / validation announced politely. */}
         <p
           role="status"
           aria-live="polite"
-          className={`font-body min-h-8 ${status ? "text-warning" : ""}`}
+          className={`font-body min-h-8 text-center ${status ? "text-warning" : "text-muted"}`}
         >
-          {status ?? ""}
+          {status ?? "No account needed · Share a room code to travel together."}
         </p>
       </div>
     </main>
