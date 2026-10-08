@@ -138,6 +138,11 @@ class CastVoteResponse(_Base):
     session_status: Literal["open", "closed"] = Field(
         description="'closed' when this vote was the last one needed and the session resolved."
     )
+    tie_pending: bool = Field(
+        default=False,
+        description="True when this vote completed a tie: the session stays open and the "
+        "room owner picks the winner with POST /votes/{id}/break-tie.",
+    )
 
 
 class CloseVoteRequest(_Base):
@@ -154,20 +159,32 @@ class TieInfo(_Base):
 class VoteResolutionResponse(_Base):
     vote_session_id: str
     category: Literal["destination", "flight"]
-    winning_option: dict[str, Any] = Field(
-        description="The winning option exactly as it appeared in the vote session."
+    tie_pending: bool = Field(
+        default=False,
+        description="True when the vote tied and now waits for the owner's break-tie pick; "
+        "winningOption and selectionId are then null.",
     )
-    tie: TieInfo | None = Field(
-        default=None, description="Set when a tie was broken by option order."
+    winning_option: dict[str, Any] | None = Field(
+        default=None, description="The winning option exactly as it appeared in the vote session."
     )
-    selection_id: str
+    tie: TieInfo | None = Field(default=None, description="The tied options, when the vote tied.")
+    selection_id: str | None = None
+
+
+class BreakTieRequest(_Base):
+    member_id: UUID = Field(
+        description="Must be the room owner's member id.", examples=[_MEMBER_ID_EXAMPLE]
+    )
+    option_id: str = Field(
+        min_length=1, max_length=200, description="One of the tied options.", examples=["tokyo"]
+    )
 
 
 # --- Agent runs -----------------------------------------------------------------------
 
 
 class StartRunRequest(_Base):
-    run_type: Literal["discovery", "logistics", "itinerary", "refinement"] = Field(
+    run_type: Literal["discovery", "logistics", "itinerary", "refinement", "tiebreak"] = Field(
         examples=["discovery"]
     )
     member_id: UUID = Field(examples=[_MEMBER_ID_EXAMPLE])

@@ -140,3 +140,63 @@ class VoteSessionRepository(BaseRepository):
         if row is None:
             self._handle_error(ValueError("update matched no row"), operation="close", table=_TABLE)
         return row
+
+    async def mark_tie_pending(
+        self, vote_session_id: str, tied_option_ids: list[str], category: str
+    ) -> dict[str, Any]:
+        """Flag the session as tied and waiting for the room owner's pick.
+
+        The session stays ``open`` so it remains visible as undecided; ``tie_pending``
+        stops further voting until the owner breaks the tie.
+        """
+        try:
+            response = (
+                await self._client.table(_TABLE)
+                .update(
+                    {
+                        "tie_pending": True,
+                        "tie_option_ids": tied_option_ids,
+                        "category": category,
+                    }
+                )
+                .eq("id", vote_session_id)
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="mark_tie_pending", table=_TABLE)
+
+        row = self._first_row(response)
+        if row is None:
+            self._handle_error(
+                ValueError("update matched no row"), operation="mark_tie_pending", table=_TABLE
+            )
+        return row
+
+    async def get_tie_pending_by_room(self, room_id: str) -> dict[str, Any] | None:
+        """Return the room's session that is waiting for a tiebreak, or ``None``."""
+        try:
+            response = (
+                await self._client.table(_TABLE)
+                .select("*")
+                .eq("room_id", room_id)
+                .eq("status", "open")
+                .eq("tie_pending", True)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="get_tie_pending_by_room", table=_TABLE)
+        return self._first_row(response)
+
+    async def clear_tie_pending(self, vote_session_id: str) -> None:
+        """Clear the tie flag (the owner has picked), so the session can close."""
+        try:
+            await (
+                self._client.table(_TABLE)
+                .update({"tie_pending": False})
+                .eq("id", vote_session_id)
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="clear_tie_pending", table=_TABLE)

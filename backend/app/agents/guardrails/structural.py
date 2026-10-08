@@ -49,7 +49,7 @@ ENUM_COLUMNS: dict[str, frozenset[str]] = {
             "trip_exported",
         }
     ),
-    "agent_run_type": frozenset({"discovery", "logistics", "itinerary", "refinement"}),
+    "agent_run_type": frozenset({"discovery", "logistics", "itinerary", "refinement", "tiebreak"}),
     "agent_run_status": frozenset({"pending", "running", "completed", "failed"}),
 }
 

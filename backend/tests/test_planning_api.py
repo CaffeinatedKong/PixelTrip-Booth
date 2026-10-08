@@ -165,8 +165,11 @@ def test_cast_vote_200(services):
         "memberId": MEMBER_ID,
         "optionId": "opt-a",
         "sessionStatus": "open",
+        "tiePending": False,
     }
-    service.cast.assert_awaited_once_with(SESSION_ID, MEMBER_ID, "opt-a")
+    args = service.cast.await_args
+    assert args.args == (SESSION_ID, MEMBER_ID, "opt-a")
+    assert callable(args.kwargs["schedule"])  # background tasks hook for a tiebreak run
 
 
 def test_cast_vote_unknown_session_404(services):

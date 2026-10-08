@@ -155,6 +155,18 @@ class SummaryMessageContent(_ContentModel):
     itinerary_version_id: str | None = None
     #: Populated when the summary explains a tie resolution or a conflict.
     details: dict[str, Any] | None = None
+    #: Tiebreak advice for the room owner (set only on a tiebreak run's message).
+    category: Literal["destination_tiebreak", "flight_tiebreak"] | None = None
+    #: The tied options the owner chooses between.
+    options: list[QuickReplyOption] | None = None
+    #: The guide's full advice to the owner.
+    advice: str | None = Field(default=None, max_length=2000)
+    #: Per-option comparison: ``{id, label, analysis, details}``.
+    items: list[dict[str, Any]] | None = None
+    #: The tied vote session, for ``POST /votes/{id}/break-tie``.
+    vote_session_id: str | None = None
+    #: The option the guide leans towards (advice only; the owner decides).
+    recommended_option_id: str | None = None
 
 
 #: ``messages.kind`` -> the content model for that kind (Requirement 15.2).

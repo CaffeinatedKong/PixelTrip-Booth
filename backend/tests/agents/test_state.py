@@ -364,8 +364,8 @@ def test_repository_bundle_tool_and_llm_slots_default_to_none() -> None:
 
 
 def test_stage_by_run_type_covers_all_four_run_types() -> None:
-    """Each run type maps to the stage it operates in."""
-    assert set(STAGE_BY_RUN_TYPE) == set(RUN_TYPES)
+    """Each run type maps to its stage; tiebreak runs in whichever stage's vote tied."""
+    assert set(STAGE_BY_RUN_TYPE) == set(RUN_TYPES) - {"tiebreak"}
     for stage in STAGE_BY_RUN_TYPE.values():
         assert stage in STAGE_ORDER
 

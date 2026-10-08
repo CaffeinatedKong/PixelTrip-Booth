@@ -32,7 +32,7 @@ class AgentRunSchema(BaseModel):
 
     id: str
     trip_id: str
-    run_type: Literal["discovery", "logistics", "itinerary", "refinement"]
+    run_type: Literal["discovery", "logistics", "itinerary", "refinement", "tiebreak"]
     status: Literal["pending", "running", "completed", "failed"]
     base_version: int
     result_version_id: str | None = None

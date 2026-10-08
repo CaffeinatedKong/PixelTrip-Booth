@@ -142,22 +142,25 @@ async def test_resolution_writes_the_selection_and_closes_the_session() -> None:
     assert client.calls_for("vote_sessions")[0].op == "update"
 
 
-async def test_a_tie_emits_exactly_one_summary_message() -> None:
-    """Requirement 17.9: the tie, its ids, its count, and the winner are named."""
+async def test_a_tie_is_held_for_the_leader_with_one_summary_message() -> None:
+    """A tie no longer auto-picks: one summary names the tie and that the leader decides."""
     client = FakeSupabaseClient()
     wire_resolution(client, vote_rows=votes((M1, "opt-b"), (M2, "opt-c")))
 
     result = await resolve_vote_session(wired_bundle(client), open_session())
 
     assert result.tie is not None
+    assert result.tie_pending is True
+    assert result.winning_option is None
+    assert result.selection is None
     turns = client.calls_for("rpc:insert_message_turn")
     assert len(turns) == 1
     sent = turns[0].payload["p_messages"][0]
     assert sent["kind"] == "summary"
     details = sent["content"]["details"]
+    assert details["tie_pending"] is True
     assert set(details["tied_ids"]) == {"opt-b", "opt-c"}
     assert details["tied_count"] == 1
-    assert details["winner"] == result.winning_option["id"]
 
 
 async def test_an_outright_winner_emits_no_summary_message() -> None:
@@ -170,15 +173,20 @@ async def test_an_outright_winner_emits_no_summary_message() -> None:
     assert client.calls_for("rpc:insert_message_turn") == []
 
 
-async def test_tie_state_never_touches_vote_sessions_status() -> None:
-    """Requirement 17.10: the enum stays open/closed; the tie lives in the message."""
+async def test_a_tie_marks_the_session_pending_and_locks_nothing() -> None:
+    """On a tie the session stays open, flagged tie_pending with the tied ids."""
     client = FakeSupabaseClient()
     wire_resolution(client, vote_rows=votes((M1, "opt-b"), (M2, "opt-c")))
 
     await resolve_vote_session(wired_bundle(client), open_session())
 
-    close_call = client.calls_for("vote_sessions")[0]
-    assert close_call.payload == {"status": "closed"}
+    update = client.calls_for("vote_sessions")[0]
+    assert update.payload["tie_pending"] is True
+    assert set(update.payload["tie_option_ids"]) == {"opt-b", "opt-c"}
+    assert update.payload["category"] == "destination"
+    assert "status" not in update.payload  # still open
+    assert client.calls_for("selections") == []
+    assert client.calls_for("rpc:set_trip_status_and_stage") == []
 
 
 async def test_a_departed_member_vote_does_not_decide_the_outcome() -> None:

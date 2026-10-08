@@ -187,15 +187,19 @@ opens one. Voting again replaces the member's previous choice.
 `200` response:
 
 ```json
-{ "voteSessionId": "…", "memberId": "…", "optionId": "opt-tokyo", "sessionStatus": "open" }
+{ "voteSessionId": "…", "memberId": "…", "optionId": "opt-tokyo", "sessionStatus": "open",
+  "tiePending": false }
 ```
 
-When the last member votes, the session closes and resolves in the same call
-(`sessionStatus: "closed"`): the winner is saved as the destination or flight selection and
-`trip.status` advances to `destination_selected` or `flight_selected`. Ties go to the
-option listed first.
+When the last member votes, the session resolves in the same call:
+- **Clear winner:** the session closes (`sessionStatus: "closed"`), the winner is saved as
+  the destination or flight selection, and `trip.status` advances to `destination_selected`
+  or `flight_selected`.
+- **Tie:** nothing is locked. The session stays open with `tiePending: true` (see "Ties"
+  below), a `tiebreak` AI run starts automatically, and the room owner picks the winner.
 
-Errors: `404 VOTE_SESSION_NOT_FOUND`, `422 VOTE_SESSION_CLOSED`, `422 MEMBER_NOT_RESOLVED`
+Errors: `404 VOTE_SESSION_NOT_FOUND`, `422 VOTE_SESSION_CLOSED`, `422 VOTE_TIE_PENDING` (the
+vote is tied and waiting for the owner), `422 MEMBER_NOT_RESOLVED`
 (member is not in the vote's room), `422 VALIDATION_ERROR` (including an `optionId` that is
 not one of the session's options), `503 DATABASE_ERROR`.
 
@@ -211,15 +215,100 @@ Closes with the votes cast so far. `200` response:
 {
   "voteSessionId": "…",
   "category": "destination",
+  "tiePending": false,
   "winningOption": { "id": "opt-tokyo", "title": "Tokyo" },
   "tie": null,
   "selectionId": "…"
 }
 ```
 
-`tie` is `{ "tiedOptionIds": [...], "tiedCount": 2 }` when a tie was broken by option order.
+If the votes so far are tied, nothing is locked: `tiePending` is `true`, `winningOption` and
+`selectionId` are `null`, `tie` is `{ "tiedOptionIds": [...], "tiedCount": 1 }`, and the
+tiebreak flow below starts.
 
 Errors: as for cast; `422 MEMBER_NOT_RESOLVED` also means "not the room owner".
+
+### Ties: AI advice, leader decides (destination and flight votes)
+
+When a vote ties:
+
+1. **The session waits.** It stays `open` with `tie_pending: true`, `tie_option_ids` (the
+   tied option ids) and `category` (`"destination"` or `"flight"`); these fields stream
+   over Realtime on `vote_sessions`. No more votes are accepted (`422 VOTE_TIE_PENDING`).
+2. **The guide announces it** with a `summary` message: `title: "It's a tie!"`,
+   `details: { tie_pending: true, vote_session_id, tied_ids, tied_count, category }`.
+3. **The guide advises the owner.** A `tiebreak` run starts automatically (you can also
+   retry it with `POST /trips/{tripId}/runs`, `runType: "tiebreak"`). It posts one
+   `summary` message:
+
+```json
+{
+  "kind": "summary",
+  "content": {
+    "title": "A tie for the leader to break",
+    "text": "Scoot is within budget for everyone; ANA is more comfortable…",
+    "stage": "LOGISTICS",
+    "category": "flight_tiebreak",
+    "vote_session_id": "…",
+    "options": [ { "id": "f1", "label": "Scoot TR804" }, { "id": "f2", "label": "ANA NH804" } ],
+    "advice": "Scoot is within budget for everyone; ANA is more comfortable…",
+    "recommended_option_id": "f1",
+    "items": [
+      {
+        "id": "f1", "title": "Scoot TR804", "label": "Scoot TR804",
+        "description": "SIN to NRT, direct, 6h 25m, SGD 1,136.",
+        "votes": ["Gerald"],
+        "score": 84,
+        "whyThisFits": "Cheapest and direct.",
+        "tags": ["Budget", "Direct", "Evening arrival"],
+        "tradeOff": "No checked bag included.",
+        "details": "Scoot TR804, SIN to NRT. Departs … SGD 1,136 per person, round trip.",
+        "facts": { "price": 1136.5, "stops": 0, "duration_minutes": 385 },
+        "memberFit": [
+          { "memberId": "…", "displayName": "Gerald", "score": 92, "reason": "Fits Gerald's budget." },
+          { "memberId": "…", "displayName": "Priya", "score": 70, "reason": "Fine, but Priya preferred ANA." }
+        ]
+      },
+      { "id": "f2", "title": "ANA NH804", "votes": ["Priya"], "score": 61, "…": "…" }
+    ]
+  }
+}
+```
+
+   - `category` is `"destination_tiebreak"` or `"flight_tiebreak"`.
+   - Each item uses the **same card keys as recommendation items** (`score`,
+     `whyThisFits`, `tags`, `tradeOff`, `details`; see "Recommendation Response
+     Structure"), so the tiebreak panel can reuse the recommendation card. Here `score`
+     is the fit re-judged for this tie, with the party's votes and each member's own
+     preferences in view.
+   - `memberFit` gives each member's own 0–100 score and a one-line reason, based on that
+     member's budget, interests, activities, wish-list destinations and constraints. Show
+     it so the leader can see who each option suits and why.
+   - `votes` lists who voted for the option; `facts` holds the raw comparable values
+     (flight price/stops/duration/times, or the destination's original card values).
+   - `recommended_option_id` is the highest-scoring option. It is only a suggestion and
+     may be absent if the options score the same.
+   - Without the LLM the guide still posts scores in the same shape, using a simple rule:
+     each member starts at 50, +25 if they voted for it, then +25 for a wish-list
+     destination or a flight within their budget (−25 if over it); the party score is the
+     average. `tags` and `tradeOff` then come from the original recommendation card (may
+     be empty).
+4. **The owner decides** with `POST /votes/{voteSessionId}/break-tie`.
+
+### `POST /votes/{voteSessionId}/break-tie` — pick the winner of a tie (owner only)
+
+```json
+{ "memberId": "…", "optionId": "f1" }
+```
+
+`optionId` must be one of `tie_option_ids`. The pick locks exactly like a normal winner:
+the selection is saved (with the option's full details), the session closes, and the trip
+advances to `destination_selected` or `flight_selected`. The guide posts a short "the
+leader has decided" summary. `200` response: the same shape as `close`, with `tie` set.
+
+Errors: `404 VOTE_SESSION_NOT_FOUND`, `422 VOTE_SESSION_CLOSED`, `422 MEMBER_NOT_RESOLVED`
+(not the room owner), `422 VALIDATION_ERROR` (the vote is not tied, or `optionId` is not a
+tied option), `503 DATABASE_ERROR`.
 
 ### `POST /trips/{tripId}/runs` — start an AI run
 
@@ -227,7 +316,8 @@ Errors: as for cast; `422 MEMBER_NOT_RESOLVED` also means "not the room owner".
 { "runType": "discovery", "memberId": "…", "idempotencyKey": "discover-1" }
 ```
 
-- `runType`: `"discovery" | "logistics" | "itinerary" | "refinement"`.
+- `runType`: `"discovery" | "logistics" | "itinerary" | "refinement" | "tiebreak"`
+  (`tiebreak` normally starts by itself when a vote ties; see "Ties").
 - `idempotencyKey` (optional, 1–200 chars): send the same key on a retry to get the same
   run back.
 
@@ -402,6 +492,7 @@ Branch on `code`, not `message`. `message` is safe to log; it is not tuned for d
 | 422 | `INVALID_DISPLAY_NAME` | Display name is blank. |
 | 422 | `MEMBER_NOT_RESOLVED` | `memberId` is not a member of this room (or not the owner, when closing a vote). |
 | 422 | `VOTE_SESSION_CLOSED` | The vote has already closed. |
+| 422 | `VOTE_TIE_PENDING` | The vote is tied; the room owner must pick the winner (`break-tie`). |
 | 422 | `INVALID_IDEMPOTENCY_KEY` | Idempotency key is blank or too long. |
 | 500 | `ROOM_CODE_EXHAUSTED` | Could not find a free room code; retry. |
 | 500 | `INTERNAL_ERROR` | Unexpected server error. |
@@ -438,13 +529,54 @@ An AI turn returns one or more messages sharing the envelope above. Common field
 `kind: "recommendation"` content. Used in DISCOVER (destinations) and LOGISTICS (flights):
 - `title`: short heading.
 - `category?`: `"destination" | "flight"` — which stage this set belongs to.
-- `items`: array of recommendation entries, each:
-  - `id`, `title`, `description`
+- `items`: array of 3–5 recommendation entries, each:
+  - `id`, `title`
+  - `description`: one sentence shown on the card (never empty from the backend).
   - `imageUrl?` / `spriteKey?`
-  - `meta?`: key/value details for comparison (e.g. price band, duration, tags).
-    For flights this carries the comparable fields (price, airline, duration, stops,
-    depart/return times); for destinations, things like region, budget band, highlights.
+  - `meta`: card details. The backend always sends these five keys (the frontend also
+    accepts the aliases in brackets):
+
+    | Key | Type | Shown as | Aliases |
+    | --- | --- | --- | --- |
+    | `score` | number 0–100 | "FIT {n}/100" badge | `fit`, `fitScore`, `match` |
+    | `whyThisFits` | string | why it suits the party (falls back to `description`) | `why`, `reason` |
+    | `tags` | string[] (≤ 4 short labels) | chips | `highlights`, `pros` |
+    | `tradeOff` | string | the main downside | `tradeoff`, `con`, `warning` |
+    | `details` | string | expanded "full details" text | `fullDetails`, `longDescription` |
+
 - `prompt?`: optional follow-up question for the party.
+
+**Destinations.** The LLM scores how well each destination fits the whole party
+(interests, activities, travel styles, budget, shared dates) and writes the copy. If the
+LLM is unavailable, the backend still fills every key: `score` 85 for a destination on
+someone's wish list, 70 for a guide suggestion, with plain copy.
+
+```json
+{
+  "id": "phuket--thailand",
+  "title": "Phuket, Thailand",
+  "description": "Island beaches, night markets and easy island-hopping.",
+  "meta": {
+    "score": 92,
+    "whyThisFits": "Matches the party's love of beaches and street food on a mid budget.",
+    "tags": ["Budget", "Low crowds", "Nightlife"],
+    "tradeOff": "Late-year showers can cancel boat trips.",
+    "details": "December is the start of the dry season, with warm seas and busy markets…"
+  }
+}
+```
+
+**Flights.** Built from the flight tool's facts (no LLM). `meta` keeps the factual keys
+(`flight_id`, `carrier`, `flight_number`, `origin`, `destination`, `depart_at`,
+`arrive_at`, `price`, `duration_minutes`, `stops`, `return_at`, `return_arrive_at`) and
+adds the five card keys:
+- `score`: value for money against the other options shown: 95, minus up to 30 for being
+  the priciest, up to 15 for being the slowest, and 8 per stop.
+- `tags`: `[price, airline, duration, stops]`, e.g. `["SGD 980", "Singapore Airlines",
+  "6h 45m", "Direct"]`.
+- `whyThisFits`: e.g. "The cheapest option for the party."; `tradeOff`: e.g. "SGD 380 more
+  than the cheapest option."
+- `details`: carrier, route, times, duration, stops and whether the price is round trip.
 
 The frontend renders destination and flight option sets with the same recommendation +
 comparison UI, keyed off `category`.
@@ -457,6 +589,8 @@ Vote session (`kind: "vote"` content or dedicated object):
 - `voteSessionId`, `roomId`, `question`
 - `options`: array of `{ id, label, count }`
 - `status`: `"open" | "closed"`
+- `tie_pending`, `tie_option_ids`, `category`: set while a tie waits for the room owner
+  (see "Ties" under HTTP API).
 
 Cast a vote:
 - Input: `{ voteSessionId, optionId, memberId }`.
@@ -518,7 +652,7 @@ Refinement result (from the AI):
 
 Each AI operation (discovery, logistics, itinerary, refinement) is tracked as a run:
 - `{ id, tripId, runType, status, baseVersion, resultVersionId?, error? }`
-  - `runType`: `"discovery" | "logistics" | "itinerary" | "refinement"`.
+  - `runType`: `"discovery" | "logistics" | "itinerary" | "refinement" | "tiebreak"`.
   - `status`: `"pending" | "running" | "completed" | "failed"`.
   - `baseVersion`: the itinerary version number the run started from (0 = none yet).
 - Requests that trigger a run may send an `idempotencyKey`; repeating a request with the

@@ -55,12 +55,19 @@ def test_no_run_type_maps_to_more_than_one_node() -> None:
     assert all(isinstance(v, str) for v in ENTRY_NODE_BY_RUN_TYPE.values())
 
 
-def test_the_graph_compiles_with_exactly_five_nodes() -> None:
-    """Requirement 1.1: orchestrator plus the four specialists, no more."""
+def test_the_graph_compiles_with_exactly_six_nodes() -> None:
+    """Orchestrator plus the four specialists and the tiebreak advisor, no more."""
     graph = get_agent_graph()
     node_names = set(graph.get_graph().nodes) - {"__start__", "__end__"}
 
-    assert node_names == {"orchestrator", "discovery", "logistics", "itinerary", "negotiation"}
+    assert node_names == {
+        "orchestrator",
+        "discovery",
+        "logistics",
+        "itinerary",
+        "negotiation",
+        "tiebreak",
+    }
 
 
 def test_the_graph_is_compiled_once_and_cached() -> None:

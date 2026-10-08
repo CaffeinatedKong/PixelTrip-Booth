@@ -277,6 +277,11 @@ class AgentRunService:
         result_version_id = (final_state.trip_context or {}).get("result_version_id")
         run = await self.agent_run_repo.mark_completed(run_id, result_version_id)
 
+        if final_state.run_type == "tiebreak":
+            # The tiebreak node posts its own advice message; it never produces a
+            # proposal, so the "plan stayed as it was" outcome would be misleading.
+            return run
+
         if final_state.proposal is not None:
             await self._emit_proposal_outcome(trip_id, final_state)
         else:

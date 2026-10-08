@@ -37,6 +37,7 @@ from app.agents.nodes.itinerary import itinerary_node
 from app.agents.nodes.logistics import logistics_node
 from app.agents.nodes.negotiation import negotiation_node
 from app.agents.nodes.orchestrator import orchestrator_node
+from app.agents.nodes.tiebreak import tiebreak_node
 from app.agents.state import AgentState
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -50,6 +51,7 @@ ENTRY_NODE_BY_RUN_TYPE: dict[str, str] = {
     "logistics": "logistics",
     "itinerary": "itinerary",
     "refinement": "negotiation",
+    "tiebreak": "tiebreak",
 }
 
 
@@ -73,6 +75,7 @@ def _build_graph() -> StateGraph:
     graph.add_node("logistics", logistics_node)
     graph.add_node("itinerary", itinerary_node)
     graph.add_node("negotiation", negotiation_node)
+    graph.add_node("tiebreak", tiebreak_node)
 
     node_names = set(ENTRY_NODE_BY_RUN_TYPE.values())
     graph.set_entry_point("orchestrator")

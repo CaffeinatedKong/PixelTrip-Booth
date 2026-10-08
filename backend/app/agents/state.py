@@ -57,9 +57,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.repositories.vote_session_repository import VoteSessionRepository
 
 #: The four ``agent_run_type`` enum values. Nothing outside this set is a run.
-RunType = Literal["discovery", "logistics", "itinerary", "refinement"]
+RunType = Literal["discovery", "logistics", "itinerary", "refinement", "tiebreak"]
 
-RUN_TYPES: tuple[str, ...] = ("discovery", "logistics", "itinerary", "refinement")
+RUN_TYPES: tuple[str, ...] = ("discovery", "logistics", "itinerary", "refinement", "tiebreak")
 
 #: Run-identity fields that may never change once the state is built
 #: (Requirement 2.4). ``base_version`` and ``iteration_count`` are deliberately

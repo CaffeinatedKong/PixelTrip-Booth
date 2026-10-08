@@ -240,9 +240,12 @@ def get_preference_service(repos: Repos) -> PreferenceService:
     )
 
 
-def get_voting_endpoint_service(repos: Repos) -> VotingEndpointService:
-    """Provide the :class:`VotingEndpointService`."""
-    return VotingEndpointService(repos)
+def get_voting_endpoint_service(
+    repos: Repos,
+    run_service: Annotated[RunEndpointService, Depends(get_run_endpoint_service)],
+) -> VotingEndpointService:
+    """Provide the :class:`VotingEndpointService` (starts tiebreak runs on a tie)."""
+    return VotingEndpointService(repos, run_service)
 
 
 def get_run_endpoint_service(repos: Repos) -> RunEndpointService:

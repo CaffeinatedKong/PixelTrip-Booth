@@ -304,8 +304,23 @@ def llm_double(*names: str, error: Exception | None = None) -> AsyncMock:
     if error is not None:
         llm.generate_structured.side_effect = error
     else:
-        llm.generate_structured.return_value = _CandidateList(destinations=list(names))
+
+        async def answer(**kwargs: Any) -> Any:
+            if kwargs["response_model"] is _CandidateList:
+                return _CandidateList(destinations=list(names))
+            raise LLMGenerationError(kwargs["operation"])  # card copy falls back
+
+        llm.generate_structured.side_effect = answer
     return llm
+
+
+def candidate_calls(llm: AsyncMock) -> int:
+    """How many times the candidate-name call ran (card copy is a separate call)."""
+    return sum(
+        1
+        for call in llm.generate_structured.await_args_list
+        if call.kwargs["operation"] == "destination_candidates"
+    )
 
 
 def queue_successful_writes(client: FakeSupabaseClient) -> None:
@@ -321,9 +336,13 @@ async def run_with_llm(
     return await discovery_node(state or make_state(), {"configurable": {"repos": bundle}})
 
 
-def emitted_titles(client: FakeSupabaseClient) -> list[str]:
+def emitted_items(client: FakeSupabaseClient) -> list[dict[str, Any]]:
     sent = client.calls_for("rpc:insert_message_turn")[0].payload["p_messages"][0]
-    return [item["title"] for item in sent["content"]["items"]]
+    return sent["content"]["items"]
+
+
+def emitted_titles(client: FakeSupabaseClient) -> list[str]:
+    return [item["title"] for item in emitted_items(client)]
 
 
 async def test_llm_names_follow_seeded_destinations_and_precede_the_fallback_list() -> None:
@@ -344,7 +363,7 @@ async def test_llm_names_follow_seeded_destinations_and_precede_the_fallback_lis
     ]
     # The fixed list is only a top-up: with the LLM filling every slot it is never reached.
     assert not (set(FALLBACK_CANDIDATES) - {"Kyoto, Japan"}) & set(titles)
-    llm.generate_structured.assert_awaited_once()
+    assert candidate_calls(llm) == 1
 
 
 async def test_an_llm_failure_falls_back_to_exactly_the_deterministic_behaviour() -> None:
@@ -364,7 +383,8 @@ async def test_an_llm_failure_falls_back_to_exactly_the_deterministic_behaviour(
 
     assert result.proposal is not None
     assert emitted_titles(failing) == emitted_titles(baseline)
-    llm.generate_structured.assert_awaited_once()
+    assert emitted_items(failing) == emitted_items(baseline)
+    assert candidate_calls(llm) == 1
 
 
 async def test_an_unexpected_llm_error_also_falls_back() -> None:
@@ -419,7 +439,8 @@ async def test_the_repair_loop_never_calls_the_llm_again(monkeypatch) -> None:
 
     await run_with_llm(client, llm)
 
-    assert llm.generate_structured.await_count == 1
+    assert candidate_calls(llm) == 1
+    assert llm.generate_structured.await_count == 2  # names + card copy, once each
 
 
 async def test_junk_duplicate_and_surplus_names_are_discarded() -> None:

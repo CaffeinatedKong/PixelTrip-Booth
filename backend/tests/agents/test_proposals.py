@@ -61,9 +61,9 @@ def itinerary(**overrides: Any) -> dict[str, Any]:
 
 
 def test_four_proposal_kinds_registered() -> None:
-    """Exactly four proposal kinds, one per run type."""
+    """Exactly four proposal kinds, one per run type except tiebreak (advice only)."""
     assert len(PROPOSAL_MODELS) == 4
-    assert set(PROPOSAL_KIND_BY_RUN_TYPE) == set(RUN_TYPES)
+    assert set(PROPOSAL_KIND_BY_RUN_TYPE) == set(RUN_TYPES) - {"tiebreak"}
     assert set(PROPOSAL_KIND_BY_RUN_TYPE.values()) == set(PROPOSAL_MODELS)
 
 

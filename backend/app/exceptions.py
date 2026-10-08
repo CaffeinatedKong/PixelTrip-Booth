@@ -72,6 +72,10 @@ class ValidationError(BackendError):
     """A value failed a domain guard before any database call (HTTP 422)."""
 
 
+class VoteTiePendingError(ValidationError):
+    """The vote is tied and waiting for the room owner's pick; no more votes."""
+
+
 class InvalidDisplayNameError(ValidationError):
     """A display name was empty, whitespace-only, or over the length limit."""
 

@@ -311,6 +311,8 @@ async def test_close_vote_maps_the_resolution(monkeypatch):
         winning_option={"id": "opt-a", "title": "Kyoto"},
         tie=SimpleNamespace(tied_ids=["opt-a", "opt-b"], tied_count=1, winner_id="opt-a"),
         selection={"id": "sel-1"},
+        tie_pending=False,
+        closed_session={"id": SESSION_ID, "status": "closed"},
     )
     monkeypatch.setattr(
         voting_endpoint_service, "close_session", AsyncMock(return_value=resolution)
@@ -398,7 +400,9 @@ async def test_start_run_member_from_another_room_is_rejected(run_repos):
 
 
 async def test_execute_run_success_completes_the_run(run_repos, monkeypatch):
-    final_state = SimpleNamespace(trip_context={"result_version_id": None}, proposal=object())
+    final_state = SimpleNamespace(
+        run_type="discovery", trip_context={"result_version_id": None}, proposal=object()
+    )
     monkeypatch.setattr(
         run_endpoint_service, "run_agent_graph", AsyncMock(return_value=final_state)
     )

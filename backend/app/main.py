@@ -38,6 +38,7 @@ from app.exceptions import (
     ValidationError,
     VersionNotProposedError,
     VoteSessionNotFoundError,
+    VoteTiePendingError,
 )
 from app.schemas.errors import error_body
 
@@ -87,6 +88,7 @@ ERROR_CODES: dict[type[BackendError], tuple[int, str]] = {
     # room API keeps its specific codes.
     RoomNotFoundError: (404, "ROOM_NOT_FOUND"),
     VoteSessionNotFoundError: (404, "VOTE_SESSION_NOT_FOUND"),
+    VoteTiePendingError: (422, "VOTE_TIE_PENDING"),
     RunNotFoundError: (404, "RUN_NOT_FOUND"),
     ItineraryVersionNotFoundError: (404, "ITINERARY_VERSION_NOT_FOUND"),
     VersionNotProposedError: (409, "VERSION_NOT_PROPOSED"),

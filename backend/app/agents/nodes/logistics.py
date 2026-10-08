@@ -148,30 +148,120 @@ def _filter_and_rank(
     return [], "the party's current constraints"
 
 
-def _build_proposal(options: list[FlightOption]) -> dict[str, Any]:
-    """Build a raw flight recommendation payload from ranked options."""
-    items = [
-        {
-            "id": option.id,
-            "title": f"{option.carrier} {option.flight_number}",
-            "meta": {
-                "flight_id": option.id,
-                "carrier": option.carrier,
-                "flight_number": option.flight_number,
-                "origin": option.origin,
-                "destination": option.destination,
-                "depart_at": option.depart_at,
-                "arrive_at": option.arrive_at,
-                "price": option.price,
-                "duration_minutes": option.duration_minutes,
-                "stops": option.stops,
-                # The itinerary sizes the trip from depart_at / return_at.
-                "return_at": option.return_depart_at,
-                "return_arrive_at": option.return_arrive_at,
-            },
-        }
-        for option in options[:MAX_RECOMMENDATION_ITEMS]
-    ]
+def _format_duration(minutes: int) -> str:
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h {mins:02d}m" if hours else f"{mins}m"
+
+
+def _format_stops(stops: int) -> str:
+    return "Direct" if stops == 0 else f"{stops} stop" + ("s" if stops > 1 else "")
+
+
+def _spread(value: float, low: float, high: float) -> float:
+    """Where ``value`` sits between ``low`` (0.0) and ``high`` (1.0)."""
+    return 0.0 if high <= low else (value - low) / (high - low)
+
+
+def _flight_card(option: FlightOption, shown: list[FlightOption], currency: str) -> dict[str, Any]:
+    """CR-1 card copy for one flight, judged against the other options shown.
+
+    ``score`` is value for money: it starts at 95 and loses up to 30 for being
+    the priciest option, up to 15 for being the slowest, and 8 per stop.
+    Everything else is built from the tool's facts, never invented.
+    """
+    prices = [o.price for o in shown]
+    durations = [o.duration_minutes for o in shown]
+    fewest_stops = min(o.stops for o in shown)
+    price_spread = _spread(option.price, min(prices), max(prices))
+    duration_spread = _spread(option.duration_minutes, min(durations), max(durations))
+    score = round(95 - 30 * price_spread - 15 * duration_spread - 8 * option.stops)
+
+    price_text = f"{currency} {option.price:,.0f}"
+    duration_text = _format_duration(option.duration_minutes)
+    stops_text = _format_stops(option.stops)
+    round_trip = option.return_depart_at is not None
+
+    strengths = []
+    if len(shown) > 1 and option.price == min(prices):
+        strengths.append("the cheapest option")
+    if len(shown) > 1 and option.duration_minutes == min(durations):
+        strengths.append("the quickest journey")
+    if option.stops == 0:
+        strengths.append("a direct flight")
+    why = (
+        f"{' and '.join(strengths).capitalize()} for the party."
+        if strengths
+        else "A balance of price and travel time for the party."
+    )
+
+    if len(shown) > 1 and option.price > min(prices):
+        trade_off = f"{currency} {option.price - min(prices):,.0f} more than the cheapest option."
+    elif option.stops > fewest_stops:
+        trade_off = f"{stops_text} where other options fly with fewer."
+    elif len(shown) > 1 and option.duration_minutes > min(durations):
+        trade_off = (
+            f"{_format_duration(option.duration_minutes - min(durations))} longer than the "
+            "quickest option."
+        )
+    else:
+        trade_off = "Nothing stands out against the other options."
+
+    route = f"{option.origin} to {option.destination}"
+    details = (
+        f"{option.carrier} {option.flight_number}, {route}. Departs {option.depart_at}, "
+        f"arrives {option.arrive_at}. {duration_text}, {stops_text.lower()}."
+    )
+    if round_trip:
+        details += f" Returns {option.return_depart_at}. {price_text} per person, round trip."
+    else:
+        details += f" {price_text} per person, one way."
+
+    return {
+        "description": f"{route}, {stops_text.lower()}, {duration_text}, {price_text}.",
+        "meta": {
+            "score": max(0, min(100, score)),
+            "whyThisFits": why,
+            "tags": [price_text, option.carrier, duration_text, stops_text],
+            "tradeOff": trade_off,
+            "details": details,
+        },
+    }
+
+
+def _build_proposal(options: list[FlightOption], currency: str | None = None) -> dict[str, Any]:
+    """Build a raw flight recommendation payload from ranked options.
+
+    ``meta`` keeps the tool's factual fields (the factual guardrail, the
+    itinerary and the tiebreak read them) and adds the CR-1 card keys.
+    """
+    currency = currency or get_settings().flight_currency
+    shown = options[:MAX_RECOMMENDATION_ITEMS]
+    items = []
+    for option in shown:
+        card = _flight_card(option, shown, currency)
+        items.append(
+            {
+                "id": option.id,
+                "title": f"{option.carrier} {option.flight_number}",
+                "description": card["description"],
+                "meta": {
+                    "flight_id": option.id,
+                    "carrier": option.carrier,
+                    "flight_number": option.flight_number,
+                    "origin": option.origin,
+                    "destination": option.destination,
+                    "depart_at": option.depart_at,
+                    "arrive_at": option.arrive_at,
+                    "price": option.price,
+                    "duration_minutes": option.duration_minutes,
+                    "stops": option.stops,
+                    # The itinerary sizes the trip from depart_at / return_at.
+                    "return_at": option.return_depart_at,
+                    "return_arrive_at": option.return_arrive_at,
+                    **card["meta"],
+                },
+            }
+        )
     return {
         "title": "How shall the party travel?",
         "items": items,

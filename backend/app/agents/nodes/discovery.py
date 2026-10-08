@@ -43,6 +43,12 @@ The guardrail loop's repair iterations (``_producer`` below) re-gather candidate
 deterministically: a repair must be fast and repeatable, and must not depend on
 a second model call that might return something different from the proposal it
 is trying to fix.
+
+**Card copy (CR-1).** After filtering, one more LLM call scores and describes
+the survivors, filling each item's ``description`` and ``meta`` (``score``,
+``whyThisFits``, ``tags``, ``tradeOff``, ``details``). It fails soft the same
+way: any destination the model skips, or whose copy mentions a hard-constraint
+subject, gets plain deterministic copy instead. Repairs reuse that copy.
 """
 
 from __future__ import annotations
@@ -56,7 +62,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.agents.errors import LLMGenerationError, PreferencesNotCollectedError
 from app.agents.group_profile import compute_group_profile
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
-from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt
+from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
 from app.agents.proposals import DestinationRecommendationProposal
 from app.core.config import get_settings
@@ -82,6 +88,17 @@ MAX_DESTINATION_NAME_LENGTH = 80
 MAX_QUESTION_LENGTH = 200
 
 STAGE = "DISCOVER"
+
+#: Card copy limits (CR-1): the frontend renders these on a small pixel card.
+MAX_TAGS = 4
+MAX_TAG_LENGTH = 24
+MAX_SHORT_TEXT = 200
+MAX_DETAILS_TEXT = 600
+
+#: Fallback fit scores when no model is available: a destination someone in the
+#: party wish-listed is a stronger signal than a guide suggestion.
+WISHLIST_SCORE = 85
+SUGGESTED_SCORE = 70
 
 
 def _slugify(name: str) -> str:
@@ -265,12 +282,187 @@ def _filter_candidates(
     return [], "the party's current constraints"
 
 
-def _build_proposal(candidates: list[str]) -> dict[str, Any]:
-    """Build a raw destination recommendation payload from candidate names."""
-    items = [
-        {"id": _slugify(name), "title": name, "meta": {}}
-        for name in candidates[:MAX_RECOMMENDATION_ITEMS]
-    ]
+class _DestinationInsight(BaseModel):
+    """The LLM's card copy for one destination (CR-1)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    score: int
+    description: str = ""
+    why_this_fits: str = ""
+    tags: list[str] = Field(default_factory=list)
+    trade_off: str = ""
+    details: str = ""
+
+
+class _DestinationInsights(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    insights: list[_DestinationInsight] = Field(min_length=1)
+
+
+def _forbidden_subjects(group_profile: dict[str, Any]) -> list[str]:
+    subjects = (_negated_subject(str(c)) for c in group_profile.get("hard_constraints") or [])
+    return [s for s in subjects if s]
+
+
+def _clean_tags(raw: Any) -> list[str]:
+    tags: list[str] = []
+    for value in raw or []:
+        tag = clip_text(str(value), MAX_TAG_LENGTH)
+        if tag and tag.lower() not in {t.lower() for t in tags}:
+            tags.append(tag)
+    return tags[:MAX_TAGS]
+
+
+def _fallback_card(name: str, group_profile: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic card copy used when the LLM is unavailable or unusable."""
+    wished = name.lower() in {str(d).lower() for d in group_profile.get("destinations") or []}
+    overlap = group_profile.get("availability_overlap") or []
+    ceiling = group_profile.get("budget_ceiling")
+    window = f"{overlap[0].get('start')} to {overlap[0].get('end')}" if overlap else None
+    details = " ".join(
+        part
+        for part in (
+            f"Shared travel window: {window}." if window else "",
+            f"Budget up to {ceiling} per person." if ceiling is not None else "",
+        )
+        if part
+    )
+    why = (
+        "Someone in the party put this on their wish list."
+        if wished
+        else "Suggested by the guide to round out the party's options."
+    )
+    return {
+        "description": why,
+        "meta": {
+            "score": WISHLIST_SCORE if wished else SUGGESTED_SCORE,
+            "whyThisFits": why,
+            "tags": ["Party wish list"] if wished else ["Guide's pick"],
+            "tradeOff": "No cost estimate yet; check prices before you vote.",
+            "details": details or why,
+        },
+    }
+
+
+def _card_from_insight(insight: _DestinationInsight, forbidden: list[str]) -> dict[str, Any] | None:
+    """Turn one model insight into card copy, or ``None`` if it is unusable.
+
+    Copy that mentions a hard-constraint subject is dropped: the business
+    guardrail scans item text, so it would reject the whole proposal.
+    """
+    why = clip_text(insight.why_this_fits, MAX_SHORT_TEXT)
+    description = clip_text(insight.description, MAX_SHORT_TEXT) or why
+    if why is None or description is None:
+        return None
+    card = {
+        "description": description,
+        "meta": {
+            "score": max(0, min(100, int(insight.score))),
+            "whyThisFits": why,
+            "tags": _clean_tags(insight.tags),
+            "tradeOff": clip_text(insight.trade_off, MAX_SHORT_TEXT) or "",
+            "details": clip_text(insight.details, MAX_DETAILS_TEXT) or description,
+        },
+    }
+    text = " ".join(
+        [card["description"], why, card["meta"]["tradeOff"], card["meta"]["details"]]
+        + card["meta"]["tags"]
+    ).lower()
+    if any(subject in text for subject in forbidden):
+        return None
+    return card
+
+
+async def _generate_insights(
+    candidates: list[str], group_profile: dict[str, Any], llm: Any
+) -> dict[str, dict[str, Any]]:
+    """Ask the LLM to score and describe each candidate (CR-1).
+
+    Returns card copy keyed by lower-cased name. Never raises: a failure, or a
+    candidate the model skipped, simply gets :func:`_fallback_card` later.
+    """
+    if llm is None or not candidates:
+        return {}
+
+    overlap = group_profile.get("availability_overlap") or []
+    window = f"{overlap[0].get('start')} to {overlap[0].get('end')}" if overlap else "unspecified"
+    ceiling = group_profile.get("budget_ceiling")
+    system_prompt = (
+        f"{UNTRUSTED_INPUT_GUARD}\n\n"
+        "You are an in-world NPC travel guide for a group trip-planning game. For each "
+        "destination given, judge how well it fits the whole party and write short card copy:\n"
+        "- score: 0-100 fit for the party (interests, activities, styles, budget, dates)\n"
+        "- description: one sentence about the place\n"
+        "- why_this_fits: one sentence tying it to the party's preferences\n"
+        "- tags: 2-4 short labels (1-3 words each), e.g. Budget, Low crowds, Nightlife\n"
+        "- trade_off: one honest downside for this party\n"
+        "- details: 2-3 sentences on what to expect in their travel window\n"
+        "Use the destination name exactly as given. Never mention or recommend anything a "
+        "hard constraint rules out."
+    )
+    user_prompt = (
+        f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
+        f"Travel window: {window}\n"
+        f"Budget ceiling per person: {ceiling if ceiling is not None else 'none stated'}\n"
+        f"Interests: {clip_for_prompt(group_profile.get('interests'))}\n"
+        f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
+        f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
+        f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
+        f"Party wish list: {clip_for_prompt(group_profile.get('destinations'))}\n"
+        f"Destinations to describe: {clip_for_prompt(candidates)}"
+    )
+    try:
+        result = await llm.generate_structured(
+            operation="destination_insights",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=_DestinationInsights,
+        )
+        insights = list(result.insights)
+    except LLMGenerationError:
+        logger.info("LLM destination insights unavailable; using fallback card copy")
+        return {}
+    except Exception:  # a malformed double or SDK surprise must not break DISCOVER
+        logger.info("LLM destination insights were unusable; using fallback card copy")
+        return {}
+
+    wanted = {name.lower() for name in candidates}
+    forbidden = _forbidden_subjects(group_profile)
+    cards: dict[str, dict[str, Any]] = {}
+    for insight in insights:
+        key = " ".join(str(insight.name).split()).strip(" .,-").lower()
+        if key in wanted and key not in cards:
+            card = _card_from_insight(insight, forbidden)
+            if card is not None:
+                cards[key] = card
+    return cards
+
+
+def _build_proposal(
+    candidates: list[str],
+    group_profile: dict[str, Any] | None = None,
+    insights: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a raw destination recommendation payload from candidate names.
+
+    Each item carries CR-1 card copy: ``description`` plus ``meta`` with
+    ``score``, ``whyThisFits``, ``tags``, ``tradeOff`` and ``details``.
+    """
+    profile = group_profile or {}
+    items = []
+    for name in candidates[:MAX_RECOMMENDATION_ITEMS]:
+        card = (insights or {}).get(name.lower()) or _fallback_card(name, profile)
+        items.append(
+            {
+                "id": _slugify(name),
+                "title": name,
+                "description": card["description"],
+                "meta": dict(card["meta"]),
+            }
+        )
     return {
         "title": "Where shall our journey begin?",
         "items": items,
@@ -353,12 +545,14 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
         )
         fresh_candidates = _gather_candidates(fresh_profile)
         fresh_survivors, _reason = _filter_candidates(fresh_candidates, fresh_profile)
-        return _build_proposal(fresh_survivors or survivors)
+        # Reuse the first attempt's card copy: a repair must not call the model again.
+        return _build_proposal(fresh_survivors or survivors, fresh_profile, insights)
 
+    insights = await _generate_insights(survivors[:MAX_RECOMMENDATION_ITEMS], profile, repos.llm)
     loop_outcome = await run_guardrail_loop(
         state,
         repos,
-        _build_proposal(survivors),
+        _build_proposal(survivors, profile, insights),
         "destination_recommendation",
         _producer,
         cap,
