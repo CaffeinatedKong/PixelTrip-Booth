@@ -199,6 +199,19 @@ class ExternalToolUnavailableError(RepositoryError):
         self.tool_name = tool_name
 
 
+class LLMGenerationError(RepositoryError):
+    """The LLM failed to produce a usable response after its retry allowance.
+
+    Subclasses :class:`RepositoryError` so it inherits the 503 family. Never
+    constructed with prompt text, completion text, or any provider payload —
+    only the operation label (Requirement 20.5, 20.8).
+    """
+
+    def __init__(self, operation: str) -> None:
+        super().__init__(f"LLM generation for '{operation}' is unavailable.")
+        self.operation = operation
+
+
 class ItineraryPersistenceError(RepositoryError):
     """Persisting an itinerary version failed for a non-contention reason."""
 
@@ -290,6 +303,7 @@ AGENT_ERROR_CODES: dict[type[Exception], tuple[int, str]] = {
     RoomResolutionError: (404, "ROOM_RESOLUTION_FAILED"),
     # 503 unavailability family
     ExternalToolUnavailableError: (503, "EXTERNAL_TOOL_UNAVAILABLE"),
+    LLMGenerationError: (503, "LLM_GENERATION_UNAVAILABLE"),
     ItineraryPersistenceError: (503, "ITINERARY_PERSISTENCE_FAILED"),
     # 409 conflict family
     RunStatusTransitionError: (409, "RUN_STATUS_TRANSITION_INVALID"),
@@ -301,13 +315,14 @@ AGENT_ERROR_CODES: dict[type[Exception], tuple[int, str]] = {
 }
 
 #: Exceptions in the 503 family inherit :class:`RepositoryError`, whose registered
-#: client message is the fixed ``"Database operation failed."``. These two are not
+#: client message is the fixed ``"Database operation failed."``. These are not
 #: database failures, so each supplies its own safe client-facing message rather
 #: than inheriting a misleading one.
 _AGENT_OPAQUE_MESSAGES: dict[type[Exception], str] = {
     ExternalToolUnavailableError: (
         "A travel data source is unavailable right now. Please try again."
     ),
+    LLMGenerationError: "The guide's thoughts are unavailable right now. Please try again.",
     ItineraryPersistenceError: "The quest log could not be saved. Please try again.",
 }
 

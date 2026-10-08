@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # --- Application metadata (safe defaults; not secret) ---
     app_name: str = Field(default="PixelArt Trip Planner API")
     environment: str = Field(default="development")
+    #: Mounts the ``/dev`` routes that exist only to test the AI agents by hand (lock a
+    #: test flight, add feedback). Off unless explicitly enabled; never set in production.
+    enable_dev_endpoints: bool = Field(default=False)
 
     # --- Supabase (service-role; backend only) ---
     # Required: the backend cannot serve any data operation without these.
@@ -75,6 +78,19 @@ class Settings(BaseSettings):
 
     # --- LLM provider (spec 03) ---
     ai_provider_api_key: str = Field(default="", repr=False)
+    llm_model_name: str = Field(default="gemini-3.8-flash", min_length=1)
+    #: Comma-separated models tried, in order, when the primary one is unavailable
+    #: (free-tier quotas are per model, so a fallback multiplies the daily budget).
+    llm_fallback_models: str = Field(
+        default="gemini-3.7-flash,gemini-3.5-flash,gemini-3.1-flash-lite"
+    )
+    llm_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    llm_max_output_tokens: int = Field(default=8192, ge=1, le=65536)
+    #: Gemini Flash models spend output tokens on hidden "thinking" unless told not
+    #: to; 0 turns it off (fast, cheap, plenty for these structured tasks). Models
+    #: that cannot disable thinking (e.g. Pro) need ``-1`` (dynamic) or a positive
+    #: budget instead.
+    llm_thinking_budget: int = Field(default=0, ge=-1)
 
     @field_validator("supabase_url")
     @classmethod
@@ -92,6 +108,16 @@ class Settings(BaseSettings):
         if not v.strip():
             raise ValueError("SUPABASE_SERVICE_ROLE_KEY must not be empty")
         return v
+
+    @property
+    def llm_model_chain(self) -> tuple[str, ...]:
+        """The primary model followed by the fallbacks, de-duplicated, in order."""
+        chain: list[str] = []
+        for name in (self.llm_model_name, *self.llm_fallback_models.split(",")):
+            cleaned = name.strip()
+            if cleaned and cleaned not in chain:
+                chain.append(cleaned)
+        return tuple(chain)
 
     def secret_values(self) -> tuple[str, ...]:
         """Return every configured secret value, for redaction checks.

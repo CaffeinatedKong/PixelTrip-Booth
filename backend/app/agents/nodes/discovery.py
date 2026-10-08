@@ -24,14 +24,25 @@ next:
 
 **On LLM-sourced candidates.** Requirement 7.5 only requires that
 ``travel_preferences.destinations`` entries are seeded *before* any
-model-generated or tool-sourced candidate — it does not require that this node
-call an LLM. No LLM client exists yet under ``app/agents/`` (that lands with the
-provider integration, out of this task's scope), so candidates here are seeded
-deterministically from preferences and topped up with a small fixed fallback
-list when the party supplied too few destinations to reach the 3-item minimum a
-recommendation requires. This is a documented interim choice, not a permanent
-one: once an LLM client exists, it is a straightforward addition to the
-candidate-gathering step without touching anything downstream of it.
+model-generated or tool-sourced candidate. The candidate set is therefore built
+in three layers, in this order: the party's own destinations, then names the
+LLM suggests for the remaining slots, then a small fixed fallback list
+(``FALLBACK_CANDIDATES``) for whatever is still missing.
+
+The LLM augments candidate generation; it is never a single point of failure
+for the DISCOVER stage. If the call fails for any reason — no API key, a
+timeout, a provider outage, a malformed answer — :func:`_generate_llm_candidates`
+returns nothing, the node logs at ``info`` (a routine, expected path, not an
+incident) and carries on with exactly the deterministic behaviour it had before
+an LLM existed. Whatever the model suggests then goes through the same hard
+constraint and budget filter as every other candidate, so a model that ignores
+a stated constraint is caught here rather than reaching the party.
+
+**Scope of the LLM call.** Only the *first* attempt gets LLM-sourced candidates.
+The guardrail loop's repair iterations (``_producer`` below) re-gather candidates
+deterministically: a repair must be fast and repeatable, and must not depend on
+a second model call that might return something different from the proposal it
+is trying to fix.
 """
 
 from __future__ import annotations
@@ -40,10 +51,12 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.errors import PreferencesNotCollectedError
+from app.agents.errors import LLMGenerationError, PreferencesNotCollectedError
 from app.agents.group_profile import compute_group_profile
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
+from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
 from app.agents.proposals import DestinationRecommendationProposal
 from app.core.config import get_settings
@@ -57,11 +70,13 @@ logger = logging.getLogger(__name__)
 MIN_RECOMMENDATION_ITEMS = 3
 MAX_RECOMMENDATION_ITEMS = 5
 
-#: Used to top up the candidate set when the party's own
-#: ``travel_preferences.destinations`` entries don't reach the minimum. Named,
-#: generic options rather than anything destination-specific, since there is no
-#: model generating real candidates yet (see module docstring).
+#: Used to top up the candidate set when neither the party's own
+#: ``travel_preferences.destinations`` entries nor the LLM's suggestions reach the
+#: minimum — the safety net that keeps DISCOVER working with no model available.
 FALLBACK_CANDIDATES: tuple[str, ...] = ("Kyoto, Japan", "Lisbon, Portugal", "Reykjavik, Iceland")
+
+#: A suggestion longer than this is not a destination name; treat it as junk.
+MAX_DESTINATION_NAME_LENGTH = 80
 
 #: Requirement 7.7: the vote question's length bound.
 MAX_QUESTION_LENGTH = 200
@@ -88,6 +103,88 @@ def _gather_candidates(group_profile: dict[str, Any]) -> list[str]:
         if fallback not in candidates:
             candidates.append(fallback)
     return candidates
+
+
+class _CandidateList(BaseModel):
+    """The LLM's answer: destination names only (everything else is built here).
+
+    The upper bound is the recommendation maximum rather than the number asked
+    for: a model that over-delivers is truncated by the caller, not failed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    destinations: list[str] = Field(min_length=1, max_length=MAX_RECOMMENDATION_ITEMS)
+
+
+def _clean_destination_name(raw: Any) -> str | None:
+    """Return a usable destination name, or ``None`` if the model's entry is junk."""
+    name = " ".join(str(raw).split()).strip(" .,-")
+    if not 2 <= len(name) <= MAX_DESTINATION_NAME_LENGTH:
+        return None
+    return name
+
+
+async def _generate_llm_candidates(
+    group_profile: dict[str, Any],
+    llm: Any,
+    exclude: list[str],
+    needed: int,
+) -> list[str]:
+    """Ask the LLM for up to ``needed`` additional destination names.
+
+    Returns an empty list — never raises — on any failure, so the caller's
+    fallback to ``FALLBACK_CANDIDATES`` is the only error-handling path
+    ``discovery_node`` needs.
+    """
+    if llm is None or needed <= 0:
+        return []
+
+    overlap = group_profile.get("availability_overlap") or []
+    window = f"{overlap[0].get('start')} to {overlap[0].get('end')}" if overlap else "unspecified"
+    ceiling = group_profile.get("budget_ceiling")
+    system_prompt = (
+        f"{UNTRUSTED_INPUT_GUARD}\n\n"
+        "You are an in-world NPC travel guide for a group trip-planning game. "
+        "Suggest real-world travel destinations, each written as 'City, Country', that fit "
+        "the party's combined interests, activities and travel styles, and are sensible for "
+        "their travel window and budget. Never suggest a destination that violates a stated "
+        "hard constraint. Return destination names only."
+    )
+    user_prompt = (
+        f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
+        f"Travel window: {window}\n"
+        f"Budget ceiling per person: {ceiling if ceiling is not None else 'none stated'}\n"
+        f"Interests: {clip_for_prompt(group_profile.get('interests'))}\n"
+        f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
+        f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
+        f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
+        f"Already suggested (do not repeat): {clip_for_prompt(exclude)}\n"
+        f"Suggest exactly {needed} new destination(s)."
+    )
+    try:
+        result = await llm.generate_structured(
+            operation="destination_candidates",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=_CandidateList,
+        )
+        raw_names = result.destinations
+    except LLMGenerationError:
+        logger.info("LLM candidate generation unavailable; using fallback list")
+        return []
+    except Exception:  # a malformed double or SDK surprise must not break DISCOVER
+        logger.info("LLM candidate generation returned an unusable result; using fallback list")
+        return []
+
+    names: list[str] = []
+    seen = {name.lower() for name in exclude}
+    for raw in raw_names:
+        name = _clean_destination_name(raw)
+        if name is not None and name.lower() not in seen:
+            seen.add(name.lower())
+            names.append(name)
+    return names[:needed]
 
 
 def _negated_subject(constraint: str) -> str | None:
@@ -181,6 +278,24 @@ def _build_proposal(candidates: list[str]) -> dict[str, Any]:
     }
 
 
+async def _gather_candidates_with_llm(group_profile: dict[str, Any], llm: Any) -> list[str]:
+    """Seed from the party, fill from the LLM, then top up from the fixed list.
+
+    Equivalent to :func:`_gather_candidates` when ``llm`` is ``None`` or fails.
+    """
+    candidates = list(group_profile.get("destinations") or [])
+    needed = MAX_RECOMMENDATION_ITEMS - len(candidates)
+    for name in await _generate_llm_candidates(group_profile, llm, candidates, needed):
+        if len(candidates) < MAX_RECOMMENDATION_ITEMS:
+            candidates.append(name)
+    for fallback in FALLBACK_CANDIDATES:
+        if len(candidates) >= MAX_RECOMMENDATION_ITEMS:
+            break
+        if fallback not in candidates:
+            candidates.append(fallback)
+    return candidates
+
+
 async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentState:
     """Produce a destination recommendation for the DISCOVER stage.
 
@@ -213,7 +328,7 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
         )
         return state
 
-    candidates = _gather_candidates(profile)
+    candidates = await _gather_candidates_with_llm(profile, repos.llm)
     survivors, eliminating_reason = _filter_candidates(candidates, profile)
     if not survivors:
         await perform_human_escalation(

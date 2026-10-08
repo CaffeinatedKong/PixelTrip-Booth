@@ -40,3 +40,6 @@ yarn-error.log*
 Thumbs.db
 .idea/
 *.swp
+
+# Local runner logs
+.local-logs/

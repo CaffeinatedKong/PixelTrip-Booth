@@ -25,6 +25,7 @@ from app.agents.errors import (
     InvalidTripDurationError,
     IterationCapExceededError,
     ItineraryPersistenceError,
+    LLMGenerationError,
     MessageContentTooLargeError,
     NoApprovedItineraryError,
     NoItineraryToRefineError,
@@ -70,6 +71,7 @@ _INSTANCES: list[BackendError] = [
     NoApprovedItineraryError(),
     RoomResolutionError("22222222-2222-2222-2222-222222222222"),
     ExternalToolUnavailableError("flight_search"),
+    LLMGenerationError("destination_candidates"),
     ItineraryPersistenceError(),
     RunStatusTransitionError("pending", "completed"),
     IdempotencyKeyConflictError(),
@@ -83,11 +85,12 @@ _INSTANCES: list[BackendError] = [
 
 
 def test_all_registered_exceptions_are_accounted_for() -> None:
-    """22 from the design's table plus 2 added for vote resolution (task 12):
+    """22 from the design's table, plus 2 added for vote resolution (task 12):
     VoteSessionClosedError and UnresolvedMemberError, which the design's
-    Requirement 17.13/22.2-22.3 require but the original table predates.
+    Requirement 17.13/22.2-22.3 require but the original table predates, plus 1
+    for the LLM boundary: LLMGenerationError.
     """
-    assert len(AGENT_ERROR_CODES) == 24
+    assert len(AGENT_ERROR_CODES) == 25
 
 
 def test_every_exception_class_in_module_is_registered() -> None:
@@ -222,6 +225,21 @@ def test_itinerary_persistence_error_has_its_own_message() -> None:
     assert code == "ITINERARY_PERSISTENCE_FAILED"
     assert "database" not in message.lower()
     assert "quest log" in message.lower()
+
+
+def test_llm_error_has_its_own_code_and_a_safe_message() -> None:
+    """The LLM boundary is not a database failure, and must not claim to be one."""
+    status, code, message = resolve_error_mapping(LLMGenerationError("itinerary_days"))
+
+    assert (status, code) == (503, "LLM_GENERATION_UNAVAILABLE")
+    assert "database" not in message.lower()
+    assert "itinerary_days" not in message  # the operation label is internal only
+
+
+def test_llm_error_keeps_the_operation_for_internal_use() -> None:
+    exc = LLMGenerationError("destination_candidates")
+
+    assert exc.operation == "destination_candidates"
 
 
 def test_external_tool_error_keeps_tool_name_for_internal_use() -> None:

@@ -24,22 +24,30 @@ The flow, in order, each step narrowing what the next step has to consider:
 8. **Report**: mark addressed rows, narrate any conflict compromise, name
    whatever is still open, and advance `trips.status`.
 
-**On outcome classification and regeneration, without an LLM.** No LLM client
-exists yet under `app/agents/` — the same documented interim choice every
-other specialist node has made. Outcome classification
-(remove/retain/edit) is a keyword scan over `feedback.comment`, and an "edit"
-appends the comment as a note to the item's description rather than rewriting
-it with real judgment. This keeps every mechanical guarantee this requirement
-makes — Affected_Scope correctness, Unaffected_Scope byte-identity, addressed
-vs still-open bookkeeping, deterministic conflict detection — true today,
-while leaving exactly one function (`_apply_outcome`) to upgrade once real
-generation lands.
+**On the LLM's role: rewriting an edited item, nothing else.** Everything that
+decides *what* may change stays deterministic and testable — Affected_Scope,
+conflict detection (Requirement 10.9 requires it to be non-LLM), the choice of
+the winning feedback row, Unaffected_Scope byte-identity, and the
+addressed/still-open bookkeeping. Outcome classification (remove/retain/edit) is
+likewise a keyword scan over ``feedback.comment``, because conflict detection and
+the apply step must always agree on what a comment asked for. The LLM is used
+only where judgment is needed: when the winning outcome for an item is "edit", it
+revises that one item (title, time, description, location) to reflect the
+comment, replacing what used to be a note appended to the description.
+
+The LLM is an enhancement, not a dependency. With no client, no API key, a failed
+call, or a revision that is malformed, names an unrequested item, or breaks a
+party hard constraint, that item falls back to the earlier behaviour (the comment
+is appended to its description as a note) and the run proceeds.
 
 **On the prompt-injection requirement (Requirement 10's "SHALL NOT execute...
-any instruction phrased as an agent directive").** Trivially satisfied: this
-interim implementation never passes feedback text to an LLM at all. The
-requirement stays documented here so whoever wires in real generation sees
-it before adding that call.
+any instruction phrased as an agent directive").** Feedback text is passed to the
+LLM, so it is treated strictly as data: the system prompt carries
+:data:`~app.agents.llm.UNTRUSTED_INPUT_GUARD`, every comment is flattened to a
+single bounded line, and the model can only return revised fields for items this
+node asked about — it has no way to touch an item outside the Affected_Scope,
+add or remove items, change an id, or alter any other part of the itinerary, so
+an injected "directive" has nothing to act on.
 """
 
 from __future__ import annotations
@@ -49,9 +57,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.errors import NoItineraryToRefineError
+from app.agents.errors import LLMGenerationError, NoItineraryToRefineError
+from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import SummaryMessageContent, TextMessageContent, emit_npc_message
+from app.agents.nodes.discovery import _violates_hard_constraints
 from app.agents.nodes.itinerary import persist_itinerary_version
 from app.agents.proposals import ItineraryModel, RefinementProposal
 from app.services.trip_status_service import advance_trip_status
@@ -71,6 +82,15 @@ MAX_CHANGE_SUMMARY_LENGTH = 500
 #: scan uses: a false positive here costs nothing worse than an odd-sounding
 #: compromise message, while silently misreading "remove" as "edit" could drop
 #: the wrong thing.
+#: Per-field ceilings applied to model text before it reaches the itinerary.
+MAX_TITLE_CHARS = 120
+MAX_DESCRIPTION_CHARS = 500
+MAX_TIME_CHARS = 40
+MAX_LOCATION_CHARS = 120
+
+#: A feedback comment longer than this is truncated before it reaches a prompt.
+MAX_COMMENT_PROMPT_CHARS = 300
+
 _REMOVE_KEYWORDS = ("remove", "delete", "cut", "drop")
 _RETAIN_KEYWORDS = ("keep", "retain", "don't remove", "do not remove")
 
@@ -343,17 +363,29 @@ def _winning_feedback(
 # ---------------------------------------------------------------------------
 
 
-def _apply_outcome(item: dict[str, Any], outcome: str, comment: str) -> dict[str, Any] | None:
+def _apply_outcome(
+    item: dict[str, Any],
+    outcome: str,
+    comment: str,
+    revision: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Apply one winning outcome to an item.
 
-    Returns the (possibly updated) item, or ``None`` to drop it. See the
-    module docstring for why "edit" is a note appended to the description
-    rather than real regeneration.
+    Returns the (possibly updated) item, or ``None`` to drop it. For "edit",
+    ``revision`` is the LLM's validated rewrite when one exists; without it the
+    comment is appended to the description as a note, so an edit is never lost
+    just because the model was unavailable.
     """
     if outcome == "remove":
         return None
     if outcome == "retain":
         return item
+    if revision is not None:
+        updated = {**item, **revision}
+        if revision.get("location") != item.get("location"):
+            # A changed place no longer matches the places-tool entry it came from.
+            updated["location_id"] = None
+        return updated
     note = comment.strip()
     if not note:
         return item
@@ -368,6 +400,7 @@ def regenerate_affected_only(
     affected_scope: dict[str, Any],
     resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
     conflicts: list[dict[str, Any]],
+    revisions: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build the new itinerary dict, touching only the Affected_Scope.
 
@@ -379,15 +412,20 @@ def regenerate_affected_only(
 
     A day-only target (no specific item id) marks its whole day in scope but
     applies no change: there is nothing in it to concretely act on. Its
-    feedback row therefore stays open rather than being marked addressed,
-    which is the honest answer for an interim implementation with no real
-    generation yet.
+    feedback row therefore stays open rather than being marked addressed, which
+    is the honest answer while day-level rewriting is not implemented.
+
+    Args:
+        revisions: LLM-drafted rewrites keyed by item id, from
+            :func:`draft_item_revisions`. Optional: an item without one falls
+            back to the note-appending edit.
 
     Returns:
         ``(new_itinerary, addressed_feedback_ids)``.
     """
     winners = _winning_feedback(resolvable, conflicts)
     in_scope_days = affected_days(affected_scope)
+    revisions = revisions or {}
 
     new_days: list[dict[str, Any]] = []
     addressed_ids: list[str] = []
@@ -405,7 +443,12 @@ def regenerate_affected_only(
                 new_items.append(item)
                 continue
             outcome = _classify_outcome(winning_row.get("comment", ""))
-            updated = _apply_outcome(item, outcome, winning_row.get("comment", ""))
+            updated = _apply_outcome(
+                item,
+                outcome,
+                winning_row.get("comment", ""),
+                revisions.get(item["id"]),
+            )
             if updated is not None:
                 new_items.append(updated)
             addressed_ids.append(winning_row["id"])
@@ -413,6 +456,139 @@ def regenerate_affected_only(
         new_days.append({**day, "items": new_items})
 
     return {**base_itinerary, "days": new_days}, addressed_ids
+
+
+# ---------------------------------------------------------------------------
+# LLM item revision
+# ---------------------------------------------------------------------------
+
+
+class _ItemRevision(BaseModel):
+    """One revised item as drafted by the model. Lenient on length; trimmed in code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str = Field(min_length=1, description="The id of the item being revised, unchanged.")
+    title: str = Field(min_length=1, description="Revised short name of the activity.")
+    time: str | None = Field(default=None, description="Start time, 24-hour HH:MM.")
+    description: str = Field(default="", description="One or two sentences.")
+    location: str | None = Field(default=None, description="Neighbourhood or venue name.")
+
+
+class _RevisionBatch(BaseModel):
+    """The model's answer: one revision per item it was asked about."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    revisions: list[_ItemRevision] = Field(min_length=1)
+
+
+def _items_needing_revision(
+    base_itinerary: dict[str, Any],
+    affected_scope: dict[str, Any],
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    conflicts: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], str]]:
+    """Return ``(item, comment)`` for each item whose winning outcome is an edit.
+
+    Mirrors the selection :func:`regenerate_affected_only` makes, so the model is
+    asked about exactly the items that function would otherwise only annotate.
+    """
+    winners = _winning_feedback(resolvable, conflicts)
+    in_scope_days = affected_days(affected_scope)
+    needing: list[tuple[dict[str, Any], str]] = []
+    for day in base_itinerary.get("days") or []:
+        if int(day["day"]) not in in_scope_days:
+            continue
+        for item in day.get("items") or []:
+            row = winners.get((int(day["day"]), item["id"]))
+            if row is None:
+                continue
+            comment = row.get("comment", "")
+            if _classify_outcome(comment) == "edit" and comment.strip():
+                needing.append((item, comment))
+    return needing
+
+
+async def draft_item_revisions(
+    llm: Any,
+    base_itinerary: dict[str, Any],
+    affected_scope: dict[str, Any],
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    conflicts: list[dict[str, Any]],
+    hard_constraints: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Ask the LLM to rewrite each item whose winning outcome is an edit.
+
+    One call covers every such item. Returns validated field updates keyed by
+    item id, containing only ``title``, ``time``, ``description`` and
+    ``location`` — never an id or any other field. Never raises: on any failure,
+    or for any revision that is unrequested, duplicated, malformed or breaks a
+    hard constraint, the item is simply absent and falls back to the note edit.
+    """
+    if llm is None:
+        return {}
+    needing = _items_needing_revision(base_itinerary, affected_scope, resolvable, conflicts)
+    if not needing:
+        return {}
+
+    entries = []
+    for item, comment in needing:
+        entries.append(
+            f"item_id: {item['id']}\n"
+            f"current title: {clip_text(item.get('title'), MAX_TITLE_CHARS) or ''}\n"
+            f"current time: {item.get('time') or 'not set'}\n"
+            "current description: "
+            f"{clip_text(item.get('description'), MAX_DESCRIPTION_CHARS) or 'not set'}\n"
+            f"current location: {item.get('location') or 'not set'}\n"
+            f"feedback: {clip_text(comment, MAX_COMMENT_PROMPT_CHARS) or ''}"
+        )
+    system_prompt = (
+        f"{UNTRUSTED_INPUT_GUARD}\n\n"
+        "You are an in-world NPC travel guide revising individual items of a group trip "
+        "itinerary after party feedback. For each item below, return a revised version that "
+        "reflects the feedback. Change only what the feedback asks for and keep the rest of "
+        "the item as it is. Return exactly one revision per item, repeating its item_id "
+        "unchanged. Never state prices, opening hours or booking details, and never include "
+        "anything that violates a stated hard constraint.\n"
+        f"Hard constraints: {clip_for_prompt(hard_constraints)}"
+    )
+    try:
+        batch = await llm.generate_structured(
+            operation="itinerary_revision",
+            system_prompt=system_prompt,
+            user_prompt="Revise these items:\n\n" + "\n\n".join(entries),
+            response_model=_RevisionBatch,
+        )
+        drafted = batch.revisions
+    except LLMGenerationError:
+        logger.info("LLM item revision unavailable; falling back to note edits")
+        return {}
+    except Exception:  # a malformed double or SDK surprise must not break REFINE
+        logger.info("LLM item revision returned an unusable result; falling back to note edits")
+        return {}
+
+    originals = {item["id"]: item for item, _comment in needing}
+    revisions: dict[str, dict[str, Any]] = {}
+    for entry in drafted:
+        original = originals.get(entry.item_id)
+        if original is None or entry.item_id in revisions:
+            continue
+        title = clip_text(entry.title, MAX_TITLE_CHARS)
+        if title is None:
+            continue
+        description = clip_text(entry.description, MAX_DESCRIPTION_CHARS)
+        location = clip_text(entry.location, MAX_LOCATION_CHARS)
+        searchable = " ".join(filter(None, (title, description, location)))
+        if _violates_hard_constraints(searchable, hard_constraints) is not None:
+            continue
+        revisions[entry.item_id] = {
+            "title": title,
+            "time": clip_text(entry.time, MAX_TIME_CHARS) or original.get("time"),
+            "description": description if description is not None else original.get("description"),
+            "location": location if location is not None else original.get("location"),
+        }
+    return revisions
 
 
 def build_change_summary(
@@ -552,8 +728,16 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
 
     affected_scope = compute_affected_scope(resolvable, base_itinerary)
     conflicts = detect_conflicts(resolvable)
+    revisions = await draft_item_revisions(
+        repos.llm,
+        base_itinerary,
+        affected_scope,
+        resolvable,
+        conflicts,
+        _hard_constraints(context.get("preferences") or []),
+    )
     new_itinerary_dict, addressed_ids = regenerate_affected_only(
-        base_itinerary, affected_scope, resolvable, conflicts
+        base_itinerary, affected_scope, resolvable, conflicts, revisions
     )
     change_summary = build_change_summary(affected_scope, conflicts)
 
@@ -629,6 +813,13 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
     )
 
     return state
+
+
+def _hard_constraints(preferences: list[dict[str, Any]]) -> list[str]:
+    """Collect the party's hard constraints (as text) from its preference rows."""
+    return [
+        str(constraint) for row in preferences for constraint in (row.get("hard_constraints") or [])
+    ]
 
 
 async def _load_context(state: AgentState, repos: RepositoryBundle) -> dict[str, Any]:
