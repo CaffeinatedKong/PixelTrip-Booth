@@ -12,6 +12,8 @@ export interface CharacterOption {
   id: string;
   /** Human-facing label rendered on the option card. */
   label: string;
+  /** Optional one-line description shown on richer card groups (e.g. vibes). */
+  description?: string;
 }
 
 /** Step 1 — budget tier (single-select). */
@@ -44,14 +46,52 @@ export const TRIP_PRIORITIES: readonly CharacterOption[] = [
 ] as const;
 
 /**
- * Suggested destination options (multi-select). Destinations remain free-form in
- * the payload; these are UI suggestions, not an exhaustive list.
+ * Destination VIBES (multi-select). Rather than specific cities, the user picks the
+ * kind of trip they feel like — "Where do you feel like going?". These are the
+ * free-form destination preferences sent to the planner.
  */
 export const DESTINATIONS: readonly CharacterOption[] = [
-  { id: "tokyo", label: "Tokyo" },
-  { id: "seoul", label: "Seoul" },
-  { id: "bangkok", label: "Bangkok" },
-  { id: "paris", label: "Paris" },
+  { id: "asia", label: "Asia", description: "Rich cultures & buzzing cities" },
+  {
+    id: "western-cities",
+    label: "Western Cities",
+    description: "Architecture, culture & nightlife",
+  },
+  {
+    id: "beach-escape",
+    label: "Beach Escape",
+    description: "Sun, sand & crystal waters",
+  },
+  {
+    id: "nature-scenery",
+    label: "Nature & Scenery",
+    description: "Mountains, forests & wild beauty",
+  },
+  {
+    id: "food-trip",
+    label: "Food Trip",
+    description: "Eat your way around the world",
+  },
+  {
+    id: "cultural-trip",
+    label: "Cultural Trip",
+    description: "History, art & local traditions",
+  },
+  {
+    id: "adventure-trip",
+    label: "Adventure Trip",
+    description: "Thrills, trails & unforgettable moments",
+  },
+  {
+    id: "shopping-city",
+    label: "Shopping City",
+    description: "Fashion, markets & retail therapy",
+  },
+  {
+    id: "hidden-gems",
+    label: "Hidden Gems",
+    description: "Off-the-beaten-path discoveries",
+  },
 ] as const;
 
 /** Activity options (multi-select tags). */

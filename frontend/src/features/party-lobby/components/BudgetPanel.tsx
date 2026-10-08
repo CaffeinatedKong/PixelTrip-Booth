@@ -1,65 +1,23 @@
 "use client";
 
 /**
- * BudgetPanel — the adventure sidebar budget readout (Req 15).
+ * BudgetPanel — the adventure sidebar budget readout.
  *
- * Presentational only: data in via the derived `BudgetView`, no data fetching.
- * Shows the budget limit, estimated expenditure, and remaining budget as whole
- * USD-style currency (e.g. "$0", "$1,500"). When the party is over budget it
- * swaps the remaining row for an over-budget state that shows the overage amount
- * plus a literal "OVER BUDGET" text label styled with the `danger` status token.
- *
- * Color is never the only signal: the "OVER BUDGET" text label always accompanies
- * the token color so the state reads without relying on color (Req 15.5).
+ * The party budget is not confirmed during setup, so this panel shows a
+ * "Not set yet" placeholder instead of actual amounts. It becomes a real readout
+ * (limit / estimated / remaining) once the trip budget is locked in. Purely
+ * presentational; token styling only.
  */
 import type { ReactElement } from "react";
 
 import { PixelCard } from "@/components/PixelCard";
 
-import type { BudgetView } from "../types";
-
-export interface BudgetPanelProps {
-  /** The derived budget readout for the party. */
-  budget: BudgetView;
-}
-
-/** Formats a whole-dollar amount as a USD-style string with no decimals, e.g. "$1,500". */
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-export function BudgetPanel({ budget }: BudgetPanelProps): ReactElement {
-  const { limit, estimated, remaining, isOverBudget, overageAmount } = budget;
-
+export function BudgetPanel(): ReactElement {
   return (
     <PixelCard title="Budget">
-      <dl className="flex flex-col gap-8" data-testid="budget-panel">
-        <div className="flex items-center justify-between gap-16">
-          <dt className="font-body text-muted">Limit</dt>
-          <dd className="font-body">{formatCurrency(limit)}</dd>
-        </div>
-        <div className="flex items-center justify-between gap-16">
-          <dt className="font-body text-muted">Estimated</dt>
-          <dd className="font-body">{formatCurrency(estimated)}</dd>
-        </div>
-        {isOverBudget ? (
-          <div className="flex items-center justify-between gap-16">
-            <dt className="font-display text-danger">OVER BUDGET</dt>
-            <dd className="font-body text-danger">
-              {formatCurrency(overageAmount)} over
-            </dd>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-16">
-            <dt className="font-body text-muted">Remaining</dt>
-            <dd className="font-body text-success">{formatCurrency(remaining)}</dd>
-          </div>
-        )}
-      </dl>
+      <p className="font-body text-muted" data-testid="budget-panel">
+        Not set yet
+      </p>
     </PixelCard>
   );
 }

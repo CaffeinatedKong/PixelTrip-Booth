@@ -25,6 +25,7 @@ import type { RoomSession } from "@/types";
 import { CharacterPreview } from "./CharacterPreview";
 import { OptionCardGroup } from "./OptionCardGroup";
 import { OptionTagGroup } from "./OptionTagGroup";
+import { VibeCardGroup } from "./VibeCardGroup";
 import { useCharacterDraft } from "../hooks/useCharacterDraft";
 import { LAYER_MAP, resolveLayers } from "../lib/characterLayers";
 import {
@@ -99,12 +100,13 @@ export function CharacterCreator({
       await getServices().preferences.savePreferences({
         roomCode: session.room.roomCode,
         memberId: session.member.id,
-        // Payload-shaped preferences. tripPriorities map onto the contract's
-        // `interests`; activities are sent as plain name tags; origin is always
-        // Singapore and is never asked of the user.
+        // Payload-shaped preferences. The group-trip role is carried in
+        // `travelStyle` (what role you play in the group); tripPriorities map onto
+        // the contract's `interests`; activities are sent as plain name tags;
+        // origin is always Singapore and is never asked of the user.
         availableDates: character.availableDates,
         destinations: character.destinations,
-        travelStyle: null,
+        travelStyle: character.groupRole,
         budget: character.budget,
         interests: character.tripPriorities,
         activities: character.activities,
@@ -206,9 +208,9 @@ export function CharacterCreator({
         onToggle={(id) => toggle("tripPriorities", id)}
       />
 
-      {/* 5. Destinations (multi-select). */}
-      <OptionTagGroup
-        legend="Destinations"
+      {/* 5. Destination vibes (multi-select). */}
+      <VibeCardGroup
+        legend="Where do you feel like going?"
         options={DESTINATIONS}
         selectedIds={draft.destinations}
         onToggle={(id) => toggle("destinations", id)}

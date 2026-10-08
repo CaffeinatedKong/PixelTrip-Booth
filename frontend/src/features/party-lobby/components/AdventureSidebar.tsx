@@ -3,8 +3,9 @@
 /**
  * AdventureSidebar — the persistent "YOUR ADVENTURE" right-panel host.
  *
- * Composes the already-built sidebar panels in order: trip header, party panel,
- * destination + flight placeholders, budget, and the six-stage quest progress.
+ * Composes the sidebar panels in order: party panel, destination + flight
+ * placeholders, budget (shown as not-yet-set until confirmed), and the six-stage
+ * quest progress. (Trip header + dates are omitted until the trip is confirmed.)
  * Presentational only: the view model arrives via `adventure` and the optional
  * `roomSession` prop supplies the live room code and planning stage. It performs
  * NO data fetching and imports NO concrete service — the room code is read solely
@@ -26,7 +27,6 @@ import type { RoomSession } from "@/types/room";
 import type { AdventureView } from "../types";
 import { useAdventureDrawer } from "../hooks/useAdventureDrawer";
 import { buildStageSteps } from "../lib/stages";
-import { SidebarTripHeader } from "./SidebarTripHeader";
 import { SidebarPartyPanel } from "./SidebarPartyPanel";
 import { SidebarPlaceholderPanel } from "./SidebarPlaceholderPanel";
 import { BudgetPanel } from "./BudgetPanel";
@@ -84,10 +84,6 @@ export function AdventureSidebar({
         id={contentId}
         className={`flex-col gap-16 lg:flex ${drawer.isOpen ? "flex" : "hidden"}`}
       >
-        <SidebarTripHeader
-          tripName={adventure.tripName}
-          dateRangeLabel={adventure.dateRangeLabel}
-        />
         <SidebarPartyPanel
           members={adventure.members}
           capacity={adventure.capacity}
@@ -96,7 +92,7 @@ export function AdventureSidebar({
         />
         <SidebarPlaceholderPanel title="DESTINATION" emptyLabel="Not selected" />
         <SidebarPlaceholderPanel title="FLIGHT" emptyLabel="Not selected" />
-        <BudgetPanel budget={adventure.budget} />
+        <BudgetPanel />
         <AdventureProgress steps={steps} />
       </div>
     </aside>
