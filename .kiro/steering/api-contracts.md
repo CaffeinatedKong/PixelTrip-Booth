@@ -262,6 +262,88 @@ fail this request; they show up as the run's `status: "failed"` with a safe `err
 
 Errors: `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
 
+### `POST /trips/{tripId}/feedback` — give feedback on the itinerary (REFINE)
+
+A member comments on the version under review (the latest `proposed` one).
+
+```json
+{
+  "memberId": "…",
+  "itineraryVersionId": "…",
+  "target": { "day": 2, "itemId": "d2-i3" },
+  "comment": "Swap the museum for a street-food market."
+}
+```
+
+- `target`: must include `day` (≥ 1) and/or `itemId` (an activity's `id` from the
+  itinerary), because the AI revises the plan day by day and activity by activity.
+  `section` is optional extra context. Feedback naming neither is rejected with `422`.
+- `comment`: 1–1000 characters, not blank.
+
+`201` response: `{ "feedback": { id, tripId, itineraryVersionId, memberId, target, comment,
+status: "open" }, "trip": { … } }`. The member is marked ready for this round and the trip
+moves to `feedback_collected`. To act on the feedback, start a `refinement` run
+(`POST /trips/{tripId}/runs`); it proposes a new version and marks the feedback
+`addressed`.
+
+Errors: `404 TRIP_NOT_FOUND`, `404 ITINERARY_VERSION_NOT_FOUND`, `409 VERSION_NOT_PROPOSED`
+(the version is superseded, approved, or rejected), `422 MEMBER_NOT_RESOLVED`,
+`422 VALIDATION_ERROR`, `503 DATABASE_ERROR`.
+
+### `POST /trips/{tripId}/itinerary/versions/{versionId}/decision` — approve or reject (owner only)
+
+```json
+{ "memberId": "…", "decision": "approve" }
+```
+
+- Only the room owner can decide, and only on the version under review.
+- `approve`: the version becomes `approved`, the trip moves to `trip_approved` (stage
+  `wrap`), and the guide posts its final `summary` message.
+- `reject`: the version becomes `rejected`; the party can give more feedback and run
+  another refinement.
+
+`200` response: `{ "version": { … }, "trip": { … } }`.
+
+Errors: `404 TRIP_NOT_FOUND`, `404 ITINERARY_VERSION_NOT_FOUND`, `409 VERSION_NOT_PROPOSED`,
+`409 DUPLICATE_APPROVAL` (another version is already approved), `422 MEMBER_NOT_RESOLVED`
+(not the owner), `422 VALIDATION_ERROR`, `503 DATABASE_ERROR`.
+
+### `POST /trips/{tripId}/export` — the final, shareable trip (WRAP)
+
+No body. `200` response:
+
+```json
+{
+  "trip": { … },
+  "room": { … },
+  "itinerary": { "id": "…", "version": 2, "status": "approved", "itinerary": { … }, … },
+  "destination": { "id": "tokyo", "title": "Tokyo", … },
+  "flight": { "title": "Scoot TR804", "depart_at": "…", "return_at": "…", "price": 1136.5, … },
+  "party": [ { "displayName": "Gerald", "role": "owner", "spriteKey": "explorer-01" } ]
+}
+```
+
+`destination` and `flight` are the locked selections' details (or `null`). The first call
+moves the trip to `trip_exported`; calling again returns the same trip.
+
+Errors: `404 TRIP_NOT_FOUND`, `404 NO_APPROVED_ITINERARY`, `503 DATABASE_ERROR`.
+
+### `POST /rooms/{roomCode}/messages` — send a chat message
+
+```json
+{ "memberId": "…", "text": "Ramen first, then the onsen?" }
+```
+
+- `text`: 1–1000 characters, not blank.
+
+`201` response: the message envelope (see "Chat Message Flow"):
+`{ id, roomId, createdAt, senderType: "user", senderId, kind: "text", content: { text } }`.
+Everyone in the room receives it live over Realtime (`messages`), in the same transcript as
+the AI guide's messages.
+
+Errors: `404 ROOM_NOT_FOUND`, `422 MEMBER_NOT_RESOLVED`, `422 VALIDATION_ERROR`,
+`503 DATABASE_ERROR`.
+
 ### Reading live data directly
 
 Writes always go through the endpoints above. For reads and live updates the frontend may
@@ -285,10 +367,12 @@ only writer:
 |---|---|
 | SETUP | save their preferences (`PUT …/preferences`) |
 | DISCOVER, LOGISTICS | cast a vote that does not close it (`POST /votes/{id}/cast`) |
-| BUILD, REFINE, WRAP | (not used yet) |
+| REFINE | give feedback on the version under review (`POST /trips/{tripId}/feedback`) |
+| BUILD, WRAP | (not used) |
 
 Whenever the room's `planningStage` changes, every member's `stageReady` resets to
-`false`, so each stage starts fresh. The party usually moves on by itself (the last member
+`false`, so each stage starts fresh. In REFINE it also resets when a refinement proposes a
+new version (trip status `refinement_completed`), so each round of feedback starts fresh. The party usually moves on by itself (the last member
 to submit or vote advances the trip), so the waiting count is for display, not a gate the
 frontend enforces.
 
@@ -308,6 +392,10 @@ Branch on `code`, not `message`. `message` is safe to log; it is not tuned for d
 | 404 | `TRIP_NOT_FOUND` | No trip with that id. |
 | 404 | `VOTE_SESSION_NOT_FOUND` | No vote session with that id. |
 | 404 | `RUN_NOT_FOUND` | No AI run with that id. |
+| 404 | `ITINERARY_VERSION_NOT_FOUND` | No itinerary version with that id on this trip. |
+| 404 | `NO_APPROVED_ITINERARY` | Export requested before any version was approved. |
+| 409 | `VERSION_NOT_PROPOSED` | That version is not the one under review. |
+| 409 | `DUPLICATE_APPROVAL` | Another version of this trip is already approved. |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | Key already used for a different trip or run type. |
 | 409 | `MEMBER_ALREADY_EXISTS` | Name taken in a race; retry the join. |
 | 422 | `VALIDATION_ERROR` | Bad body or path; `message` names the fields. |
@@ -329,7 +417,8 @@ A room message has a stable envelope:
 - `content`: shape depends on `kind` (see below)
 
 Flow:
-1. User sends a text message → persisted to Supabase → broadcast via Realtime.
+1. User sends a text message (`POST /rooms/{roomCode}/messages`) → persisted to Supabase →
+   broadcast via Realtime.
 2. Backend AI produces messages (any `kind`) → persisted → broadcast via Realtime.
 3. Clients render new messages from the Realtime stream.
 
@@ -412,8 +501,8 @@ The UI can list versions and step through/compare them. At most one version per 
 
 Feedback entry (submitted by a party member):
 - Input: `{ tripId, itineraryVersionId, memberId, target, comment }`
-  - `target`: structured reference to what the feedback applies to, e.g.
-    `{ day?, itemId?, section? }`.
+  - `target`: what the feedback applies to: `{ day?, itemId?, section? }` with at least
+    `day` or `itemId`.
   - `comment`: the party member's comment or suggested change.
 - `status`: `"open" | "addressed"`.
 
@@ -421,8 +510,9 @@ Refinement result (from the AI):
 - An analysis `text`/`summary` message: conflicts identified and compromises proposed.
 - A new itinerary version (see above) with `source: "refine"`, `status: "proposed"`, and a
   `changeSummary`. The version it replaces becomes `superseded`.
-- Decision: `{ tripId, itineraryVersionId, decision: "approve" | "reject" }`. Approving
-  marks the version `approved` and advances toward WRAP.
+- Decision: `{ tripId, itineraryVersionId, decision: "approve" | "reject" }`, made by the
+  room owner. Approving marks the version `approved` and moves the trip to WRAP. See "HTTP
+  API" for the feedback, decision, and export endpoints.
 
 ## AI Runs
 
@@ -447,6 +537,6 @@ Every planning surface reflects where the party is:
 
 ## Export (WRAP)
 
-Finalisation returns:
-- The approved itinerary version.
-- `export`: a shareable payload the WRAP UI offers to share/download.
+Finalisation (`POST /trips/{tripId}/export`) returns the approved itinerary version together
+with the locked destination, flight, and party: everything the WRAP screen shows and
+shares.

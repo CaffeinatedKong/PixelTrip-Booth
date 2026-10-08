@@ -46,8 +46,11 @@ from app.repositories.trip_repository import TripRepository
 from app.repositories.vote_repository import VoteRepository
 from app.repositories.vote_session_repository import VoteSessionRepository
 from app.services.agent_run_service import AgentRunService
+from app.services.chat_service import ChatService
+from app.services.export_service import ExportService
 from app.services.itinerary_service import ItineraryService
 from app.services.preference_service import PreferenceService
+from app.services.refine_service import RefineService
 from app.services.room_service import RoomService
 from app.services.run_endpoint_service import RunEndpointService
 from app.services.voting_endpoint_service import VotingEndpointService
@@ -265,3 +268,18 @@ def get_run_endpoint_service(repos: Repos) -> RunEndpointService:
 def get_itinerary_service(repos: Repos) -> ItineraryService:
     """Provide the :class:`ItineraryService`."""
     return ItineraryService(repos.trip_repo, repos.itinerary_version_repo)
+
+
+def get_refine_service(repos: Repos) -> RefineService:
+    """Provide the :class:`RefineService` (feedback and approve/reject)."""
+    return RefineService(repos)
+
+
+def get_export_service(repos: Repos) -> ExportService:
+    """Provide the :class:`ExportService`."""
+    return ExportService(repos)
+
+
+def get_chat_service(repos: Repos) -> ChatService:
+    """Provide the :class:`ChatService`."""
+    return ChatService(repos)

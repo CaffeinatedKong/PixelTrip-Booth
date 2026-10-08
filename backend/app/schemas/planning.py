@@ -13,7 +13,13 @@ from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 
-from app.schemas.room import CharacterSchema, TravelPreferencesSchema, TripSchema, _Base
+from app.schemas.room import (
+    CharacterSchema,
+    PartyRoomSchema,
+    TravelPreferencesSchema,
+    TripSchema,
+    _Base,
+)
 
 _MEMBER_ID_EXAMPLE = "3a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d"
 
@@ -185,3 +191,122 @@ class ItineraryVersionSchema(_Base):
     status: Literal["proposed", "approved", "rejected", "superseded"]
     itinerary: dict[str, Any]
     change_summary: str | None = None
+
+
+# --- Feedback & decisions (REFINE) ----------------------------------------------------
+
+
+class FeedbackTarget(_Base):
+    """What the feedback is about: a whole day, or one activity (``itemId``).
+
+    At least one of ``day`` / ``itemId`` is required, because the refinement AI revises
+    the itinerary day by day and activity by activity. ``section`` is optional context.
+    """
+
+    day: int | None = Field(default=None, ge=1, le=60, examples=[2])
+    item_id: str | None = Field(default=None, min_length=1, max_length=100, examples=["d2-i3"])
+    section: str | None = Field(default=None, max_length=100, examples=["dinner"])
+
+    @model_validator(mode="after")
+    def _names_a_day_or_activity(self) -> FeedbackTarget:
+        if self.day is None and self.item_id is None:
+            raise ValueError("target must include a 'day' or an 'itemId'")
+        return self
+
+
+class SubmitFeedbackRequest(_Base):
+    member_id: UUID = Field(examples=[_MEMBER_ID_EXAMPLE])
+    itinerary_version_id: UUID = Field(
+        description="The version being commented on; must be the one under review."
+    )
+    target: FeedbackTarget
+    comment: str = Field(
+        min_length=1, max_length=1000, examples=["Swap the museum for a street-food market."]
+    )
+
+    @field_validator("comment")
+    @classmethod
+    def _comment_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("comment must not be blank")
+        return value
+
+
+class FeedbackSchema(_Base):
+    id: str
+    trip_id: str
+    itinerary_version_id: str
+    member_id: str
+    target: dict[str, Any]
+    comment: str
+    status: Literal["open", "addressed"]
+
+
+class SubmitFeedbackResponse(_Base):
+    feedback: FeedbackSchema
+    trip: TripSchema
+
+
+class VersionDecisionRequest(_Base):
+    member_id: UUID = Field(
+        description="Must be the room owner's member id.", examples=[_MEMBER_ID_EXAMPLE]
+    )
+    decision: Literal["approve", "reject"] = Field(examples=["approve"])
+
+
+class VersionDecisionResponse(_Base):
+    version: ItineraryVersionSchema
+    trip: TripSchema
+
+
+# --- Export (WRAP) ----------------------------------------------------------------------
+
+
+class ExportMember(_Base):
+    display_name: str
+    role: Literal["owner", "member"]
+    sprite_key: str | None = None
+
+
+class TripExportResponse(_Base):
+    """The final, shareable adventure."""
+
+    trip: TripSchema
+    room: PartyRoomSchema
+    itinerary: ItineraryVersionSchema = Field(description="The approved version.")
+    destination: dict[str, Any] | None = Field(
+        default=None, description="The locked destination selection's details."
+    )
+    flight: dict[str, Any] | None = Field(
+        default=None, description="The locked flight selection's details."
+    )
+    party: list[ExportMember]
+
+
+# --- Chat -----------------------------------------------------------------------------
+
+
+class SendMessageRequest(_Base):
+    member_id: UUID = Field(examples=[_MEMBER_ID_EXAMPLE])
+    text: str = Field(min_length=1, max_length=1000, examples=["Ramen first, then the onsen?"])
+
+    @field_validator("text")
+    @classmethod
+    def _text_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("text must not be blank")
+        return value
+
+
+class MessageSchema(_Base):
+    """A chat message (the envelope in "Chat Message Flow" of api-contracts.md)."""
+
+    id: str
+    room_id: str
+    created_at: str
+    sender_type: Literal["user", "ai"]
+    sender_id: str | None = Field(description="Member id, or null for the AI guide.")
+    kind: Literal["text", "recommendation", "vote", "summary"]
+    content: dict[str, Any]

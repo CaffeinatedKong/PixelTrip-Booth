@@ -46,6 +46,10 @@ class RunNotFoundError(NotFoundError):
     """No ``agent_runs`` row matches the supplied id."""
 
 
+class ItineraryVersionNotFoundError(NotFoundError):
+    """No itinerary version with that id belongs to the trip."""
+
+
 # --- 409 family: a conflicting state or constraint violation ----------------
 
 
@@ -55,6 +59,10 @@ class ConflictError(BackendError):
 
 class MemberAlreadyExistsError(ConflictError):
     """A member with that display name already exists in the room."""
+
+
+class VersionNotProposedError(ConflictError):
+    """The itinerary version is not the one under review (not ``proposed``)."""
 
 
 # --- 422 family: the request or derived state is invalid --------------------

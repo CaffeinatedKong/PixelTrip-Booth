@@ -22,12 +22,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import dev, health, preferences, rooms, trips, votes
+from app.api.routes import dev, health, messages, preferences, rooms, trips, votes
 from app.core.config import get_settings
 from app.exceptions import (
     BackendError,
     ConflictError,
     InvalidDisplayNameError,
+    ItineraryVersionNotFoundError,
     MemberAlreadyExistsError,
     NotFoundError,
     RepositoryError,
@@ -35,6 +36,7 @@ from app.exceptions import (
     RoomNotFoundError,
     RunNotFoundError,
     ValidationError,
+    VersionNotProposedError,
     VoteSessionNotFoundError,
 )
 from app.schemas.errors import error_body
@@ -58,6 +60,7 @@ app.include_router(rooms.router)
 app.include_router(preferences.router)
 app.include_router(votes.router)
 app.include_router(trips.router)
+app.include_router(messages.router)
 if settings.enable_dev_endpoints:
     # Testing-only routes (lock a test flight, add feedback); absent unless explicitly enabled.
     app.include_router(dev.router)
@@ -85,6 +88,8 @@ ERROR_CODES: dict[type[BackendError], tuple[int, str]] = {
     RoomNotFoundError: (404, "ROOM_NOT_FOUND"),
     VoteSessionNotFoundError: (404, "VOTE_SESSION_NOT_FOUND"),
     RunNotFoundError: (404, "RUN_NOT_FOUND"),
+    ItineraryVersionNotFoundError: (404, "ITINERARY_VERSION_NOT_FOUND"),
+    VersionNotProposedError: (409, "VERSION_NOT_PROPOSED"),
     MemberAlreadyExistsError: (409, "MEMBER_ALREADY_EXISTS"),
     InvalidDisplayNameError: (422, "INVALID_DISPLAY_NAME"),
 }
