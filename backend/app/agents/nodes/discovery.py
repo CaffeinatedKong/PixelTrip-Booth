@@ -90,10 +90,11 @@ MAX_QUESTION_LENGTH = 200
 STAGE = "DISCOVER"
 
 #: Card copy limits (CR-1): the frontend renders these on a small pixel card.
-MAX_TAGS = 4
+MAX_TAGS = 5
 MAX_TAG_LENGTH = 24
-MAX_SHORT_TEXT = 200
-MAX_DETAILS_TEXT = 600
+MAX_DESCRIPTION_TEXT = 300
+MAX_REASONING_TEXT = 600
+MAX_DETAILS_TEXT = 1500
 
 #: Fallback fit scores when no model is available: a destination someone in the
 #: party wish-listed is a stronger signal than a guide suggestion.
@@ -353,8 +354,8 @@ def _card_from_insight(insight: _DestinationInsight, forbidden: list[str]) -> di
     Copy that mentions a hard-constraint subject is dropped: the business
     guardrail scans item text, so it would reject the whole proposal.
     """
-    why = clip_text(insight.why_this_fits, MAX_SHORT_TEXT)
-    description = clip_text(insight.description, MAX_SHORT_TEXT) or why
+    why = clip_text(insight.why_this_fits, MAX_REASONING_TEXT)
+    description = clip_text(insight.description, MAX_DESCRIPTION_TEXT) or why
     if why is None or description is None:
         return None
     card = {
@@ -363,7 +364,7 @@ def _card_from_insight(insight: _DestinationInsight, forbidden: list[str]) -> di
             "score": max(0, min(100, int(insight.score))),
             "whyThisFits": why,
             "tags": _clean_tags(insight.tags),
-            "tradeOff": clip_text(insight.trade_off, MAX_SHORT_TEXT) or "",
+            "tradeOff": clip_text(insight.trade_off, MAX_REASONING_TEXT) or "",
             "details": clip_text(insight.details, MAX_DETAILS_TEXT) or description,
         },
     }
@@ -393,13 +394,20 @@ async def _generate_insights(
     system_prompt = (
         f"{UNTRUSTED_INPUT_GUARD}\n\n"
         "You are an in-world NPC travel guide for a group trip-planning game. For each "
-        "destination given, judge how well it fits the whole party and write short card copy:\n"
-        "- score: 0-100 fit for the party (interests, activities, styles, budget, dates)\n"
-        "- description: one sentence about the place\n"
-        "- why_this_fits: one sentence tying it to the party's preferences\n"
-        "- tags: 2-4 short labels (1-3 words each), e.g. Budget, Low crowds, Nightlife\n"
-        "- trade_off: one honest downside for this party\n"
-        "- details: 2-3 sentences on what to expect in their travel window\n"
+        "destination given, judge how well it fits the whole party and write card copy that "
+        "helps them decide. Be specific and concrete; avoid generic praise.\n"
+        "- score: 0-100 fit for the party (interests, activities, styles, budget, dates). "
+        "Spread the scores so the best fit clearly stands out.\n"
+        "- description: 1-2 sentences capturing the place's character.\n"
+        "- why_this_fits: 2-3 sentences naming the party's own interests, activities and "
+        "travel styles it matches, with real examples (a district, dish, beach or "
+        "activity), and how it suits their budget and travel window.\n"
+        "- tags: 3-5 short labels (1-3 words each), e.g. Budget, Low crowds, Nightlife.\n"
+        "- trade_off: 1-2 sentences on the most important downside for this party and how "
+        "they could work around it.\n"
+        "- details: 4-6 sentences covering the weather in their travel window, the top "
+        "things to do for this party, the food scene, a rough daily cost per person "
+        "compared with their budget, and where to stay or how to get around.\n"
         "Use the destination name exactly as given. Never mention or recommend anything a "
         "hard constraint rules out."
     )

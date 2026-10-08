@@ -113,6 +113,31 @@ def _is_model_unavailable(exc: BaseException) -> bool:
     return "RESOURCE_EXHAUSTED" in str(exc)[:300]
 
 
+#: Provider status keywords safe to log: fixed words, never the error's own text.
+_LOGGABLE_STATUSES: tuple[tuple[str, str], ...] = (
+    ("UNAVAILABLE", "503 UNAVAILABLE (model overloaded)"),
+    ("RESOURCE_EXHAUSTED", "429 RESOURCE_EXHAUSTED (quota)"),
+    ("DEADLINE_EXCEEDED", "504 DEADLINE_EXCEEDED"),
+    ("INTERNAL", "500 INTERNAL"),
+    ("PERMISSION_DENIED", "403 PERMISSION_DENIED (check the API key)"),
+    ("UNAUTHENTICATED", "401 UNAUTHENTICATED (check the API key)"),
+    ("NOT_FOUND", "404 NOT_FOUND (model name)"),
+)
+
+
+def _error_summary(exc: BaseException) -> str:
+    """The exception type plus a known status keyword, for logs.
+
+    Only matches against :data:`_LOGGABLE_STATUSES`, so nothing from the
+    provider's message (which can quote the prompt) reaches the log.
+    """
+    head = str(exc)[:300]
+    for keyword, label in _LOGGABLE_STATUSES:
+        if keyword in head:
+            return f"{type(exc).__name__} {label}"
+    return type(exc).__name__
+
+
 def _is_request_rejected(exc: BaseException) -> bool:
     """Whether the provider refused this *request* as invalid for this model (HTTP 400).
 
@@ -285,14 +310,14 @@ class LLMClient:
                         logger.info(
                             "LLM model '%s' unavailable (%s); trying the next model",
                             model_name,
-                            type(exc).__name__,
+                            _error_summary(exc),
                         )
                         break
                     if _is_request_rejected(exc):
                         logger.info(
                             "LLM model '%s' rejected the request (%s); trying the next model",
                             model_name,
-                            type(exc).__name__,
+                            _error_summary(exc),
                         )
                         break
                     if attempt == MAX_ATTEMPTS - 1:
@@ -300,7 +325,7 @@ class LLMClient:
                             "LLM call '%s' failed on model '%s' after retry: %s",
                             operation,
                             model_name,
-                            type(exc).__name__,
+                            _error_summary(exc),
                         )
                         self._unavailable_until[model_name] = _now() + FAILURE_COOLDOWN_SECONDS
                         break

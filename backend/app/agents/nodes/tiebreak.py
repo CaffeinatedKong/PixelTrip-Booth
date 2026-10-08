@@ -47,9 +47,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 logger = logging.getLogger(__name__)
 
 STAGE_BY_CATEGORY = {"destination": "DISCOVER", "flight": "LOGISTICS"}
-MAX_ANALYSIS_CHARS = 400
-MAX_ADVICE_CHARS = 800
-MAX_REASON_CHARS = 160
+MAX_ANALYSIS_CHARS = 700
+MAX_ADVICE_CHARS = 1500
+MAX_REASON_CHARS = 300
 MAX_DETAILS_CHARS = 600
 MAX_TAGS = 4
 MAX_TAG_CHARS = 24
@@ -75,22 +75,31 @@ DETAIL_KEYS = {
 class _MemberFit(BaseModel):
     member_id: str = Field(description="The member's id, exactly as given.")
     score: int = Field(description="0-100: how well this option fits this member's preferences.")
-    reason: str = Field(description="One short sentence explaining the score for this member.")
+    reason: str = Field(
+        description="1-2 sentences explaining the score using this member's own preferences."
+    )
 
 
 class _OptionAnalysis(BaseModel):
     option_id: str = Field(description="The id of one tied option, exactly as given.")
     score: int = Field(description="0-100: how well this option fits the whole party.")
-    why_this_fits: str = Field(description="One or two sentences on why it fits the party.")
+    why_this_fits: str = Field(
+        description="2-3 sentences on why it fits the party, naming their own preferences."
+    )
     tags: list[str] = Field(description="2-4 short labels (1-3 words each), e.g. Direct.")
-    trade_off: str = Field(description="The main downside of this option, in one short line.")
+    trade_off: str = Field(
+        description="1-2 sentences on the main downside for this party and its impact."
+    )
     member_fit: list[_MemberFit] = Field(description="One entry per party member.")
 
 
 class _TiebreakAdvice(BaseModel):
     analyses: list[_OptionAnalysis] = Field(description="One entry per tied option.")
     recommended_option_id: str = Field(description="The tied option id the guide leans towards.")
-    advice: str = Field(description="Two to four sentences of advice to the party leader.")
+    advice: str = Field(
+        description="3-5 sentences to the party leader: compare the options and who each "
+        "suits, then say which you lean towards and why."
+    )
 
 
 # --- Advice ready to post -------------------------------------------------------------
@@ -352,8 +361,9 @@ async def _llm_advice(
         f"scoring each tied option. {focus} For every tied option give: a 0-100 fit score "
         "for the whole party, a 0-100 score and one-sentence reason for EACH member, up to "
         "short tags (1-3 words each), and its main trade-off. Be fair and consistent: the "
-        "option you recommend should be the one with the highest party fit score. Keep "
-        "every sentence short."
+        "option you recommend should be the one with the highest party fit score. Be "
+        "specific: name each member's own budget, interests or wishes when explaining a "
+        "score, and compare the options concretely (price, time, location, activities)."
     )
     prefs_by_member = {str(p.get("member_id")): p for p in preferences}
     member_lines = "\n".join(
