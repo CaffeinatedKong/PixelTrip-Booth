@@ -10,6 +10,7 @@ import type { Unsubscribe } from "@/types";
 
 import { MOCK_DESTINATION_OPTIONS } from "../features/party-lobby/lib/destinationMocks";
 import type {
+  BreakTieInput,
   CastDestinationVoteInput,
   DestinationService,
   DiscoverState,
@@ -33,6 +34,8 @@ const MOCK_STATE: DiscoverState = {
       count: 0,
     })),
   },
+  tiePending: false,
+  tiebreak: null,
 };
 
 export class MockDestinationService implements DestinationService {
@@ -45,6 +48,10 @@ export class MockDestinationService implements DestinationService {
   }
 
   async castVote(_input: CastDestinationVoteInput): Promise<void> {
+    return Promise.resolve();
+  }
+
+  async breakTie(_input: BreakTieInput): Promise<void> {
     return Promise.resolve();
   }
 

@@ -30,6 +30,43 @@ export interface DestinationVote {
   status: "open" | "closed";
 }
 
+/** Per-member fit from the AI's tiebreak advice. */
+export interface MemberFit {
+  memberId: string;
+  displayName: string;
+  score: number;
+  reason: string;
+}
+
+/** One tied option, scored by the AI tiebreak advice (card shape + tie extras). */
+export interface TiebreakOption {
+  id: string;
+  title: string;
+  description?: string;
+  /** Party-fit score 0-100, when the AI scored it. */
+  score?: number;
+  whyThisFits?: string;
+  tags?: readonly string[];
+  tradeOff?: string;
+  details?: string;
+  /** Display names of members who voted for this option. */
+  votes?: readonly string[];
+  /** Per-member fit breakdown. */
+  memberFit?: readonly MemberFit[];
+}
+
+/** The AI's advice for a tied vote the room owner must break. */
+export interface TiebreakAdvice {
+  voteSessionId: string;
+  category: "destination" | "flight";
+  /** The leader-facing advice paragraph. */
+  advice: string;
+  /** The option the guide leans towards, if any. */
+  recommendedOptionId: string | null;
+  /** The tied options, scored. */
+  options: readonly TiebreakOption[];
+}
+
 /** A snapshot of the DISCOVER stage for a room. */
 export interface DiscoverState {
   /** True while a discovery run is in progress and nothing is posted yet. */
@@ -38,6 +75,10 @@ export interface DiscoverState {
   options: readonly DestinationOption[];
   /** The destination vote, or null until the AI opens it. */
   vote: DestinationVote | null;
+  /** True when the vote tied and awaits the owner's break-tie pick. */
+  tiePending: boolean;
+  /** The AI's tiebreak advice, or null when there is no pending tie. */
+  tiebreak: TiebreakAdvice | null;
 }
 
 export interface StartDiscoveryInput {
@@ -48,6 +89,14 @@ export interface StartDiscoveryInput {
 export interface CastDestinationVoteInput {
   voteSessionId: string;
   memberId: string;
+  optionId: string;
+}
+
+export interface BreakTieInput {
+  voteSessionId: string;
+  /** Must be the room owner's member id. */
+  memberId: string;
+  /** One of the tied option ids. */
   optionId: string;
 }
 
@@ -76,4 +125,7 @@ export interface DestinationService {
 
   /** Cast (or change) this member's destination vote. */
   castVote(input: CastDestinationVoteInput): Promise<void>;
+
+  /** Owner-only: pick the winner of a tied vote (`POST .../break-tie`). */
+  breakTie(input: BreakTieInput): Promise<void>;
 }

@@ -12,12 +12,15 @@ import { ApiError } from "@/lib/errors";
 import type { Unsubscribe } from "@/types";
 
 import type {
+  BreakTieInput,
   CastDestinationVoteInput,
   DestinationOption,
   DestinationService,
   DestinationVote,
   DiscoverState,
   StartDiscoveryInput,
+  TiebreakAdvice,
+  TiebreakOption,
 } from "./destination.contract";
 
 interface MessageRow {
@@ -32,6 +35,9 @@ interface VoteSessionRow {
   question: string;
   options: { id: string; label: string }[];
   status: "open" | "closed";
+  tie_pending: boolean | null;
+  tie_option_ids: string[] | null;
+  category: "destination" | "flight" | null;
 }
 
 interface VoteRow {
@@ -61,6 +67,64 @@ function toOptions(content: Record<string, unknown>): DestinationOption[] {
   });
 }
 
+/** Parse a `*_tiebreak` summary message's content into TiebreakAdvice. */
+function toTiebreakAdvice(
+  content: Record<string, unknown>,
+  voteSessionId: string,
+): TiebreakAdvice | null {
+  const category = String(content.category ?? "");
+  const base = category.endsWith("_tiebreak")
+    ? (category.replace("_tiebreak", "") as "destination" | "flight")
+    : null;
+  if (base !== "destination" && base !== "flight") return null;
+
+  const rawItems = Array.isArray(content.items) ? content.items : [];
+  const options: TiebreakOption[] = rawItems.map((raw) => {
+    const item = raw as Record<string, unknown>;
+    const num = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) ? v : undefined;
+    const str = (v: unknown): string | undefined =>
+      typeof v === "string" && v.trim() !== "" ? v : undefined;
+    const memberFit = Array.isArray(item.memberFit)
+      ? item.memberFit.map((f) => {
+          const fit = f as Record<string, unknown>;
+          return {
+            memberId: String(fit.memberId ?? ""),
+            displayName: String(fit.displayName ?? ""),
+            score: num(fit.score) ?? 0,
+            reason: String(fit.reason ?? ""),
+          };
+        })
+      : undefined;
+    return {
+      id: String(item.id ?? ""),
+      title: String(item.title ?? item.label ?? ""),
+      description: str(item.description),
+      score: num(item.score),
+      whyThisFits: str(item.whyThisFits),
+      tags: Array.isArray(item.tags) ? item.tags.map(String) : undefined,
+      tradeOff: str(item.tradeOff),
+      details: str(item.details),
+      votes: Array.isArray(item.votes) ? item.votes.map(String) : undefined,
+      memberFit,
+    };
+  });
+
+  // SummaryMessageContent stores top-level fields snake_case (no camel alias);
+  // the hand-built items[] use camelCase. Read the snake_case key here.
+  const recommended = content.recommended_option_id;
+  return {
+    voteSessionId,
+    category: base,
+    advice: String(content.advice ?? content.text ?? ""),
+    recommendedOptionId:
+      typeof recommended === "string" && recommended.trim() !== ""
+        ? recommended
+        : null,
+    options,
+  };
+}
+
 class DestinationApiService implements DestinationService {
   async getTripId(roomId: string): Promise<string | null> {
     const { data, error } = await getSupabaseClient()
@@ -83,6 +147,13 @@ class DestinationApiService implements DestinationService {
 
   async castVote(input: CastDestinationVoteInput): Promise<void> {
     await getApiClient().post(`/votes/${input.voteSessionId}/cast`, {
+      memberId: input.memberId,
+      optionId: input.optionId,
+    });
+  }
+
+  async breakTie(input: BreakTieInput): Promise<void> {
+    await getApiClient().post(`/votes/${input.voteSessionId}/break-tie`, {
       memberId: input.memberId,
       optionId: input.optionId,
     });
@@ -111,7 +182,7 @@ class DestinationApiService implements DestinationService {
     // Open (or most recent) destination vote session.
     const { data: sessions, error: vsErr } = await supabase
       .from("vote_sessions")
-      .select("id,question,options,status")
+      .select("id,question,options,status,tie_pending,tie_option_ids,category,message_id")
       .eq("room_id", roomId)
       .order("created_at", { ascending: false })
       .returns<VoteSessionRow[]>();
@@ -144,7 +215,35 @@ class DestinationApiService implements DestinationService {
       };
     }
 
-    return { loading: options.length === 0 && vote === null, options, vote };
+    const tiePending = sessionRow?.tie_pending === true;
+
+    let tiebreak: TiebreakAdvice | null = null;
+    if (tiePending && sessionRow) {
+      // Find the latest tiebreak advice summary message for this session's category.
+      const { data: adviceMessages, error: aErr } = await supabase
+        .from("messages")
+        .select("id,kind,content,created_at")
+        .eq("room_id", roomId)
+        .eq("kind", "summary")
+        .order("created_at", { ascending: false })
+        .returns<MessageRow[]>();
+      if (aErr) throw readError("messages");
+      const wanted = `${sessionRow.category ?? "destination"}_tiebreak`;
+      const adviceMsg = (adviceMessages ?? []).find(
+        (m) => (m.content as { category?: string }).category === wanted,
+      );
+      if (adviceMsg) {
+        tiebreak = toTiebreakAdvice(adviceMsg.content, sessionRow.id);
+      }
+    }
+
+    return {
+      loading: options.length === 0 && vote === null,
+      options,
+      vote,
+      tiePending,
+      tiebreak,
+    };
   }
 
   subscribeDiscover(

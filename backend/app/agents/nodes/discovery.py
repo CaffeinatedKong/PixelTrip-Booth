@@ -188,11 +188,19 @@ async def _generate_llm_candidates(
             response_model=_CandidateList,
         )
         raw_names = result.destinations
-    except LLMGenerationError:
-        logger.info("LLM candidate generation unavailable; using fallback list")
+    except LLMGenerationError as exc:
+        logger.warning(
+            "LLM candidate generation unavailable (%s: %s); using fallback list",
+            type(exc).__name__,
+            exc,
+        )
         return []
-    except Exception:  # a malformed double or SDK surprise must not break DISCOVER
-        logger.info("LLM candidate generation returned an unusable result; using fallback list")
+    except Exception as exc:  # a malformed double or SDK surprise must not break DISCOVER
+        logger.warning(
+            "LLM candidate generation returned an unusable result (%s: %s); using fallback list",
+            type(exc).__name__,
+            exc,
+        )
         return []
 
     names: list[str] = []
