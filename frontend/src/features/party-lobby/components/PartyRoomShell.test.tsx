@@ -63,9 +63,8 @@ describe("PartyRoomShell", () => {
 
     // Real setup content is shown: the room code and the live roster.
     expect(screen.getByTestId("room-code")).toHaveTextContent("ABC123");
-    expect(
-      screen.getByRole("list", { name: "Party roster" }),
-    ).toBeInTheDocument();
+    const roster = screen.getByRole("list", { name: "Party members" });
+    expect(within(roster).getByText("Aria")).toBeInTheDocument();
 
     // No placeholder for the real stage.
     expect(screen.queryByTestId("stage-placeholder")).not.toBeInTheDocument();
@@ -75,8 +74,30 @@ describe("PartyRoomShell", () => {
       screen.getByRole("list", { name: "Party chat messages" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /save character locally/i }),
+      screen.getByRole("button", { name: /save character/i }),
     ).toBeInTheDocument();
+  });
+
+  it("gives the sidebar's quest progress its own name, distinct from the stepper", () => {
+    render(
+      <PartyRoomShell
+        session={makeSession("setup")}
+        members={[makeMember()]}
+        copied={false}
+        onCopyCode={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+
+    // Both six-stage lists are on screen in SETUP; each must be addressable by name.
+    const stepper = screen.getByRole("list", { name: "Planning stages" });
+    const sidebar = screen.getByRole("list", { name: "Quest progress" });
+
+    expect(stepper).not.toBe(sidebar);
+    expect(within(sidebar).getAllByRole("listitem")).toHaveLength(6);
+    expect(
+      within(sidebar).getByText("Gather the party").closest("li"),
+    ).toHaveAttribute("aria-current", "step");
   });
 
   it("renders an honest placeholder for a non-setup stage and no setup content", () => {
@@ -98,7 +119,7 @@ describe("PartyRoomShell", () => {
     // No real setup content leaks through.
     expect(screen.queryByTestId("room-code")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("list", { name: "Party roster" }),
+      screen.queryByRole("list", { name: "Party members" }),
     ).not.toBeInTheDocument();
 
     // Neither the chat panel nor the character creator render off-setup.
@@ -106,7 +127,7 @@ describe("PartyRoomShell", () => {
       screen.queryByRole("list", { name: "Party chat messages" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /save character locally/i }),
+      screen.queryByRole("button", { name: /save character/i }),
     ).not.toBeInTheDocument();
 
     // DISCOVER is marked current in the stepper.

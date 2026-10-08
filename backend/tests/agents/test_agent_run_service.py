@@ -315,3 +315,27 @@ async def test_the_schema_object_itself_has_no_internal_attributes() -> None:
         "completed_at",
     ):
         assert not hasattr(result, internal_field)
+
+
+# ===========================================================================
+# LLM wiring
+# ===========================================================================
+
+
+def test_the_bundle_carries_no_llm_unless_one_was_injected() -> None:
+    """Without a client every node stays on its deterministic path."""
+    service = wired_service(FakeSupabaseClient())
+
+    assert service.llm_client is None
+    assert service._bundle().llm is None
+
+
+def test_the_bundle_carries_the_injected_llm_client() -> None:
+    from dataclasses import replace
+
+    from app.agents.llm import LLMClient
+
+    llm = LLMClient()
+    service = replace(wired_service(FakeSupabaseClient()), llm_client=llm)
+
+    assert service._bundle().llm is llm

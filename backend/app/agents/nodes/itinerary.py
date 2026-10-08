@@ -22,6 +22,16 @@ beaten). Negotiation_Node, which generates version 2+ from a real
 ``Affected_Scope``, is where that callback does real work — this function takes
 the callback as a parameter precisely so that case can plug in without a second
 copy of the retry loop.
+
+**On LLM-drafted days.** The model drafts each day's activities; everything
+around that is deterministic. Day count, dates, ids, ordering and the
+1-10-items-per-day bound come from code, never from the model, and every draft
+goes back through :class:`~app.agents.proposals.ItineraryProposal`'s strict
+validation before anything is persisted. Items that break a party hard
+constraint are dropped. The LLM is an enhancement, not a dependency: with no
+client, no API key, or a failed call, the affected days fall back to a single
+well-formed placeholder activity each, so BUILD still completes and the
+itinerary stays structurally valid and immediately refinable.
 """
 
 from __future__ import annotations
@@ -31,17 +41,21 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.errors import (
     DestinationNotSelectedError,
     FlightNotSelectedError,
     InvalidTripDurationError,
     ItineraryPersistenceError,
+    LLMGenerationError,
     PreferencesNotCollectedError,
     RepeatedVersionContentionError,
 )
 from app.agents.group_profile import compute_group_profile
+from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import SummaryMessageContent, emit_npc_message
+from app.agents.nodes.discovery import _violates_hard_constraints
 from app.agents.proposals import (
     DateRange,
     DestinationRef,
@@ -71,6 +85,17 @@ MAX_ITEMS_PER_DAY = 10
 #: Requirement 9.5: a derived trip duration outside this range fails the run.
 MIN_TRIP_DAYS = 1
 MAX_TRIP_DAYS = 30
+
+#: Days drafted per model call. Bounds one response's size (a 30-day trip is
+#: three calls, not one oversized one) and keeps the call count low enough for
+#: free-tier rate limits.
+LLM_DAYS_PER_CALL = 10
+
+#: Per-field ceilings applied to model text before it reaches the proposal.
+MAX_TITLE_CHARS = 120
+MAX_DESCRIPTION_CHARS = 500
+MAX_TIME_CHARS = 40
+MAX_LOCATION_CHARS = 120
 
 STAGE = "BUILD"
 
@@ -235,15 +260,12 @@ def _derive_day_count(
 
 
 def _generate_items(day_index: int) -> list[ItineraryItemModel]:
-    """Generate a simple, deterministic set of items for one day.
+    """Return the deterministic placeholder for one day.
 
-    No LLM client exists yet under ``app/agents/`` (the same documented
-    interim choice discovery_node made for candidate destinations). A real day
-    plan needs the model's judgment about what to see and in what order; until
-    that lands, each day gets a single well-formed placeholder activity so the
-    itinerary object is structurally complete and immediately improvable once
-    generation is wired in. Ordering (Requirement 9.6) and unique ids
-    (Requirement 9.9) hold regardless of what fills each slot.
+    Used for any day the LLM did not (or could not) draft. A single well-formed
+    activity keeps the itinerary structurally complete; ordering
+    (Requirement 9.6) and unique ids (Requirement 9.9) hold regardless of what
+    fills each slot.
     """
     return [
         ItineraryItemModel(
@@ -254,25 +276,179 @@ def _generate_items(day_index: int) -> list[ItineraryItemModel]:
     ]
 
 
+class _ItemDraft(BaseModel):
+    """One activity as drafted by the model. Lenient on length; trimmed in code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, description="Short name of the activity.")
+    time: str | None = Field(default=None, description="Start time, 24-hour HH:MM.")
+    description: str = Field(default="", description="One or two sentences.")
+    location: str | None = Field(default=None, description="Neighbourhood or venue name.")
+
+
+class _DayDraft(BaseModel):
+    """One day's drafted activities, in chronological order."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    day: int = Field(ge=1)
+    items: list[_ItemDraft] = Field(min_length=1)
+
+
+class _ItineraryDraft(BaseModel):
+    """The model's answer for one chunk of days."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    days: list[_DayDraft] = Field(min_length=1)
+
+
+def _items_from_draft(
+    day_number: int, draft: _DayDraft, hard_constraints: list[str]
+) -> list[ItineraryItemModel]:
+    """Turn one drafted day into validated items, or ``[]`` if nothing usable survives.
+
+    Ids are assigned here (``d{day}-i{n}``), never taken from the model, so they
+    are unique and stable by construction (Requirement 9.9). An item that names
+    something a party hard constraint forbids is dropped.
+    """
+    items: list[ItineraryItemModel] = []
+    for entry in draft.items:
+        title = clip_text(entry.title, MAX_TITLE_CHARS)
+        if title is None:
+            continue
+        description = clip_text(entry.description, MAX_DESCRIPTION_CHARS)
+        location = clip_text(entry.location, MAX_LOCATION_CHARS)
+        searchable = " ".join(filter(None, (title, description, location)))
+        if _violates_hard_constraints(searchable, hard_constraints) is not None:
+            continue
+        items.append(
+            ItineraryItemModel(
+                id=f"d{day_number}-i{len(items) + 1}",
+                title=title,
+                time=clip_text(entry.time, MAX_TIME_CHARS),
+                description=description,
+                location=location,
+            )
+        )
+        if len(items) >= MAX_ITEMS_PER_DAY:
+            break
+    return items
+
+
+def _day_label(day_number: int, day_count: int, day_date: date) -> str:
+    """Describe one requested day for the prompt."""
+    role = ""
+    if day_count > 1 and day_number == 1:
+        role = " (arrival day: keep it light)"
+    elif day_count > 1 and day_number == day_count:
+        role = " (departure day: keep it short)"
+    return f"Day {day_number}: {day_date.isoformat()}{role}"
+
+
+async def _draft_days_with_llm(
+    llm: Any,
+    *,
+    destination: str,
+    outbound: date,
+    day_count: int,
+    group_profile: dict[str, Any],
+) -> dict[int, list[ItineraryItemModel]]:
+    """Ask the LLM to draft the days, a chunk at a time.
+
+    Returns whatever it managed to draft, keyed by day number. Never raises: a
+    failed chunk simply leaves its days out, and the caller fills them with the
+    placeholder.
+    """
+    if llm is None:
+        return {}
+
+    hard_constraints = [str(c) for c in (group_profile.get("hard_constraints") or [])]
+    ceiling = group_profile.get("budget_ceiling")
+    system_prompt = (
+        f"{UNTRUSTED_INPUT_GUARD}\n\n"
+        "You are an in-world NPC travel guide drafting a day-by-day itinerary for a group "
+        "trip-planning game. For each requested day, list 3 to 5 activities in chronological "
+        "order, with a 24-hour HH:MM start time, a one or two sentence description, and the "
+        "neighbourhood or venue. Prefer well-known real places and typical local activities "
+        "for the destination. Never state prices, opening hours, flight details or booking "
+        "information. Never include anything that violates a stated hard constraint, and "
+        "include every required activity somewhere in the trip. Return exactly the days "
+        "requested, numbered as given."
+    )
+    context = (
+        f"Destination: {' '.join(destination.split())[:MAX_TITLE_CHARS]}\n"
+        f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
+        f"Budget ceiling per person: {ceiling if ceiling is not None else 'none stated'}\n"
+        f"Interests: {clip_for_prompt(group_profile.get('interests'))}\n"
+        f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
+        f"Required activities: {clip_for_prompt(group_profile.get('required_activities'))}\n"
+        f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
+        f"Hard constraints: {clip_for_prompt(hard_constraints)}\n"
+    )
+
+    drafted: dict[int, list[ItineraryItemModel]] = {}
+    for first in range(1, day_count + 1, LLM_DAYS_PER_CALL):
+        chunk = list(range(first, min(first + LLM_DAYS_PER_CALL, day_count + 1)))
+        requested = "\n".join(
+            _day_label(n, day_count, outbound + timedelta(days=n - 1)) for n in chunk
+        )
+        try:
+            draft = await llm.generate_structured(
+                operation="itinerary_days",
+                system_prompt=system_prompt,
+                user_prompt=f"{context}\nDraft these days:\n{requested}",
+                response_model=_ItineraryDraft,
+            )
+            drafted_days = draft.days
+        except LLMGenerationError:
+            logger.info("LLM itinerary drafting unavailable; using placeholder days")
+            continue
+        except Exception:  # a malformed double or SDK surprise must not break BUILD
+            logger.info("LLM itinerary drafting returned an unusable result; using placeholders")
+            continue
+
+        for day_draft in drafted_days:
+            if day_draft.day in chunk and day_draft.day not in drafted:
+                items = _items_from_draft(day_draft.day, day_draft, hard_constraints)
+                if items:
+                    drafted[day_draft.day] = items
+    return drafted
+
+
+def _destination_title(destination_selection: dict[str, Any]) -> str:
+    """Name the locked destination.
+
+    Vote options (and so the locked selection) carry ``label``; ``title`` is
+    accepted too. Used for both the itinerary itself and the model prompt, so the
+    two can never disagree about where the party is going.
+    """
+    data = destination_selection.get("data") or {}
+    return str(data.get("title") or data.get("label") or "the destination")
+
+
 def _build_itinerary(
     trip_id: str,
     room_id: str,
     destination_selection: dict[str, Any],
     outbound: date,
     day_count: int,
+    drafted_items: dict[int, list[ItineraryItemModel]] | None = None,
 ) -> ItineraryModel:
-    """Build the itinerary object for a fresh BUILD-stage version."""
-    destination_data = destination_selection.get("data") or {}
-    # Vote options (and so the locked selection) carry "label"; accept "title" too.
-    destination_title = (
-        destination_data.get("title") or destination_data.get("label") or "the destination"
-    )
+    """Build the itinerary object for a fresh BUILD-stage version.
+
+    ``drafted_items`` holds the LLM's validated items by day number; any day
+    absent from it gets the deterministic placeholder.
+    """
+    destination_title = _destination_title(destination_selection)
+    drafted_items = drafted_items or {}
 
     days = [
         ItineraryDayModel(
             day=day_number,
             date=(outbound + timedelta(days=day_number - 1)).isoformat(),
-            items=_generate_items(day_number),
+            items=drafted_items.get(day_number) or _generate_items(day_number),
         )
         for day_number in range(1, day_count + 1)
     ]
@@ -341,8 +517,21 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
         overlap = profile.get("availability_overlap") or []
         outbound = _parse_date(overlap[0]["start"]) if overlap else date.today()
 
+    destination_title = _destination_title(destination_selection)
+    drafted_items = await _draft_days_with_llm(
+        repos.llm,
+        destination=destination_title,
+        outbound=outbound,
+        day_count=day_count,
+        group_profile=profile,
+    )
     itinerary = _build_itinerary(
-        state.trip_id, context["room_id"], destination_selection, outbound, day_count
+        state.trip_id,
+        context["room_id"],
+        destination_selection,
+        outbound,
+        day_count,
+        drafted_items,
     )
     proposal = ItineraryProposal(itinerary=itinerary, affected_scope={})
     state = state.with_proposal(proposal.model_dump(mode="json"))
