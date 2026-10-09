@@ -101,3 +101,17 @@ def test_the_party_flies_from_singapore_unless_a_member_says_otherwise() -> None
     assert "flying from: Singapore" in format_party_for_prompt(
         compute_group_profile([BEE], [BEE_PREFS])
     )
+
+
+def test_frontend_vibe_ids_are_steering_with_readable_labels_and_keywords() -> None:
+    from app.agents.group_profile import describe_wishes, vibe_keywords
+
+    for raw in ("beach-escape", "beach_escape", "Beach Escape", "beach_escaape"):
+        assert is_region_word(raw) and "beach" in vibe_keywords(raw)
+    assert is_region_word("western-cities") and "europe" in vibe_keywords("western-cities")
+    assert describe_wishes(["asia", "beach-escape", "Bali, Indonesia"]) == [
+        "Asia (region)",
+        "beach escape (vibe)",
+        "Bali, Indonesia",
+    ]
+    assert not is_region_word("Bali, Indonesia")

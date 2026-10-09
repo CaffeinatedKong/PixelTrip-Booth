@@ -210,6 +210,31 @@ async def test_seeded_destinations_appear_before_any_fallback() -> None:
     assert titles[0] == "Kyoto, Japan"
 
 
+async def test_destination_vibes_are_not_rendered_as_recommendation_cards() -> None:
+    """Frontend vibe ids guide discovery but are not votable destinations."""
+    client = FakeSupabaseClient()
+    wire_base_context(
+        client,
+        preferences=[
+            preference_row(MEMBER_1, destinations=["asia", "beach-escape"]),
+        ],
+    )
+    client.queue("vote_sessions", [])
+    client.queue("rpc:insert_message_turn", [{"id": "msg-1"}])
+    client.queue("vote_sessions", [{"id": "vs-1"}])
+
+    await run_node(client)
+
+    sent = client.calls_for("rpc:insert_message_turn")[0].payload["p_messages"][0]
+    titles = [item["title"] for item in sent["content"]["items"]]
+    assert "asia" not in titles
+    assert "beach-escape" not in titles
+    # Asia + beach-escape steers the offline fallback to Asian beach places, not Europe.
+    asian = {name for name, keywords in FALLBACK_POOL if "asia" in keywords}
+    assert set(titles) <= asian and len(titles) == 5
+    assert titles[0] in {"Bali, Indonesia", "Phuket, Thailand", "Da Nang, Vietnam"}
+
+
 async def test_a_prior_open_destination_session_is_closed_before_the_new_one() -> None:
     """Requirement 7.8: at most one open destination vote session per room."""
     client = FakeSupabaseClient()

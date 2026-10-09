@@ -255,9 +255,48 @@ REGION_WORDS = frozenset(
 )
 
 
+#: The frontend's "destination vibe" cards are saved into ``destinations`` as ids. They
+#: describe what the party wants, not a place to book. Keyed by the id with everything but
+#: letters removed (so ``beach-escape``, ``beach_escape`` and ``Beach Escape`` all match,
+#: as does the ``beach_escaape`` spelling an older build saved); each maps to a readable
+#: label and the keywords it adds to the party's profile.
+_VIBES: dict[str, tuple[str, frozenset[str]]] = {
+    "asia": ("Asia (region)", frozenset({"asia"})),
+    "westerncities": (
+        "Western cities (Europe or North America)",
+        frozenset({"europe", "north america", "city"}),
+    ),
+    "beachescape": ("beach escape (vibe)", frozenset({"beach", "island"})),
+    "beachescaape": ("beach escape (vibe)", frozenset({"beach", "island"})),
+    "naturescenery": ("nature and scenery (vibe)", frozenset({"nature"})),
+    "natureandscenery": ("nature and scenery (vibe)", frozenset({"nature"})),
+    "foodtrip": ("food trip (vibe)", frozenset({"food"})),
+    "culturaltrip": ("cultural trip (vibe)", frozenset({"culture", "history", "temples"})),
+    "adventuretrip": ("adventure trip (vibe)", frozenset({"adventure", "hiking"})),
+    "shoppingcity": ("shopping city (vibe)", frozenset({"shopping", "city"})),
+    "hiddengems": ("hidden gems (vibe)", frozenset()),
+}
+
+
+def _vibe_key(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalpha())
+
+
+def vibe_keywords(value: str) -> frozenset[str]:
+    """Keywords a vibe id adds to the profile; empty for anything that is not a vibe."""
+    return _VIBES.get(_vibe_key(value), ("", frozenset()))[1]
+
+
 def is_region_word(value: str) -> bool:
     """Whether a wish-list entry is a region or a vibe, not a bookable destination."""
-    return value.strip().lower() in REGION_WORDS
+    return value.strip().lower() in REGION_WORDS or _vibe_key(value) in _VIBES
+
+
+def describe_wishes(values: Any) -> list[str]:
+    """Wish-list entries as readable text: vibe ids get their label, places stay as typed."""
+    if not isinstance(values, list):
+        return []
+    return [_VIBES.get(_vibe_key(str(v)), (str(v), frozenset()))[0] for v in values]
 
 
 def member_origin(preference: dict[str, Any]) -> str | None:
@@ -368,7 +407,7 @@ def member_profile_line(profile: dict[str, Any]) -> str:
         f"interests: {clip_for_prompt(profile['interests'], max_items=8)}",
         f"activities: {clip_for_prompt(profile['activities'], max_items=8)}",
         f"must-do: {clip_for_prompt(profile['required_activities'], max_items=5)}",
-        f"wish-list: {clip_for_prompt(profile['destinations'], max_items=6)}",
+        f"wish-list: {clip_for_prompt(describe_wishes(profile['destinations']), max_items=6)}",
         f"hard constraints: {clip_for_prompt(profile['hard_constraints'], max_items=6)}",
     ]
     label = f"{profile['name']} (party leader)" if profile["is_owner"] else profile["name"]

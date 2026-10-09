@@ -62,8 +62,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.agents.errors import LLMGenerationError, PreferencesNotCollectedError
 from app.agents.group_profile import (
     compute_group_profile,
+    describe_wishes,
     format_party_for_prompt,
     is_region_word,
+    vibe_keywords,
 )
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
@@ -156,6 +158,7 @@ def _profile_words(group_profile: dict[str, Any]) -> set[str]:
             text = str(entry).lower()
             words.add(text.strip())
             words.update(text.replace(",", " ").split())
+            words.update(vibe_keywords(str(entry)))
     return words
 
 
@@ -181,16 +184,24 @@ def _fallback_order(group_profile: dict[str, Any]) -> list[str]:
     return [name for _index, (name, _keywords) in ranked]
 
 
+def _gather_candidates_seeds(group_profile: dict[str, Any]) -> list[str]:
+    """The party's own destination entries that name a bookable place."""
+    return [
+        str(d).strip()
+        for d in (group_profile.get("destinations") or [])
+        if str(d).strip() and not is_region_word(str(d))
+    ]
+
+
 def _gather_candidates(group_profile: dict[str, Any]) -> list[str]:
-    """Seed candidates from the party's own destinations, then top up.
+    """Seed real party destinations, then top up.
 
     Requirement 7.5: every ``travel_preferences.destinations`` entry that names a place
     comes first, in the order ``compute_group_profile`` already de-duplicated them in.
     Entries that name a region or vibe ("Asia", "anywhere") steer the guide instead and
     are not candidates themselves.
     """
-    seeded = [d for d in (group_profile.get("destinations") or []) if not is_region_word(d)]
-    candidates = list(seeded)
+    candidates = _gather_candidates_seeds(group_profile)
     for fallback in _fallback_order(group_profile):
         if len(candidates) >= MAX_RECOMMENDATION_ITEMS:
             break
@@ -267,8 +278,8 @@ async def _generate_llm_candidates(
         f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
         f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
         f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
-        f"Party wish list (regions and places named): "
-        f"{clip_for_prompt(group_profile.get('destinations'))}\n"
+        f"Party wish list (regions, vibes and places named): "
+        f"{clip_for_prompt(describe_wishes(group_profile.get('destinations')))}\n"
         f"{format_party_for_prompt(group_profile)}"
         f"Already suggested (do not repeat): {clip_for_prompt(exclude)}\n"
         f"Suggest exactly {needed} new destination(s)."
@@ -523,7 +534,7 @@ async def _generate_insights(
         f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
         f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
         f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
-        f"Party wish list: {clip_for_prompt(group_profile.get('destinations'))}\n"
+        f"Party wish list: {clip_for_prompt(describe_wishes(group_profile.get('destinations')))}\n"
         f"{format_party_for_prompt(group_profile)}"
         f"Destinations to describe: {clip_for_prompt(candidates)}"
     )
@@ -588,7 +599,7 @@ async def _gather_candidates_with_llm(group_profile: dict[str, Any], llm: Any) -
 
     Equivalent to :func:`_gather_candidates` when ``llm`` is ``None`` or fails.
     """
-    candidates = [d for d in (group_profile.get("destinations") or []) if not is_region_word(d)]
+    candidates = _gather_candidates_seeds(group_profile)
     needed = MAX_RECOMMENDATION_ITEMS - len(candidates)
     for name in await _generate_llm_candidates(group_profile, llm, candidates, needed):
         if len(candidates) < MAX_RECOMMENDATION_ITEMS:
