@@ -65,7 +65,7 @@ DETAIL_KEYS = {
         "depart_at",
         "return_at",
     ),
-    "destination": ("score", "whyThisFits", "tags", "tradeOff"),
+    "destination": ("score", "whyThisFits", "tags", "tradeOff", "estimatedDailyCostSgd", "bestFor"),
 }
 
 

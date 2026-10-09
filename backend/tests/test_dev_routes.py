@@ -147,3 +147,40 @@ def test_feedback_on_an_unknown_trip_is_a_404(client, repos) -> None:
 
     assert response.status_code == 404
     repos.feedback_repo.create.assert_not_called()
+
+
+async def test_recent_llm_calls_are_recorded_only_with_dev_endpoints_on(client, monkeypatch):
+    from app.agents import llm as llm_module
+    from app.core import llm_debug
+    from pydantic import BaseModel
+
+    class Reply(BaseModel):
+        ok: bool
+
+    class FakeModel:
+        def with_structured_output(self, _model):
+            return self
+
+        async def ainvoke(self, _messages):
+            return Reply(ok=True)
+
+    llm_debug.RECENT_CALLS.clear()
+    for enabled in (False, True):
+        settings = Settings(
+            supabase_url="https://example.supabase.co",
+            supabase_service_role_key="service-role-key",
+            ai_provider_api_key="test-key",
+            enable_dev_endpoints=enabled,
+        )
+        llm = llm_module.LLMClient(settings)
+        monkeypatch.setattr(llm, "_get_model", lambda _name=None: FakeModel())
+        await llm.generate_structured(
+            operation="demo", system_prompt="SYS", user_prompt="USER", response_model=Reply
+        )
+
+    calls = client.get("/dev/llm-calls").json()
+    assert len(calls) == 1  # the call made with dev endpoints off was not kept
+    assert calls[0]["systemPrompt"] == "SYS"
+    assert calls[0]["userPrompt"] == "USER"
+    assert calls[0]["response"] == {"ok": True}
+    llm_debug.RECENT_CALLS.clear()

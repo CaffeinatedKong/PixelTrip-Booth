@@ -52,6 +52,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.agents.errors import LLMGenerationError
 from app.core.config import Settings, get_settings
+from app.core.llm_debug import record_call
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,27 @@ def clip_for_prompt(values: Any, *, max_items: int = 20, max_chars: int = 120) -
         if len(cleaned) >= max_items:
             break
     return cleaned
+
+
+def _record_call(
+    settings: Settings,
+    operation: str,
+    model: str | None,
+    system_prompt: str,
+    user_prompt: str,
+    response: BaseModel | None,
+    error: str | None = None,
+) -> None:
+    """Keep the call for ``GET /dev/llm-calls`` (only with dev endpoints on)."""
+    if settings.enable_dev_endpoints:
+        record_call(
+            operation=operation,
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response=response.model_dump(mode="json") if response is not None else None,
+            error=error,
+        )
 
 
 class LLMClient:
@@ -346,12 +368,32 @@ class LLMClient:
                     except ValidationError:
                         wrong_shape = True  # raised below; see the note above
                     if validated is not None:
+                        _record_call(
+                            self._settings,
+                            operation,
+                            model_name,
+                            system_prompt,
+                            user_prompt,
+                            validated,
+                        )
                         return validated  # type: ignore[return-value]
 
                 logger.warning("LLM call '%s' returned a response of the wrong shape", operation)
+                _record_call(
+                    self._settings,
+                    operation,
+                    model_name,
+                    system_prompt,
+                    user_prompt,
+                    None,
+                    "wrong response shape",
+                )
                 raise LLMGenerationError(operation)
 
             # This model is exhausted for this call; fall through to the next one.
 
         # Every model failed (or none was usable): the caller falls back deterministically.
+        _record_call(
+            self._settings, operation, None, system_prompt, user_prompt, None, "every model failed"
+        )
         raise LLMGenerationError(operation)

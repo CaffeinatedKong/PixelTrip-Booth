@@ -8,18 +8,23 @@ the two inputs an agent run needs that no real endpoint provides yet:
   flight-search API key;
 * feedback on an itinerary, because there is no endpoint for members to submit it.
 
+It also exposes the most recent LLM calls (``GET /dev/llm-calls``): the exact
+prompts sent and the parsed replies, for tuning prompts. These are held in memory
+only while dev endpoints are on, and are never logged or stored.
+
 Both write through the same repositories the agent layer reads from, so a run
 started afterwards sees them exactly as it would see real data.
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Path
 from pydantic import Field, model_validator
 
 from app.api.deps import Repos
+from app.core.llm_debug import RECENT_CALLS
 from app.exceptions import NotFoundError
 from app.schemas.errors import ErrorResponse
 from app.schemas.room import _Base
@@ -113,3 +118,22 @@ async def add_test_feedback(
         body.comment,
     )
     return {"feedbackId": str(row["id"])}
+
+
+@router.get(
+    "/llm-calls",
+    summary="The most recent LLM calls: exact prompts and replies (newest first)",
+)
+async def list_llm_calls(limit: int = 10) -> list[dict[str, Any]]:
+    return [
+        {
+            "at": call["at"],
+            "operation": call["operation"],
+            "model": call["model"],
+            "systemPrompt": call["system_prompt"],
+            "userPrompt": call["user_prompt"],
+            "response": call["response"],
+            "error": call["error"],
+        }
+        for call in list(RECENT_CALLS)[: max(1, min(limit, 20))]
+    ]

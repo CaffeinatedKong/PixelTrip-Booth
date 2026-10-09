@@ -13,11 +13,13 @@ import { useState, type ReactElement, type ReactNode } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
 import { PixelCard } from "@/components/PixelCard";
-import type {
-  ConsoleItineraryVersion,
-  ConsoleMessage,
-  ConsoleRun,
-  RunType,
+import {
+  listLlmCalls,
+  type ConsoleLlmCall,
+  type ConsoleItineraryVersion,
+  type ConsoleMessage,
+  type ConsoleRun,
+  type RunType,
 } from "@/services/devConsole.api";
 
 import { useDevConsole } from "./useDevConsole";
@@ -152,6 +154,62 @@ function ItineraryView({
         ))}
       </ol>
     </div>
+  );
+}
+
+/**
+ * The exact prompts sent to the LLM and its parsed replies, newest first, for
+ * tuning prompts. Needs the backend running with `ENABLE_DEV_ENDPOINTS=true`.
+ */
+function LlmCallsPanel(): ReactElement {
+  const [calls, setCalls] = useState<ConsoleLlmCall[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh(): Promise<void> {
+    try {
+      setCalls(await listLlmCalls());
+      setError(null);
+    } catch {
+      setError(
+        "Could not load. Is the backend running with ENABLE_DEV_ENDPOINTS=true?",
+      );
+    }
+  }
+
+  return (
+    <PixelCard title="AI prompts (latest calls)">
+      <div className="flex flex-col gap-16">
+        <PixelButton
+          variant="secondary"
+          label={calls === null ? "Load prompts" : "Refresh"}
+          onClick={() => void refresh()}
+        />
+        {error ? <p className="text-danger">{error}</p> : null}
+        {calls?.length === 0 ? (
+          <p className="text-muted">No LLM calls since the backend started.</p>
+        ) : null}
+        {calls?.map((call) => (
+          <details
+            key={`${call.at}-${call.operation}`}
+            className="flex flex-col gap-8"
+          >
+            <summary>
+              <strong className="text-accent">{call.operation}</strong> ·{" "}
+              {call.model ?? "no model"} · {call.at}
+              {call.error ? ` · ${call.error}` : ""}
+            </summary>
+            <h4 className="font-display">System prompt</h4>
+            <pre className="whitespace-pre-wrap">{call.systemPrompt}</pre>
+            <h4 className="font-display">User prompt</h4>
+            <pre className="whitespace-pre-wrap">{call.userPrompt}</pre>
+            <h4 className="font-display">Reply</h4>
+            <pre className="whitespace-pre-wrap">
+              {JSON.stringify(call.response, null, 2)}
+            </pre>
+          </details>
+        ))}
+      </div>
+    </PixelCard>
   );
 }
 
@@ -472,6 +530,7 @@ export function DevRunConsole(): ReactElement {
             </PixelCard>
           </>
         ) : null}
+        <LlmCallsPanel />
       </div>
     </main>
   );

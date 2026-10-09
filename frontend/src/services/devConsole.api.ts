@@ -275,3 +275,19 @@ export function addTestFeedback(
     comment,
   });
 }
+
+/** One recent LLM call: the exact prompts sent and the parsed reply. */
+export interface ConsoleLlmCall {
+  at: string;
+  operation: string;
+  model: string | null;
+  systemPrompt: string;
+  userPrompt: string;
+  response: unknown;
+  error: string | null;
+}
+
+/** The latest LLM calls, newest first (backend `/dev` route; needs `ENABLE_DEV_ENDPOINTS`). */
+export function listLlmCalls(limit = 10): Promise<ConsoleLlmCall[]> {
+  return getApiClient().get<ConsoleLlmCall[]>(`/dev/llm-calls?limit=${limit}`);
+}

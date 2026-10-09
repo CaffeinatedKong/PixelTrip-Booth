@@ -1,75 +1,60 @@
 """Discovery_Node — DISCOVER stage destination recommendation.
 
-The flow is five steps, each with exactly one way to fail without reaching the
-next:
+The flow, each step with exactly one way to fail without reaching the next:
 
 1. **Load fresh context, compute the Group_Profile.** Zero ``travel_preferences``
    rows is a hard failure (``PreferencesNotCollectedError``) — there is nothing
-   to reason over, so no profile is even computed (Requirement 7.12).
-2. **Escalate if the party shares no dates.** An empty availability overlap
-   means no plan can be scheduled at all; escalating here, before any candidate
-   work, avoids proposing a destination the party could never actually visit
-   (Requirement 7.11).
-3. **Seed and filter candidates.** ``travel_preferences.destinations`` seeds the
-   set before anything model-generated (Requirement 7.5); hard constraints and
-   the budget ceiling then exclude candidates (Requirement 7.9). An empty result
-   escalates, naming whichever constraint did the eliminating (Requirement 7.10).
-4. **Validate through the guardrail loop.** The same three-layer pipeline every
-   proposal goes through, with the party's own repair/escalate budget
-   (``Iteration_Cap``). An escalation from *this* step is handled identically to
-   steps 2-3 from the node's point of view: nothing further is written.
-5. **On success, emit the recommendation and open its vote.** One message, one
-   paired ``vote_sessions`` row, with any prior open destination session closed
-   first so at most one stays open per room (Requirement 7.6-7.8).
+   to reason over (Requirement 7.12).
+2. **Escalate if the party shares no dates.** No plan can be scheduled at all,
+   so this happens before any model call (Requirement 7.11).
+3. **Ask the LLM once for the whole recommendation.** The party brief
+   (:mod:`app.agents.party_brief`) describes what each member wants; the prompt
+   lives in ``app/agents/prompts/discovery_*.md``. One call returns every card:
+   the places the party named themselves plus new suggestions, each with copy,
+   a "pick" badge, who it suits, a rough daily cost and four 0-10 sub-scores.
+4. **Check the answer in code.** Names must be real "City, Country" places (never
+   a region or a trip type such as "asia"), duplicates and a third card from one
+   country are dropped, suggestions clearly over the budget are dropped while
+   enough remain, and every named place is kept first (Requirement 7.5). The
+   card ``score`` is computed here from the sub-scores with fixed weights
+   (:data:`SCORE_WEIGHTS`), so it is consistent and explainable.
+5. **Filter and validate.** Hard constraints still exclude candidates
+   (Requirement 7.9-7.10), then the guardrail loop validates the proposal.
+6. **On success, emit the recommendation and open its vote** (Requirement 7.6-7.8).
 
-**On LLM-sourced candidates.** Requirement 7.5 only requires that
-``travel_preferences.destinations`` entries are seeded *before* any
-model-generated or tool-sourced candidate. The candidate set is therefore built
-in three layers, in this order: the party's own destinations, then names the
-LLM suggests for the remaining slots, then a small region-aware fallback
-pool (``FALLBACK_POOL``, ranked by the party's own words) for whatever is still missing.
-
-The LLM augments candidate generation; it is never a single point of failure
-for the DISCOVER stage. If the call fails for any reason — no API key, a
-timeout, a provider outage, a malformed answer — :func:`_generate_llm_candidates`
-returns nothing, the node logs at ``info`` (a routine, expected path, not an
-incident) and carries on with exactly the deterministic behaviour it had before
-an LLM existed. Whatever the model suggests then goes through the same hard
-constraint and budget filter as every other candidate, so a model that ignores
-a stated constraint is caught here rather than reaching the party.
-
-**Scope of the LLM call.** Only the *first* attempt gets LLM-sourced candidates.
-The guardrail loop's repair iterations (``_producer`` below) re-gather candidates
-deterministically: a repair must be fast and repeatable, and must not depend on
-a second model call that might return something different from the proposal it
-is trying to fix.
-
-**Card copy (CR-1).** After filtering, one more LLM call scores and describes
-the survivors, filling each item's ``description`` and ``meta`` (``score``,
-``whyThisFits``, ``tags``, ``tradeOff``, ``details``). It fails soft the same
-way: any destination the model skips, or whose copy mentions a hard-constraint
-subject, gets plain deterministic copy instead. Repairs reuse that copy.
+**The LLM is never a single point of failure.** If the call fails or returns too
+little, the remaining slots are filled from :data:`FALLBACK_POOL`, narrowed to any
+region the party named and ranked by the party's own words (:func:`_fallback_order`),
+with plain card copy. Repair iterations of the
+guardrail loop reuse the first answer and never call the model again.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.errors import LLMGenerationError, PreferencesNotCollectedError
-from app.agents.group_profile import (
-    compute_group_profile,
-    describe_wishes,
-    format_party_for_prompt,
-    is_region_word,
-    vibe_keywords,
-)
+from app.agents.group_profile import compute_group_profile, is_region_word, vibe_keywords
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
-from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
+from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_text
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
+from app.agents.party_brief import (
+    CURRENCY,
+    PartyBrief,
+    budget_text,
+    build_party_brief,
+    members_text,
+    named_places_text,
+    trip_text,
+    wants_text,
+)
+from app.agents.preference_labels import TRIP_TYPES
+from app.agents.prompts import render
 from app.agents.proposals import DestinationRecommendationProposal
 from app.core.config import get_settings
 
@@ -124,7 +109,8 @@ FALLBACK_POOL: tuple[tuple[str, frozenset[str]], ...] = (
     ),
 )
 
-#: A suggestion longer than this is not a destination name; treat it as junk.
+
+#: A name longer than this is not a destination name; treat it as junk.
 MAX_DESTINATION_NAME_LENGTH = 80
 
 #: Requirement 7.7: the vote question's length bound.
@@ -132,17 +118,43 @@ MAX_QUESTION_LENGTH = 200
 
 STAGE = "DISCOVER"
 
-#: Card copy limits (CR-1): the frontend renders these on a small pixel card.
+#: Card copy limits: the frontend renders these on a small pixel card.
 MAX_TAGS = 5
 MAX_TAG_LENGTH = 24
 MAX_DESCRIPTION_TEXT = 300
 MAX_REASONING_TEXT = 600
 MAX_DETAILS_TEXT = 1500
 
-#: Fallback fit scores when no model is available: a destination someone in the
-#: party wish-listed is a stronger signal than a guide suggestion.
+#: Fallback fit scores when no model answered for a card.
 WISHLIST_SCORE = 85
 SUGGESTED_SCORE = 70
+
+#: How the card ``score`` (0-100) is built from the LLM's 0-10 sub-scores.
+#: Tune here, not in the prompt; the weights must add up to 1.
+SCORE_WEIGHTS: dict[str, float] = {
+    "preferences": 0.4,
+    "budget": 0.2,
+    "season": 0.2,
+    "tripLength": 0.2,
+}
+
+#: The badges the LLM chooses from; fallback cards use the last two.
+PICKS: tuple[str, ...] = ("Best fit", "Budget pick", "Hidden gem", "Wildcard")
+PARTY_PICK = "Party pick"
+GUIDE_PICK = "Guide's pick"
+
+#: At most this many cards from one country, so the vote has real choices.
+MAX_PER_COUNTRY = 2
+
+#: Never a destination on its own, whatever the model says.
+_REGION_WORDS = frozenset(
+    {
+        "asia", "southeast asia", "east asia", "south asia", "europe", "western europe",
+        "africa", "north america", "south america", "latin america", "oceania",
+        "middle east", "caribbean", "scandinavia", "the world", "anywhere",
+    }
+)  # fmt: skip
+_CITY_COUNTRY = re.compile(r"[^,]{2,},\s*[^,]{2,}")
 
 
 def _slugify(name: str) -> str:
@@ -184,137 +196,305 @@ def _fallback_order(group_profile: dict[str, Any]) -> list[str]:
     return [name for _index, (name, _keywords) in ranked]
 
 
-def _gather_candidates_seeds(group_profile: dict[str, Any]) -> list[str]:
-    """The party's own destination entries that name a bookable place."""
-    return [
-        str(d).strip()
-        for d in (group_profile.get("destinations") or [])
-        if str(d).strip() and not is_region_word(str(d))
-    ]
+# --- The LLM's answer -----------------------------------------------------------------
 
 
-def _gather_candidates(group_profile: dict[str, Any]) -> list[str]:
-    """Seed real party destinations, then top up.
+class _DestinationCard(BaseModel):
+    """One destination in the LLM's answer. Explanations come before scores on
+    purpose: the model reasons first, then scores, which gives steadier numbers."""
 
-    Requirement 7.5: every ``travel_preferences.destinations`` entry that names a place
-    comes first, in the order ``compute_group_profile`` already de-duplicated them in.
-    Entries that name a region or vibe ("Asia", "anywhere") steer the guide instead and
-    are not candidates themselves.
-    """
-    candidates = _gather_candidates_seeds(group_profile)
-    for fallback in _fallback_order(group_profile):
-        if len(candidates) >= MAX_RECOMMENDATION_ITEMS:
-            break
-        if fallback not in candidates:
-            candidates.append(fallback)
-    return candidates
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(description='"City, Country". For places the party named, exactly as given.')
+    pick: str = Field(description='One of "Best fit", "Budget pick", "Hidden gem", "Wildcard".')
+    description: str = Field(description="1-2 sentences capturing the place's character.")
+    why_this_fits: str = Field(
+        description="2-3 sentences naming the party's own preferences it matches, with real "
+        "examples, and how it suits their budget and dates."
+    )
+    best_for: list[str] = Field(
+        description="Names of the members it suits best, exactly as given in the brief."
+    )
+    tags: list[str] = Field(description="3-5 short labels, 1-3 words each.")
+    trade_off: str = Field(
+        description="1-2 sentences: the biggest downside for this party and how to work around it."
+    )
+    details: str = Field(
+        description="4-6 sentences: weather on their dates, top things to do for this party, "
+        "the food scene, rough daily cost per person, where to stay or how to get around."
+    )
+    estimated_daily_cost_sgd: int = Field(
+        description="Rough cost per person per day in SGD for stay, food and activities, "
+        "excluding flights."
+    )
+    preference_match: int = Field(description="0-10")
+    budget_fit: int = Field(description="0-10")
+    season_fit: int = Field(description="0-10")
+    trip_length_fit: int = Field(description="0-10")
 
 
-class _CandidateList(BaseModel):
-    """The LLM's answer: destination names only (everything else is built here).
+class _DiscoveryAnswer(BaseModel):
+    model_config = ConfigDict(extra="ignore")
 
-    The upper bound is the recommendation maximum rather than the number asked
-    for: a model that over-delivers is truncated by the caller, not failed.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    destinations: list[str] = Field(min_length=1, max_length=MAX_RECOMMENDATION_ITEMS)
+    destinations: list[_DestinationCard] = Field(min_length=1)
 
 
-def _clean_destination_name(raw: Any) -> str | None:
-    """Return a usable destination name, or ``None`` if the model's entry is junk."""
+def build_discovery_prompts(brief: PartyBrief) -> tuple[str, str]:
+    """The (system, user) prompts for ``brief``. Public for the comparison script."""
+    system = render(
+        "discovery_system",
+        guard=UNTRUSTED_INPUT_GUARD,
+        count=MAX_RECOMMENDATION_ITEMS,
+        currency=CURRENCY,
+    )
+    user = render(
+        "discovery_user",
+        trip=trip_text(brief),
+        party_size=brief.party_size,
+        budget=budget_text(brief),
+        wants=wants_text(brief),
+        members=members_text(brief),
+        named_places=named_places_text(brief),
+        count=MAX_RECOMMENDATION_ITEMS,
+    )
+    return system, user
+
+
+async def _ask_llm(brief: PartyBrief, llm: Any) -> list[_DestinationCard]:
+    """One call for the whole recommendation. Never raises: ``[]`` on any failure."""
+    if llm is None:
+        return []
+    system_prompt, user_prompt = build_discovery_prompts(brief)
+    try:
+        result = await llm.generate_structured(
+            operation="destination_recommendation",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=_DiscoveryAnswer,
+        )
+        return list(result.destinations)
+    except LLMGenerationError:
+        logger.info("LLM destination recommendation unavailable; using fallback places")
+    except Exception:  # a malformed double or SDK surprise must not break DISCOVER
+        logger.info("LLM destination recommendation was unusable; using fallback places")
+    return []
+
+
+# --- Checking the answer --------------------------------------------------------------
+
+
+def _clean_name(raw: Any) -> str | None:
+    """A real "City, Country" name, or ``None`` for junk, regions and trip types."""
     name = " ".join(str(raw).split()).strip(" .,-")
-    if not 2 <= len(name) <= MAX_DESTINATION_NAME_LENGTH:
+    if not 2 <= len(name) <= MAX_DESTINATION_NAME_LENGTH or not _CITY_COUNTRY.fullmatch(name):
+        return None
+    city = name.split(",", 1)[0].strip().lower()
+    if (
+        city in _REGION_WORDS
+        or is_region_word(city)
+        or is_region_word(name)
+        or city in _TRIP_TYPE_LABELS
+    ):
         return None
     return name
 
 
-async def _generate_llm_candidates(
-    group_profile: dict[str, Any],
-    llm: Any,
-    exclude: list[str],
-    needed: int,
-) -> list[str]:
-    """Ask the LLM for up to ``needed`` additional destination names.
+_TRIP_TYPE_LABELS = frozenset(label.lower() for label in TRIP_TYPES.values())
 
-    Returns an empty list — never raises — on any failure, so the caller's
-    fallback to ``FALLBACK_POOL`` is the only error-handling path
-    ``discovery_node`` needs.
+
+def _country(name: str) -> str:
+    return name.rsplit(",", 1)[-1].strip().lower()
+
+
+def _score(card: _DestinationCard) -> tuple[int, dict[str, int]]:
+    """The 0-100 card score from the four 0-10 sub-scores, plus the breakdown."""
+    parts = {
+        "preferences": card.preference_match,
+        "budget": card.budget_fit,
+        "season": card.season_fit,
+        "tripLength": card.trip_length_fit,
+    }
+    parts = {key: max(0, min(10, int(value))) for key, value in parts.items()}
+    total = sum(SCORE_WEIGHTS[key] * value for key, value in parts.items()) * 10
+    return max(0, min(100, round(total))), parts
+
+
+def _clean_tags(raw: Any) -> list[str]:
+    tags: list[str] = []
+    for value in raw or []:
+        tag = clip_text(str(value), MAX_TAG_LENGTH)
+        if tag and tag.lower() not in {t.lower() for t in tags}:
+            tags.append(tag)
+    return tags[:MAX_TAGS]
+
+
+def _forbidden_subjects(group_profile: dict[str, Any]) -> list[str]:
+    subjects = (_negated_subject(str(c)) for c in group_profile.get("hard_constraints") or [])
+    return [s for s in subjects if s]
+
+
+def _card_from_llm(
+    card: _DestinationCard, brief: PartyBrief, forbidden: list[str]
+) -> dict[str, Any] | None:
+    """Turn one LLM card into item copy, or ``None`` if it is unusable.
+
+    Copy mentioning a hard-constraint subject is dropped: the business guardrail
+    scans item text and would reject the whole proposal.
     """
-    if llm is None or needed <= 0:
-        return []
+    why = clip_text(card.why_this_fits, MAX_REASONING_TEXT)
+    description = clip_text(card.description, MAX_DESCRIPTION_TEXT) or why
+    if why is None or description is None:
+        return None
+    score, breakdown = _score(card)
+    names = {n.lower(): n for n in brief.member_names}
+    cost = card.estimated_daily_cost_sgd
+    pick = next((p for p in PICKS if p.lower() == str(card.pick).strip().lower()), "Wildcard")
+    copy = {
+        "description": description,
+        "meta": {
+            "score": score,
+            "whyThisFits": why,
+            "tags": _clean_tags(card.tags),
+            "tradeOff": clip_text(card.trade_off, MAX_REASONING_TEXT) or "",
+            "details": clip_text(card.details, MAX_DETAILS_TEXT) or description,
+            "pick": pick,
+            "bestFor": [names[n.lower()] for n in card.best_for if n.lower() in names],
+            "estimatedDailyCostSgd": cost if isinstance(cost, int) and cost > 0 else None,
+            "scoreBreakdown": breakdown,
+        },
+    }
+    meta = copy["meta"]
+    text = " ".join(
+        [copy["description"], why, meta["tradeOff"], meta["details"], *meta["tags"]]
+    ).lower()
+    if any(subject in text for subject in forbidden):
+        return None
+    return copy
 
-    overlap = group_profile.get("availability_overlap") or []
-    window = f"{overlap[0].get('start')} to {overlap[0].get('end')}" if overlap else "unspecified"
-    ceiling = group_profile.get("budget_ceiling")
-    system_prompt = (
-        f"{UNTRUSTED_INPUT_GUARD}\n\n"
-        "You are an in-world NPC travel guide for a group trip-planning game. "
-        "Suggest real-world travel destinations, each written as 'City, Country', that fit "
-        "the party's combined interests, activities and travel styles, and are sensible for "
-        "their travel window and budget. Read each member's own profile: favour places "
-        "that serve what several members share, and make sure no member is left with "
-        "nothing they asked for. A wish-list entry or interest that names a region or "
-        "vibe (for example 'Asia' or 'beach') is a firm steer: every suggestion must lie "
-        "in that region and offer that vibe. When no region is named, let the theme decide "
-        "and look across continents: snowboarding or skiing points to Japan, the Alps or "
-        "Canada, hiking to Nepal, Patagonia or New Zealand, beaches to Southeast Asia or the "
-        "Mediterranean, and so on, choosing the places that are best for that theme in the "
-        "party's travel window (mind the season in each hemisphere). Give the party a real "
-        "choice: when the theme allows it, spread the suggestions over at least three "
-        "different countries rather than several towns in one. Never suggest a region "
-        "just for variety. The party flies from the departure cities listed (Singapore "
-        "unless stated otherwise): prefer places with practical flights from there and be "
-        "realistic about travel time for the trip length and budget. Never "
-        "suggest a destination that violates a stated hard constraint. Return destination "
-        "names only."
-    )
-    user_prompt = (
-        f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
-        f"Travel window: {window}\n"
-        f"Budget ceiling per person: {ceiling if ceiling is not None else 'none stated'}\n"
-        f"Interests: {clip_for_prompt(group_profile.get('interests'))}\n"
-        f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
-        f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
-        f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
-        f"Party wish list (regions, vibes and places named): "
-        f"{clip_for_prompt(describe_wishes(group_profile.get('destinations')))}\n"
-        f"{format_party_for_prompt(group_profile)}"
-        f"Already suggested (do not repeat): {clip_for_prompt(exclude)}\n"
-        f"Suggest exactly {needed} new destination(s)."
-    )
-    try:
-        result = await llm.generate_structured(
-            operation="destination_candidates",
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=_CandidateList,
-        )
-        raw_names = result.destinations
-    except LLMGenerationError as exc:
-        logger.warning(
-            "LLM candidate generation unavailable (%s: %s); using fallback list",
-            type(exc).__name__,
-            exc,
-        )
-        return []
-    except Exception as exc:  # a malformed double or SDK surprise must not break DISCOVER
-        logger.warning(
-            "LLM candidate generation returned an unusable result (%s: %s); using fallback list",
-            type(exc).__name__,
-            exc,
-        )
-        return []
 
-    names: list[str] = []
-    seen = {name.lower() for name in exclude}
-    for raw in raw_names:
-        name = _clean_destination_name(raw)
-        if name is not None and name.lower() not in seen:
-            seen.add(name.lower())
+def _fallback_card(name: str, brief: PartyBrief) -> dict[str, Any]:
+    """Plain card copy for a place no usable LLM card covers."""
+    named = name.lower() in {p.lower() for p in brief.named_places}
+    if named:
+        why = "Someone in the party named this place."
+    else:
+        why = "A backup pick that matches the party's trip types and interests."
+    details = f"Trip: {trip_text(brief)}. " if brief.days else ""
+    return {
+        "description": why,
+        "meta": {
+            "score": WISHLIST_SCORE if named else SUGGESTED_SCORE,
+            "whyThisFits": why,
+            "tags": [PARTY_PICK if named else GUIDE_PICK],
+            "tradeOff": "No cost estimate yet; check prices before you vote.",
+            "details": (details + why).strip(),
+            "pick": PARTY_PICK if named else GUIDE_PICK,
+            "bestFor": [],
+            "estimatedDailyCostSgd": None,
+            "scoreBreakdown": None,
+        },
+    }
+
+
+def _choose_destinations(
+    brief: PartyBrief, answer: list[_DestinationCard], group_profile: dict[str, Any]
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """Pick the destination names, in order, and their card copy (keyed by lower name).
+
+    Named places first (always kept), then the LLM's suggestions best-score first
+    (over-budget ones dropped while enough remain, at most :data:`MAX_PER_COUNTRY`
+    per country), then :data:`FALLBACK_POOL` ranked by the party's own words.
+    """
+    forbidden = _forbidden_subjects(group_profile)
+    cards: dict[str, dict[str, Any]] = {}
+    for card in answer:
+        name = _clean_name(card.name)
+        if name and name.lower() not in cards:
+            copy = _card_from_llm(card, brief, forbidden)
+            if copy is not None:
+                cards[name.lower()] = {"name": name, **copy}
+
+    names: list[str] = list(brief.named_places)
+    taken = {n.lower() for n in names}
+    per_country: dict[str, int] = {}
+    for name in names:
+        per_country[_country(name)] = per_country.get(_country(name), 0) + 1
+
+    suggestions = sorted(
+        (c for key, c in cards.items() if key not in taken),
+        key=lambda c: -c["meta"]["score"],
+    )
+    affordable = [c for c in suggestions if not _over_budget(c, brief)]
+    if len(names) + len(affordable) >= MIN_RECOMMENDATION_ITEMS:
+        suggestions = affordable
+    for card in suggestions:
+        country = _country(card["name"])
+        if len(names) >= MAX_RECOMMENDATION_ITEMS or per_country.get(country, 0) >= MAX_PER_COUNTRY:
+            continue
+        names.append(card["name"])
+        taken.add(card["name"].lower())
+        per_country[country] = per_country.get(country, 0) + 1
+
+    for name in _fallback_order(group_profile):
+        if len(names) >= MAX_RECOMMENDATION_ITEMS:
+            break
+        if name.lower() not in taken:
             names.append(name)
-    return names[:needed]
+            taken.add(name.lower())
+
+    return names, cards
+
+
+def _over_budget(card: dict[str, Any], brief: PartyBrief) -> bool:
+    cost = card["meta"].get("estimatedDailyCostSgd")
+    if not cost or brief.budget_amount is None or not brief.days:
+        return False
+    return cost * brief.days > brief.budget_amount
+
+
+def _mark_best_fit(items: list[dict[str, Any]]) -> None:
+    """Exactly one "Best fit": the highest-scoring LLM card."""
+    scored = [i for i in items if i["meta"].get("scoreBreakdown")]
+    best = max(scored, key=lambda i: i["meta"]["score"], default=None)
+    for item in scored:
+        if item is best:
+            item["meta"]["pick"] = "Best fit"
+        elif item["meta"]["pick"] == "Best fit":
+            item["meta"]["pick"] = "Wildcard"
+
+
+def _build_proposal(
+    names: list[str],
+    cards: dict[str, dict[str, Any]] | None = None,
+    brief: PartyBrief | None = None,
+) -> dict[str, Any]:
+    """Build a raw destination recommendation payload.
+
+    Each item carries ``description`` and ``meta`` with ``score``, ``whyThisFits``,
+    ``tags``, ``tradeOff``, ``details``, ``pick``, ``bestFor``,
+    ``estimatedDailyCostSgd`` and ``scoreBreakdown``.
+    """
+    brief = brief or build_party_brief([], [], [], [])
+    items = []
+    for name in names[:MAX_RECOMMENDATION_ITEMS]:
+        card = (cards or {}).get(name.lower()) or _fallback_card(name, brief)
+        items.append(
+            {
+                "id": _slugify(name),
+                "title": name,
+                "description": card["description"],
+                "meta": {**card["meta"]},
+            }
+        )
+    _mark_best_fit(items)
+    return {
+        "title": "Where shall our journey begin?",
+        "items": items,
+        "question": "Which destination calls to the party?"[:MAX_QUESTION_LENGTH],
+    }
+
+
+# --- Hard constraints and budget (Requirement 7.9-7.10) --------------------------------
 
 
 def _negated_subject(constraint: str) -> str | None:
@@ -395,223 +575,6 @@ def _filter_candidates(
     return [], "the party's current constraints"
 
 
-class _DestinationInsight(BaseModel):
-    """The LLM's card copy for one destination (CR-1)."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    name: str
-    score: int
-    description: str = ""
-    why_this_fits: str = ""
-    tags: list[str] = Field(default_factory=list)
-    trade_off: str = ""
-    details: str = ""
-
-
-class _DestinationInsights(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    insights: list[_DestinationInsight] = Field(min_length=1)
-
-
-def _forbidden_subjects(group_profile: dict[str, Any]) -> list[str]:
-    subjects = (_negated_subject(str(c)) for c in group_profile.get("hard_constraints") or [])
-    return [s for s in subjects if s]
-
-
-def _clean_tags(raw: Any) -> list[str]:
-    tags: list[str] = []
-    for value in raw or []:
-        tag = clip_text(str(value), MAX_TAG_LENGTH)
-        if tag and tag.lower() not in {t.lower() for t in tags}:
-            tags.append(tag)
-    return tags[:MAX_TAGS]
-
-
-def _fallback_card(name: str, group_profile: dict[str, Any]) -> dict[str, Any]:
-    """Deterministic card copy used when the LLM is unavailable or unusable."""
-    wished = name.lower() in {str(d).lower() for d in group_profile.get("destinations") or []}
-    overlap = group_profile.get("availability_overlap") or []
-    ceiling = group_profile.get("budget_ceiling")
-    window = f"{overlap[0].get('start')} to {overlap[0].get('end')}" if overlap else None
-    details = " ".join(
-        part
-        for part in (
-            f"Shared travel window: {window}." if window else "",
-            f"Budget up to {ceiling} per person." if ceiling is not None else "",
-        )
-        if part
-    )
-    why = (
-        "Someone in the party put this on their wish list."
-        if wished
-        else "Suggested by the guide to round out the party's options."
-    )
-    return {
-        "description": why,
-        "meta": {
-            "score": WISHLIST_SCORE if wished else SUGGESTED_SCORE,
-            "whyThisFits": why,
-            "tags": ["Party wish list"] if wished else ["Guide's pick"],
-            "tradeOff": "No cost estimate yet; check prices before you vote.",
-            "details": details or why,
-        },
-    }
-
-
-def _card_from_insight(insight: _DestinationInsight, forbidden: list[str]) -> dict[str, Any] | None:
-    """Turn one model insight into card copy, or ``None`` if it is unusable.
-
-    Copy that mentions a hard-constraint subject is dropped: the business
-    guardrail scans item text, so it would reject the whole proposal.
-    """
-    why = clip_text(insight.why_this_fits, MAX_REASONING_TEXT)
-    description = clip_text(insight.description, MAX_DESCRIPTION_TEXT) or why
-    if why is None or description is None:
-        return None
-    card = {
-        "description": description,
-        "meta": {
-            "score": max(0, min(100, int(insight.score))),
-            "whyThisFits": why,
-            "tags": _clean_tags(insight.tags),
-            "tradeOff": clip_text(insight.trade_off, MAX_REASONING_TEXT) or "",
-            "details": clip_text(insight.details, MAX_DETAILS_TEXT) or description,
-        },
-    }
-    text = " ".join(
-        [card["description"], why, card["meta"]["tradeOff"], card["meta"]["details"]]
-        + card["meta"]["tags"]
-    ).lower()
-    if any(subject in text for subject in forbidden):
-        return None
-    return card
-
-
-async def _generate_insights(
-    candidates: list[str], group_profile: dict[str, Any], llm: Any
-) -> dict[str, dict[str, Any]]:
-    """Ask the LLM to score and describe each candidate (CR-1).
-
-    Returns card copy keyed by lower-cased name. Never raises: a failure, or a
-    candidate the model skipped, simply gets :func:`_fallback_card` later.
-    """
-    if llm is None or not candidates:
-        return {}
-
-    overlap = group_profile.get("availability_overlap") or []
-    window = f"{overlap[0].get('start')} to {overlap[0].get('end')}" if overlap else "unspecified"
-    ceiling = group_profile.get("budget_ceiling")
-    system_prompt = (
-        f"{UNTRUSTED_INPUT_GUARD}\n\n"
-        "You are an in-world NPC travel guide for a group trip-planning game. For each "
-        "destination given, judge how well it fits the whole party and write card copy that "
-        "helps them decide. Be specific and concrete; avoid generic praise.\n"
-        "- score: 0-100 fit for the party (interests, activities, styles, budget, dates). "
-        "Spread the scores so the best fit clearly stands out.\n"
-        "- description: 1-2 sentences capturing the place's character.\n"
-        "- why_this_fits: 2-3 sentences naming the party's own interests, activities and "
-        "travel styles it matches, with real examples (a district, dish, beach or "
-        "activity), and how it suits their budget and travel window.\n"
-        "- tags: 3-5 short labels (1-3 words each), e.g. Budget, Low crowds, Nightlife.\n"
-        "- trade_off: 1-2 sentences on the most important downside for this party and how "
-        "they could work around it.\n"
-        "- details: 4-6 sentences covering the weather in their travel window, the top "
-        "things to do for this party, the food scene, a rough daily cost per person "
-        "compared with their budget, and where to stay or how to get around.\n"
-        "In why_this_fits and trade_off, speak to individual members by name: say who the "
-        "place suits most and who gets less from it. Never claim a place matches an "
-        "interest it does not.\n"
-        "Use the destination name exactly as given. Never mention or recommend anything a "
-        "hard constraint rules out."
-    )
-    user_prompt = (
-        f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
-        f"Travel window: {window}\n"
-        f"Budget ceiling per person: {ceiling if ceiling is not None else 'none stated'}\n"
-        f"Interests: {clip_for_prompt(group_profile.get('interests'))}\n"
-        f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
-        f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
-        f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
-        f"Party wish list: {clip_for_prompt(describe_wishes(group_profile.get('destinations')))}\n"
-        f"{format_party_for_prompt(group_profile)}"
-        f"Destinations to describe: {clip_for_prompt(candidates)}"
-    )
-    try:
-        result = await llm.generate_structured(
-            operation="destination_insights",
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=_DestinationInsights,
-        )
-        insights = list(result.insights)
-    except LLMGenerationError:
-        logger.info("LLM destination insights unavailable; using fallback card copy")
-        return {}
-    except Exception:  # a malformed double or SDK surprise must not break DISCOVER
-        logger.info("LLM destination insights were unusable; using fallback card copy")
-        return {}
-
-    wanted = {name.lower() for name in candidates}
-    forbidden = _forbidden_subjects(group_profile)
-    cards: dict[str, dict[str, Any]] = {}
-    for insight in insights:
-        key = " ".join(str(insight.name).split()).strip(" .,-").lower()
-        if key in wanted and key not in cards:
-            card = _card_from_insight(insight, forbidden)
-            if card is not None:
-                cards[key] = card
-    return cards
-
-
-def _build_proposal(
-    candidates: list[str],
-    group_profile: dict[str, Any] | None = None,
-    insights: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Build a raw destination recommendation payload from candidate names.
-
-    Each item carries CR-1 card copy: ``description`` plus ``meta`` with
-    ``score``, ``whyThisFits``, ``tags``, ``tradeOff`` and ``details``.
-    """
-    profile = group_profile or {}
-    items = []
-    for name in candidates[:MAX_RECOMMENDATION_ITEMS]:
-        card = (insights or {}).get(name.lower()) or _fallback_card(name, profile)
-        items.append(
-            {
-                "id": _slugify(name),
-                "title": name,
-                "description": card["description"],
-                "meta": dict(card["meta"]),
-            }
-        )
-    return {
-        "title": "Where shall our journey begin?",
-        "items": items,
-        "question": "Which destination calls to the party?"[:MAX_QUESTION_LENGTH],
-    }
-
-
-async def _gather_candidates_with_llm(group_profile: dict[str, Any], llm: Any) -> list[str]:
-    """Seed from the party, fill from the LLM, then top up from the region-aware pool.
-
-    Equivalent to :func:`_gather_candidates` when ``llm`` is ``None`` or fails.
-    """
-    candidates = _gather_candidates_seeds(group_profile)
-    needed = MAX_RECOMMENDATION_ITEMS - len(candidates)
-    for name in await _generate_llm_candidates(group_profile, llm, candidates, needed):
-        if len(candidates) < MAX_RECOMMENDATION_ITEMS:
-            candidates.append(name)
-    for fallback in _fallback_order(group_profile):
-        if len(candidates) >= MAX_RECOMMENDATION_ITEMS:
-            break
-        if fallback not in candidates:
-            candidates.append(fallback)
-    return candidates
-
-
 async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentState:
     """Produce a destination recommendation for the DISCOVER stage.
 
@@ -644,7 +607,12 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
         )
         return state
 
-    candidates = await _gather_candidates_with_llm(profile, repos.llm)
+    brief = build_party_brief(
+        context["members"], context["preferences"], context["characters"],
+        profile["availability_overlap"],
+    )  # fmt: skip
+    answer = await _ask_llm(brief, repos.llm)
+    candidates, cards = _choose_destinations(brief, answer, profile)
     survivors, eliminating_reason = _filter_candidates(candidates, profile)
     if not survivors:
         await perform_human_escalation(
@@ -662,21 +630,21 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
     cap = get_settings().iteration_cap
 
     async def _producer(repair_state: AgentState) -> dict[str, Any]:
-        """Re-load context and recompute candidates, honoring Requirement 6.3."""
+        """Re-load context and re-filter the same answer (Requirement 6.3).
+
+        A repair never calls the model again: it must be fast and repeatable.
+        """
         fresh_context = await _load_context(repair_state, repos)
         fresh_profile = compute_group_profile(
             fresh_context["members"], fresh_context["preferences"], fresh_context["characters"]
         )
-        fresh_candidates = _gather_candidates(fresh_profile)
-        fresh_survivors, _reason = _filter_candidates(fresh_candidates, fresh_profile)
-        # Reuse the first attempt's card copy: a repair must not call the model again.
-        return _build_proposal(fresh_survivors or survivors, fresh_profile, insights)
+        fresh_survivors, _reason = _filter_candidates(candidates, fresh_profile)
+        return _build_proposal(fresh_survivors or survivors, cards, brief)
 
-    insights = await _generate_insights(survivors[:MAX_RECOMMENDATION_ITEMS], profile, repos.llm)
     loop_outcome = await run_guardrail_loop(
         state,
         repos,
-        _build_proposal(survivors, profile, insights),
+        _build_proposal(survivors, cards, brief),
         "destination_recommendation",
         _producer,
         cap,

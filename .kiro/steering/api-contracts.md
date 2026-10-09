@@ -546,22 +546,40 @@ An AI turn returns one or more messages sharing the envelope above. Common field
 
 - `prompt?`: optional follow-up question for the party.
 
-**Destinations.** The LLM scores how well each destination fits the whole party
-(interests, activities, travel styles, budget, shared dates) and writes the copy. If the
-LLM is unavailable, the backend still fills every key: `score` 85 for a destination on
-someone's wish list, 70 for a guide suggestion, with plain copy.
+**Destinations.** One LLM call builds the whole set from the party's preferences (prompt
+text in `backend/app/agents/prompts/discovery_*.md`). Places a member typed themselves
+always come first; trip types such as "Asia" or "Beach Escape" guide the suggestions but
+never become cards. Destination `meta` also carries:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `pick` | string | Badge: `"Best fit"` (exactly one, the top score), `"Budget pick"`, `"Hidden gem"`, `"Wildcard"`; fallback cards use `"Party pick"` (a place the party named) or `"Guide's pick"` |
+| `bestFor` | string[] | Display names of the members it suits best (may be empty) |
+| `estimatedDailyCostSgd` | number \| null | Rough cost per person per day in SGD (stay, food, activities; no flights) |
+| `scoreBreakdown` | object \| null | `{ preferences, budget, season, tripLength }`, each 0–10 |
+
+`score` is computed by the backend from `scoreBreakdown`: 10 × (0.4 × preferences + 0.2 ×
+budget + 0.2 × season + 0.2 × tripLength). Suggestions whose cost for the trip clearly
+exceeds the party's budget are dropped while enough options remain, and at most two cards
+come from one country. If the LLM is unavailable, the backend still fills every key: places
+matching the party's trip types, `score` 85 for a place the party named and 70 otherwise,
+plain copy, and `scoreBreakdown`/`estimatedDailyCostSgd` set to `null`.
 
 ```json
 {
-  "id": "phuket--thailand",
-  "title": "Phuket, Thailand",
-  "description": "Island beaches, night markets and easy island-hopping.",
+  "id": "penang--malaysia",
+  "title": "Penang, Malaysia",
+  "description": "An island blending UNESCO-listed heritage streets with sandy coves and legendary street hawkers.",
   "meta": {
-    "score": 92,
-    "whyThisFits": "Matches the party's love of beaches and street food on a mid budget.",
-    "tags": ["Budget", "Low crowds", "Nightlife"],
-    "tradeOff": "Late-year showers can cancel boat trips.",
-    "details": "December is the start of the dry season, with warm seas and busy markets…"
+    "score": 88,
+    "whyThisFits": "Both Gerald and Priya prioritise food, which Penang delivers with dishes like char kway teow…",
+    "tags": ["Street Food", "Coastal Trails", "Night Markets", "Heritage"],
+    "tradeOff": "Beaches are better for sunsets than swimming; take a boat to Teluk Kampi for cleaner sands.",
+    "details": "Mid-October brings brief afternoon showers… Daily expenses average around 40 to 60 SGD…",
+    "pick": "Best fit",
+    "bestFor": ["Gerald", "Priya"],
+    "estimatedDailyCostSgd": 50,
+    "scoreBreakdown": { "preferences": 9, "budget": 9, "season": 7, "tripLength": 10 }
   }
 }
 ```
