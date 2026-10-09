@@ -26,11 +26,13 @@ import { TiebreakPanel } from "./TiebreakPanel";
 export interface DestinationStageContentProps {
   session: RoomSession;
   members: RoomMember[];
+  onDiscoverChange?: (state: DiscoverState) => void;
 }
 
 export function DestinationStageContent({
   session,
   members,
+  onDiscoverChange,
 }: DestinationStageContentProps): ReactElement {
   const isOwner = session.member.role === "owner";
   const roomId = session.room.id;
@@ -39,6 +41,7 @@ export function DestinationStageContent({
   const [discover, setDiscover] = useState<DiscoverState>({
     loading: true,
     options: [],
+    selectedDestination: null,
     vote: null,
     tiePending: false,
     tiebreak: null,
@@ -70,13 +73,16 @@ export function DestinationStageContent({
     void kickOff();
 
     const unsubscribe = service.subscribeDiscover(roomId, (state) => {
-      if (!cancelled) setDiscover(state);
+      if (!cancelled) {
+        setDiscover(state);
+        onDiscoverChange?.(state);
+      }
     });
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [roomId, memberId, isOwner]);
+  }, [roomId, memberId, isOwner, onDiscoverChange]);
 
   const vote = discover.vote;
   const viewer = members.find((m) => m.id === memberId);

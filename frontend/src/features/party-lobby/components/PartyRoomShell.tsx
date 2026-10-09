@@ -13,9 +13,10 @@
  * Presentational only: session, roster, and copy flag in via props; copy/leave
  * out via callbacks. No service imports here.
  */
-import type { ReactElement } from "react";
+import { useCallback, useState, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
+import type { DiscoverState } from "@/services/destination.contract";
 import type { RoomMember, RoomSession } from "@/types";
 
 import { AdventureSidebar } from "./AdventureSidebar";
@@ -46,6 +47,10 @@ export function PartyRoomShell({
   onLeave,
 }: PartyRoomShellProps): ReactElement {
   const activeStage = session.room.planningStage;
+  const [discover, setDiscover] = useState<DiscoverState | null>(null);
+  const handleDiscoverChange = useCallback((state: DiscoverState): void => {
+    setDiscover(state);
+  }, []);
   const adventure = buildAdventureView(members);
 
   return (
@@ -67,13 +72,21 @@ export function PartyRoomShell({
                 onCopyCode={onCopyCode}
               />
             ) : activeStage === "discover" ? (
-              <DestinationStageContent session={session} members={members} />
+              <DestinationStageContent
+                session={session}
+                members={members}
+                onDiscoverChange={handleDiscoverChange}
+              />
             ) : (
               <StagePlaceholder stage={stageMeta(activeStage)} />
             )}
           </div>
 
-          <AdventureSidebar adventure={adventure} roomSession={session} />
+          <AdventureSidebar
+            adventure={adventure}
+            roomSession={session}
+            selectedDestination={discover?.selectedDestination ?? null}
+          />
         </div>
       </div>
     </main>

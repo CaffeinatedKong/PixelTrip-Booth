@@ -18,6 +18,7 @@ import type {
   DestinationService,
   DestinationVote,
   DiscoverState,
+  SelectedDestination,
   StartDiscoveryInput,
   TiebreakAdvice,
   TiebreakOption,
@@ -42,6 +43,10 @@ interface VoteSessionRow {
 
 interface VoteRow {
   option_id: string;
+}
+
+interface SelectionRow {
+  data: Record<string, unknown>;
 }
 
 function readError(table: string): ApiError {
@@ -179,6 +184,22 @@ class DestinationApiService implements DestinationService {
     );
     const options = recommendation ? toOptions(recommendation.content) : [];
 
+    const { data: selection, error: selectionErr } = await supabase
+      .from("selections")
+      .select("data")
+      .eq("room_id", roomId)
+      .eq("kind", "destination")
+      .maybeSingle<SelectionRow>();
+    if (selectionErr) throw readError("selections");
+
+    const selectionData = selection?.data ?? {};
+    const selectedId = selectionData.id ?? selectionData.option_id;
+    const selectedTitle = selectionData.title ?? selectionData.label;
+    const selectedDestination: SelectedDestination | null =
+      typeof selectedId === "string" && typeof selectedTitle === "string"
+        ? { id: selectedId, title: selectedTitle }
+        : null;
+
     // Open (or most recent) destination vote session.
     const { data: sessions, error: vsErr } = await supabase
       .from("vote_sessions")
@@ -240,6 +261,7 @@ class DestinationApiService implements DestinationService {
     return {
       loading: options.length === 0 && vote === null,
       options,
+      selectedDestination,
       vote,
       tiePending,
       tiebreak,
@@ -278,6 +300,11 @@ class DestinationApiService implements DestinationService {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "votes" },
+        () => void push(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "selections", filter: `room_id=eq.${roomId}` },
         () => void push(),
       )
       .subscribe();

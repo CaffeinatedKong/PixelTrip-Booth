@@ -88,15 +88,15 @@ export function DestinationMatchCard({
 
   return (
     <article
-      className={`flex flex-col gap-16 border-2 p-16 ${
-        selected ? "border-accent bg-bg-alt" : "border-muted bg-bg-alt"
+      className={`flex flex-col gap-16 border-4 bg-ink p-8 text-bg ${
+        selected ? "border-success" : "border-primary-dark"
       }`}
     >
       {/* Header: title + fit score */}
-      <header className="flex items-center justify-between gap-16">
-        <h3 className="font-display text-accent">{option.title}</h3>
+      <header className="flex items-center justify-between gap-16 border-2 border-primary-dark bg-primary px-16 py-8 text-bg">
+        <h3 className="font-display leading-relaxed">{option.title}</h3>
         {score !== null ? (
-          <span className="font-display border-2 border-success bg-success px-8 py-8 text-bg">
+          <span className="shrink-0 border-2 border-bg bg-success px-8 py-8 font-display text-bg">
             FIT {score}/100
           </span>
         ) : null}
@@ -104,9 +104,9 @@ export function DestinationMatchCard({
 
       {/* Why this fits */}
       {why ? (
-        <div className="flex flex-col gap-8">
-          <span className="font-display text-muted">WHY THIS FITS</span>
-          <p className="font-body">{why}</p>
+        <div className="flex flex-col gap-8 px-8 pt-8">
+          <span className="font-display text-primary-dark">WHY THIS FITS</span>
+          <p className="font-body leading-relaxed">{why}</p>
         </div>
       ) : null}
 
@@ -116,7 +116,7 @@ export function DestinationMatchCard({
           {tags.map((tag) => (
             <li
               key={tag}
-              className="font-body border-2 border-success bg-bg px-8 py-8 text-success"
+              className="border-2 border-success bg-success px-8 py-8 font-body text-bg"
             >
               {tag}
             </li>
@@ -126,14 +126,14 @@ export function DestinationMatchCard({
 
       {/* Trade-off */}
       {tradeOff ? (
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-8 border-l-4 border-warning bg-bg px-8 py-8">
           <span className="font-display text-warning">TRADE-OFF</span>
-          <p className="font-body text-muted">{tradeOff}</p>
+          <p className="font-body leading-relaxed text-ink">{tradeOff}</p>
         </div>
       ) : null}
 
       {/* Actions */}
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-8 border-t-2 border-muted px-8 pb-8 pt-8">
         <PixelButton
           variant={selected ? "primary" : "option"}
           label={selected ? "Selected" : "Select"}
@@ -145,12 +145,16 @@ export function DestinationMatchCard({
             type="button"
             aria-expanded={open}
             onClick={() => setOpen((prev) => !prev)}
-            className="font-body text-muted border-2 border-muted px-16 py-8 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            className="border-2 border-primary-dark bg-primary px-16 py-8 text-left font-body text-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           >
             {open ? "▲ Hide details" : "▼ View full details"}
           </button>
         ) : null}
-        {open && details ? <p className="font-body">{details}</p> : null}
+        {open && details ? (
+          <p className="border-2 border-muted bg-bg p-8 font-body leading-relaxed text-ink">
+            {details}
+          </p>
+        ) : null}
       </div>
     </article>
   );

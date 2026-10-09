@@ -22,6 +22,12 @@ export interface DestinationOption {
   meta?: Record<string, unknown>;
 }
 
+/** The locked destination selection persisted after a vote resolves. */
+export interface SelectedDestination {
+  id: string;
+  title: string;
+}
+
 /** The open (or resolved) destination vote. */
 export interface DestinationVote {
   voteSessionId: string;
@@ -73,6 +79,8 @@ export interface DiscoverState {
   loading: boolean;
   /** The recommended destinations, or empty until the AI posts them. */
   options: readonly DestinationOption[];
+  /** The locked destination, or null while the vote is still open. */
+  selectedDestination: SelectedDestination | null;
   /** The destination vote, or null until the AI opens it. */
   vote: DestinationVote | null;
   /** True when the vote tied and awaits the owner's break-tie pick. */

@@ -24,6 +24,7 @@ const MOCK_STATE: DiscoverState = {
     title: o.label,
     description: o.description,
   })),
+  selectedDestination: null,
   vote: {
     voteSessionId: "mock-destination-vote",
     question: "Where shall the party go?",

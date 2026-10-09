@@ -18,15 +18,20 @@ export interface SidebarPlaceholderPanelProps {
   title: string;
   /** Empty-state value shown as the section content, e.g. "Not selected". */
   emptyLabel: string;
+  /** Confirmed value shown after the backend locks the selection. */
+  value?: string;
 }
 
 export function SidebarPlaceholderPanel({
   title,
   emptyLabel,
+  value,
 }: SidebarPlaceholderPanelProps): ReactElement {
   return (
     <PixelCard title={title}>
-      <p className="font-body text-muted">{emptyLabel}</p>
+      <p className={`font-display ${value ? "text-accent" : "text-muted"}`}>
+        {value ?? emptyLabel}
+      </p>
     </PixelCard>
   );
 }

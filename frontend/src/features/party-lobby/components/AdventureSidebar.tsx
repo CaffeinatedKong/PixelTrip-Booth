@@ -23,6 +23,7 @@
 import type { ReactElement } from "react";
 
 import type { RoomSession } from "@/types/room";
+import type { SelectedDestination } from "@/services/destination.contract";
 
 import type { AdventureView } from "../types";
 import { useAdventureDrawer } from "../hooks/useAdventureDrawer";
@@ -37,11 +38,14 @@ export interface AdventureSidebarProps {
   adventure: AdventureView;
   /** The active room session, or null when no session is available. */
   roomSession?: RoomSession | null;
+  /** The destination locked by the resolved vote, when available. */
+  selectedDestination?: SelectedDestination | null;
 }
 
 export function AdventureSidebar({
   adventure,
   roomSession,
+  selectedDestination = null,
 }: AdventureSidebarProps): ReactElement {
   const drawer = useAdventureDrawer();
 
@@ -90,7 +94,11 @@ export function AdventureSidebar({
           roomCode={roomCode}
           onInvite={handleInvite}
         />
-        <SidebarPlaceholderPanel title="DESTINATION" emptyLabel="Not selected" />
+        <SidebarPlaceholderPanel
+          title="DESTINATION"
+          emptyLabel="Not selected"
+          value={selectedDestination?.title}
+        />
         <SidebarPlaceholderPanel title="FLIGHT" emptyLabel="Not selected" />
         <BudgetPanel />
         <AdventureProgress steps={steps} />
