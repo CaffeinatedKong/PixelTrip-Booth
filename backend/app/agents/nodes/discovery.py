@@ -81,6 +81,39 @@ MAX_RECOMMENDATION_ITEMS = 5
 #: minimum — the safety net that keeps DISCOVER working with no model available.
 FALLBACK_CANDIDATES: tuple[str, ...] = ("Kyoto, Japan", "Lisbon, Portugal", "Reykjavik, Iceland")
 
+# The current frontend calls these fields ``destinations``, but these values are
+# destination vibes, not places that can be voted on. Keep them as profile
+# guidance for the LLM, never as recommendation cards.
+DESTINATION_VIBE_VALUES = frozenset(
+    {
+        "asia",
+        "western-cities",
+        "western_cities",
+        "beach-escape",
+        "beach_escape",
+        "beach_escaape",
+        "nature-scenery",
+        "nature_scenery",
+        "food-trip",
+        "food_trip",
+        "cultural-trip",
+        "cultural_trip",
+        "adventure-trip",
+        "adventure_trip",
+        "shopping-city",
+        "shopping_city",
+        "hidden-gems",
+        "hidden_gems",
+        "shopping city",
+        "beach escape",
+        "nature & scenery",
+        "food trip",
+        "cultural trip",
+        "adventure trip",
+        "hidden gems",
+    }
+)
+
 #: A suggestion longer than this is not a destination name; treat it as junk.
 MAX_DESTINATION_NAME_LENGTH = 80
 
@@ -108,12 +141,17 @@ def _slugify(name: str) -> str:
 
 
 def _gather_candidates(group_profile: dict[str, Any]) -> list[str]:
-    """Seed candidates from the party's own destinations, then top up.
+    """Seed real party destinations, then top up.
 
-    Requirement 7.5: every ``travel_preferences.destinations`` entry comes
-    first, in the order ``compute_group_profile`` already de-duplicated them in.
+    Real destinations from ``travel_preferences.destinations`` come first.
+    Frontend destination-vibe values remain in the group profile for prompting,
+    but must never become vote options.
     """
-    seeded = list(group_profile.get("destinations") or [])
+    seeded = [
+        str(destination).strip()
+        for destination in group_profile.get("destinations") or []
+        if str(destination).strip().lower() not in DESTINATION_VIBE_VALUES
+    ]
     candidates = list(seeded)
     for fallback in FALLBACK_CANDIDATES:
         if len(candidates) >= MAX_RECOMMENDATION_ITEMS:
@@ -491,7 +529,8 @@ async def _gather_candidates_with_llm(group_profile: dict[str, Any], llm: Any) -
 
     Equivalent to :func:`_gather_candidates` when ``llm`` is ``None`` or fails.
     """
-    candidates = list(group_profile.get("destinations") or [])
+    candidates = _gather_candidates(group_profile)
+    candidates = [candidate for candidate in candidates if candidate not in FALLBACK_CANDIDATES]
     needed = MAX_RECOMMENDATION_ITEMS - len(candidates)
     for name in await _generate_llm_candidates(group_profile, llm, candidates, needed):
         if len(candidates) < MAX_RECOMMENDATION_ITEMS:
