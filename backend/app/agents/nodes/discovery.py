@@ -26,8 +26,8 @@ next:
 ``travel_preferences.destinations`` entries are seeded *before* any
 model-generated or tool-sourced candidate. The candidate set is therefore built
 in three layers, in this order: the party's own destinations, then names the
-LLM suggests for the remaining slots, then a small fixed fallback list
-(``FALLBACK_CANDIDATES``) for whatever is still missing.
+LLM suggests for the remaining slots, then a small region-aware fallback
+pool (``FALLBACK_POOL``, ranked by the party's own words) for whatever is still missing.
 
 The LLM augments candidate generation; it is never a single point of failure
 for the DISCOVER stage. If the call fails for any reason — no API key, a
@@ -60,7 +60,11 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.errors import LLMGenerationError, PreferencesNotCollectedError
-from app.agents.group_profile import compute_group_profile
+from app.agents.group_profile import (
+    compute_group_profile,
+    format_party_for_prompt,
+    is_region_word,
+)
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
@@ -76,10 +80,47 @@ logger = logging.getLogger(__name__)
 MIN_RECOMMENDATION_ITEMS = 3
 MAX_RECOMMENDATION_ITEMS = 5
 
-#: Used to top up the candidate set when neither the party's own
-#: ``travel_preferences.destinations`` entries nor the LLM's suggestions reach the
-#: minimum — the safety net that keeps DISCOVER working with no model available.
-FALLBACK_CANDIDATES: tuple[str, ...] = ("Kyoto, Japan", "Lisbon, Portugal", "Reykjavik, Iceland")
+#: Region-aware safety net, used only when the LLM cannot suggest anything. Each entry is
+#: ``(name, region/vibe keywords)``; the party's own words pick which ones are offered, so
+#: an Asia-and-beach party is never padded out with European cities.
+FALLBACK_POOL: tuple[tuple[str, frozenset[str]], ...] = (
+    ("Kyoto, Japan", frozenset({"asia", "east asia", "japan", "culture", "temples", "food"})),
+    ("Bali, Indonesia", frozenset({"asia", "southeast asia", "beach", "island", "nature"})),
+    ("Phuket, Thailand", frozenset({"asia", "southeast asia", "beach", "island", "nightlife"})),
+    ("Da Nang, Vietnam", frozenset({"asia", "southeast asia", "beach", "food", "budget"})),
+    ("Bangkok, Thailand", frozenset({"asia", "southeast asia", "food", "city", "nightlife"})),
+    ("Seoul, South Korea", frozenset({"asia", "east asia", "city", "food", "shopping"})),
+    ("Lisbon, Portugal", frozenset({"europe", "city", "food", "culture", "coast"})),
+    ("Barcelona, Spain", frozenset({"europe", "beach", "city", "food", "nightlife"})),
+    ("Rome, Italy", frozenset({"europe", "culture", "history", "food", "city"})),
+    ("Reykjavik, Iceland", frozenset({"europe", "nature", "adventure", "hiking"})),
+    ("Cape Town, South Africa", frozenset({"africa", "beach", "nature", "adventure"})),
+    ("Sydney, Australia", frozenset({"oceania", "beach", "city", "nature"})),
+    ("Cancun, Mexico", frozenset({"north america", "beach", "island", "nightlife"})),
+    (
+        "Niseko, Japan",
+        frozenset(
+            {"asia", "east asia", "japan", "snow", "ski", "skiing", "snowboarding", "winter"}
+        ),
+    ),
+    (
+        "Chamonix, France",
+        frozenset({"europe", "snow", "ski", "skiing", "snowboarding", "winter", "hiking", "alps"}),
+    ),
+    (
+        "Banff, Canada",
+        frozenset({"north america", "snow", "ski", "skiing", "snowboarding", "hiking", "nature"}),
+    ),
+    (
+        "Queenstown, New Zealand",
+        frozenset({"oceania", "adventure", "hiking", "ski", "skiing", "snowboarding", "nature"}),
+    ),
+    ("Kathmandu, Nepal", frozenset({"asia", "south asia", "hiking", "trekking", "mountains"})),
+    (
+        "Torres del Paine, Chile",
+        frozenset({"south america", "hiking", "trekking", "mountains", "nature"}),
+    ),
+)
 
 #: A suggestion longer than this is not a destination name; treat it as junk.
 MAX_DESTINATION_NAME_LENGTH = 80
@@ -107,15 +148,50 @@ def _slugify(name: str) -> str:
     return "".join(ch if ch.isalnum() else "-" for ch in name.lower()).strip("-") or "option"
 
 
+def _profile_words(group_profile: dict[str, Any]) -> set[str]:
+    """Lower-cased words and phrases the party used to describe what it wants."""
+    words: set[str] = set()
+    for key in ("interests", "activities", "destinations", "travel_styles"):
+        for entry in group_profile.get(key) or []:
+            text = str(entry).lower()
+            words.add(text.strip())
+            words.update(text.replace(",", " ").split())
+    return words
+
+
+def _fallback_order(group_profile: dict[str, Any]) -> list[str]:
+    """The fallback pool ranked by how many of the party's own words each entry matches.
+
+    When the party named a region ("Asia", "Europe") the pool is first narrowed to that
+    region, so no ranking can pull a place from elsewhere back in. The narrowing is only
+    applied while it leaves enough entries to fill a recommendation. Ties keep the pool
+    order, so a party that said nothing useful gets the original spread.
+    """
+    words = _profile_words(group_profile)
+    regions = {word for word in words if is_region_word(word)}
+    pool = list(FALLBACK_POOL)
+    if regions:
+        in_region = [entry for entry in pool if entry[1] & regions]
+        if len(in_region) >= MIN_RECOMMENDATION_ITEMS:
+            pool = in_region
+    ranked = sorted(
+        enumerate(pool),
+        key=lambda pair: (-len(pair[1][1] & words), pair[0]),
+    )
+    return [name for _index, (name, _keywords) in ranked]
+
+
 def _gather_candidates(group_profile: dict[str, Any]) -> list[str]:
     """Seed candidates from the party's own destinations, then top up.
 
-    Requirement 7.5: every ``travel_preferences.destinations`` entry comes
-    first, in the order ``compute_group_profile`` already de-duplicated them in.
+    Requirement 7.5: every ``travel_preferences.destinations`` entry that names a place
+    comes first, in the order ``compute_group_profile`` already de-duplicated them in.
+    Entries that name a region or vibe ("Asia", "anywhere") steer the guide instead and
+    are not candidates themselves.
     """
-    seeded = list(group_profile.get("destinations") or [])
+    seeded = [d for d in (group_profile.get("destinations") or []) if not is_region_word(d)]
     candidates = list(seeded)
-    for fallback in FALLBACK_CANDIDATES:
+    for fallback in _fallback_order(group_profile):
         if len(candidates) >= MAX_RECOMMENDATION_ITEMS:
             break
         if fallback not in candidates:
@@ -152,7 +228,7 @@ async def _generate_llm_candidates(
     """Ask the LLM for up to ``needed`` additional destination names.
 
     Returns an empty list — never raises — on any failure, so the caller's
-    fallback to ``FALLBACK_CANDIDATES`` is the only error-handling path
+    fallback to ``FALLBACK_POOL`` is the only error-handling path
     ``discovery_node`` needs.
     """
     if llm is None or needed <= 0:
@@ -166,8 +242,22 @@ async def _generate_llm_candidates(
         "You are an in-world NPC travel guide for a group trip-planning game. "
         "Suggest real-world travel destinations, each written as 'City, Country', that fit "
         "the party's combined interests, activities and travel styles, and are sensible for "
-        "their travel window and budget. Never suggest a destination that violates a stated "
-        "hard constraint. Return destination names only."
+        "their travel window and budget. Read each member's own profile: favour places "
+        "that serve what several members share, and make sure no member is left with "
+        "nothing they asked for. A wish-list entry or interest that names a region or "
+        "vibe (for example 'Asia' or 'beach') is a firm steer: every suggestion must lie "
+        "in that region and offer that vibe. When no region is named, let the theme decide "
+        "and look across continents: snowboarding or skiing points to Japan, the Alps or "
+        "Canada, hiking to Nepal, Patagonia or New Zealand, beaches to Southeast Asia or the "
+        "Mediterranean, and so on, choosing the places that are best for that theme in the "
+        "party's travel window (mind the season in each hemisphere). Give the party a real "
+        "choice: when the theme allows it, spread the suggestions over at least three "
+        "different countries rather than several towns in one. Never suggest a region "
+        "just for variety. The party flies from the departure cities listed (Singapore "
+        "unless stated otherwise): prefer places with practical flights from there and be "
+        "realistic about travel time for the trip length and budget. Never "
+        "suggest a destination that violates a stated hard constraint. Return destination "
+        "names only."
     )
     user_prompt = (
         f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
@@ -177,6 +267,9 @@ async def _generate_llm_candidates(
         f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
         f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
         f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
+        f"Party wish list (regions and places named): "
+        f"{clip_for_prompt(group_profile.get('destinations'))}\n"
+        f"{format_party_for_prompt(group_profile)}"
         f"Already suggested (do not repeat): {clip_for_prompt(exclude)}\n"
         f"Suggest exactly {needed} new destination(s)."
     )
@@ -416,6 +509,9 @@ async def _generate_insights(
         "- details: 4-6 sentences covering the weather in their travel window, the top "
         "things to do for this party, the food scene, a rough daily cost per person "
         "compared with their budget, and where to stay or how to get around.\n"
+        "In why_this_fits and trade_off, speak to individual members by name: say who the "
+        "place suits most and who gets less from it. Never claim a place matches an "
+        "interest it does not.\n"
         "Use the destination name exactly as given. Never mention or recommend anything a "
         "hard constraint rules out."
     )
@@ -428,6 +524,7 @@ async def _generate_insights(
         f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
         f"Hard constraints: {clip_for_prompt(group_profile.get('hard_constraints'))}\n"
         f"Party wish list: {clip_for_prompt(group_profile.get('destinations'))}\n"
+        f"{format_party_for_prompt(group_profile)}"
         f"Destinations to describe: {clip_for_prompt(candidates)}"
     )
     try:
@@ -487,16 +584,16 @@ def _build_proposal(
 
 
 async def _gather_candidates_with_llm(group_profile: dict[str, Any], llm: Any) -> list[str]:
-    """Seed from the party, fill from the LLM, then top up from the fixed list.
+    """Seed from the party, fill from the LLM, then top up from the region-aware pool.
 
     Equivalent to :func:`_gather_candidates` when ``llm`` is ``None`` or fails.
     """
-    candidates = list(group_profile.get("destinations") or [])
+    candidates = [d for d in (group_profile.get("destinations") or []) if not is_region_word(d)]
     needed = MAX_RECOMMENDATION_ITEMS - len(candidates)
     for name in await _generate_llm_candidates(group_profile, llm, candidates, needed):
         if len(candidates) < MAX_RECOMMENDATION_ITEMS:
             candidates.append(name)
-    for fallback in FALLBACK_CANDIDATES:
+    for fallback in _fallback_order(group_profile):
         if len(candidates) >= MAX_RECOMMENDATION_ITEMS:
             break
         if fallback not in candidates:

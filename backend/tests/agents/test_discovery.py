@@ -14,7 +14,7 @@ from app.agents.errors import LLMGenerationError, PreferencesNotCollectedError
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, LLMClient
 from app.agents.nodes import discovery as discovery_module
 from app.agents.nodes.discovery import (
-    FALLBACK_CANDIDATES,
+    FALLBACK_POOL,
     _CandidateList,
     _generate_llm_candidates,
     discovery_node,
@@ -137,10 +137,13 @@ async def test_a_hard_constraint_eliminating_every_candidate_escalates() -> None
             preference_row(
                 MEMBER_1,
                 destinations=["Kyoto, Japan"],
-                # One hard constraint per fallback candidate too, so the whole
-                # candidate set (seeded + fallback) is eliminated, not just the
-                # seeded entry.
-                hard_constraints=["no japan", "no lisbon", "no reykjavik"],
+                # One hard constraint per fallback city too, so the whole candidate
+                # set (seeded + the entire fallback pool) is eliminated, not just
+                # the seeded entry.
+                hard_constraints=[
+                    "no japan",
+                    *(f"no {name.split(',')[0].lower()}" for name, _keywords in FALLBACK_POOL),
+                ],
             ),
         ],
     )
@@ -361,8 +364,6 @@ async def test_llm_names_follow_seeded_destinations_and_precede_the_fallback_lis
         "Seoul, South Korea",
         "Oslo, Norway",
     ]
-    # The fixed list is only a top-up: with the LLM filling every slot it is never reached.
-    assert not (set(FALLBACK_CANDIDATES) - {"Kyoto, Japan"}) & set(titles)
     assert candidate_calls(llm) == 1
 
 
@@ -487,3 +488,106 @@ async def test_the_prompt_carries_the_injection_guard_and_flattens_party_text() 
     assert "no beaches" in user_prompt
     # Party text cannot start a fresh line that looks like a new instruction.
     assert "\nSYSTEM:" not in user_prompt
+
+
+# --- per-member profiles and region steering -------------------------------------------
+
+ANDY = {"id": MEMBER_1, "display_name": "Andy", "role": "owner"}
+BEE = {"id": MEMBER_2, "display_name": "Bee", "role": "member"}
+
+
+def two_member_party(client: FakeSupabaseClient, *, andy_wishes: list[str]) -> None:
+    wire_base_context(
+        client,
+        members=[ANDY, BEE],
+        preferences=[
+            preference_row(
+                MEMBER_1,
+                destinations=andy_wishes,
+                interests=["beach", "street food"],
+                budget=1500,
+                travel_style="relaxed",
+                hard_constraints=[{"type": "departure_origin", "value": "SIN"}],
+            ),
+            preference_row(
+                MEMBER_2,
+                interests=["street food", "nightlife"],
+                budget=900,
+                travel_style="packed",
+            ),
+        ],
+    )
+
+
+async def test_the_candidate_prompt_carries_each_members_own_profile() -> None:
+    client = FakeSupabaseClient()
+    two_member_party(client, andy_wishes=["Asia"])
+    queue_successful_writes(client)
+    llm = llm_double("Bali, Indonesia", "Da Nang, Vietnam", "Phuket, Thailand")
+
+    await run_with_llm(client, llm)
+
+    call = next(
+        c
+        for c in llm.generate_structured.await_args_list
+        if c.kwargs["operation"] == "destination_candidates"
+    )
+    prompt = call.kwargs["user_prompt"]
+    assert "Andy (party leader)" in prompt and "Bee" in prompt
+    assert "budget: 1500" in prompt and "budget: 900" in prompt
+    assert "flying from: SIN" in prompt
+    assert "Shared by 2+ members: ['street food']" in prompt
+    assert "Bee: nightlife" in prompt  # an interest only one member asked for
+    assert "Travel styles differ" in prompt
+    assert "firm steer" in call.kwargs["system_prompt"]
+    # The mirrored origin entry is bookkeeping, never a hard constraint the model sees.
+    assert "departure_origin" not in prompt
+
+
+async def test_a_region_in_the_wish_list_steers_but_is_never_a_destination_card() -> None:
+    client = FakeSupabaseClient()
+    two_member_party(client, andy_wishes=["Asia"])
+    queue_successful_writes(client)
+
+    await run_with_llm(client, llm_double(error=LLMGenerationError("destination_candidates")))
+
+    titles = emitted_titles(client)
+    assert "Asia" not in titles
+    assert len(titles) == 5
+
+
+async def test_the_fallback_follows_the_partys_region_instead_of_defaulting_to_europe() -> None:
+    client = FakeSupabaseClient()
+    two_member_party(client, andy_wishes=["Asia"])
+    queue_successful_writes(client)
+
+    await run_with_llm(client, llm_double(error=LLMGenerationError("destination_candidates")))
+
+    asian = {name for name, keywords in FALLBACK_POOL if "asia" in keywords}
+    assert set(emitted_titles(client)) <= asian
+
+
+def test_a_named_region_narrows_the_fallback_pool_even_when_other_cities_match_more_words() -> None:
+    profile = {
+        "destinations": ["Europe"],
+        "interests": ["beach", "street food", "nightlife", "city"],
+    }
+
+    order = discovery_module._fallback_order(profile)
+
+    europe = {name for name, keywords in FALLBACK_POOL if "europe" in keywords}
+    assert set(order) == europe
+
+
+def test_an_unrecognised_region_does_not_empty_the_pool() -> None:
+    order = discovery_module._fallback_order({"destinations": ["Antarctica"]})
+
+    assert len(order) == len(FALLBACK_POOL)
+
+
+def test_a_theme_with_no_region_ranks_matching_places_across_continents() -> None:
+    snow = discovery_module._fallback_order({"interests": ["snowboarding"]})[:4]
+    hiking = discovery_module._fallback_order({"interests": ["hiking"]})[:6]
+
+    assert {"Niseko, Japan", "Chamonix, France", "Banff, Canada"} <= set(snow)
+    assert {"Kathmandu, Nepal", "Torres del Paine, Chile"} <= set(hiking)

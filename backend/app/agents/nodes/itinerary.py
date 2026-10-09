@@ -52,7 +52,7 @@ from app.agents.errors import (
     PreferencesNotCollectedError,
     RepeatedVersionContentionError,
 )
-from app.agents.group_profile import compute_group_profile
+from app.agents.group_profile import compute_group_profile, format_party_for_prompt
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import SummaryMessageContent, emit_npc_message
 from app.agents.nodes.discovery import _violates_hard_constraints
@@ -374,8 +374,11 @@ async def _draft_days_with_llm(
         "neighbourhood or venue. Prefer well-known real places and typical local activities "
         "for the destination. Never state prices, opening hours, flight details or booking "
         "information. Never include anything that violates a stated hard constraint, and "
-        "include every required activity somewhere in the trip. Return exactly the days "
-        "requested, numbered as given."
+        "include every required activity somewhere in the trip. Read each member's own "
+        "profile and spread the days so every member gets some of what they asked for, "
+        "not only the loudest interest; name who an activity is for in its description "
+        "when it serves one member in particular. Return exactly the days requested, "
+        "numbered as given."
     )
     context = (
         f"Destination: {' '.join(destination.split())[:MAX_TITLE_CHARS]}\n"
@@ -386,6 +389,7 @@ async def _draft_days_with_llm(
         f"Required activities: {clip_for_prompt(group_profile.get('required_activities'))}\n"
         f"Travel styles: {clip_for_prompt(group_profile.get('travel_styles'))}\n"
         f"Hard constraints: {clip_for_prompt(hard_constraints)}\n"
+        f"{format_party_for_prompt(group_profile)}"
     )
 
     drafted: dict[int, list[ItineraryItemModel]] = {}
