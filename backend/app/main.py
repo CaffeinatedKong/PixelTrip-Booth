@@ -27,6 +27,7 @@ from app.core.config import get_settings
 from app.exceptions import (
     BackendError,
     ConflictError,
+    InvalidBudgetError,
     InvalidDisplayNameError,
     ItineraryVersionNotFoundError,
     MemberAlreadyExistsError,
@@ -94,6 +95,7 @@ ERROR_CODES: dict[type[BackendError], tuple[int, str]] = {
     VersionNotProposedError: (409, "VERSION_NOT_PROPOSED"),
     MemberAlreadyExistsError: (409, "MEMBER_ALREADY_EXISTS"),
     InvalidDisplayNameError: (422, "INVALID_DISPLAY_NAME"),
+    InvalidBudgetError: (422, "INVALID_BUDGET"),
 }
 
 #: Exceptions whose own message must never reach the client. For these the

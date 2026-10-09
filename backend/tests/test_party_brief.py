@@ -55,15 +55,19 @@ def test_brief_counts_labels_and_separates_trip_types_from_places():
     assert brief.roles == ["Planner", "Chill"]
 
 
-def test_budget_uses_the_lowest_tier_and_ignores_typo_amounts():
+def test_budget_uses_the_lowest_level_and_names_typo_amounts():
     brief = build_party_brief(MEMBERS, PREFS, CHARACTERS, OVERLAP)
 
     assert brief.budget_level == "Low"
-    assert brief.budget_amount == 1200  # the "2" is ignored
+    assert brief.budget_amount == 1200  # the "2" is never a limit
     assert budget_text(brief) == (
-        "Budget level: low (1 of 2 chose Low Budget)\n"
-        "Budget per person for the whole trip: SGD 1,200 (the lowest in the party)"
+        "Budget level: low (1 of 2 chose Low Budget), about SGD 50-120 per person per day, "
+        "excluding flights\n"
+        "Budget per person for the whole trip, including flights: SGD 1,200 (a hard limit, "
+        "set by Priya, the lowest in the party)\n"
+        "Ignored as likely typos (outside SGD 100-50,000): Gerald entered SGD 2"
     )
+    assert "budget: Low, SGD 1,200 total" in members_text(brief)
 
 
 def test_trip_uses_the_longest_shared_window():

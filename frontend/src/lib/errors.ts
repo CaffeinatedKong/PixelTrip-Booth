@@ -30,6 +30,8 @@ export type ApiErrorCode =
   | "MEMBER_ALREADY_EXISTS"
   | "VALIDATION_ERROR"
   | "INVALID_DISPLAY_NAME"
+  /** Budget outside SGD 100–50,000; the message is safe to show next to the field. */
+  | "INVALID_BUDGET"
   | "ROOM_CODE_EXHAUSTED"
   | "INTERNAL_ERROR"
   | "DATABASE_ERROR"

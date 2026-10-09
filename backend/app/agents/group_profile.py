@@ -23,6 +23,7 @@ from datetime import date
 from typing import Any
 
 from app.agents.llm import clip_for_prompt
+from app.core.budget import is_valid_amount
 
 #: Keys accepted for a date range inside ``travel_preferences.available_dates``.
 #: Tolerant of both shapes because the frontend contract and the mock fixtures
@@ -148,9 +149,13 @@ def compute_budget_ceiling(preferences: list[dict[str, Any]]) -> float | None:
         if raw is None:
             continue
         try:
-            budgets.append(float(raw))
+            amount = float(raw)
         except (TypeError, ValueError):
             continue
+        # Amounts outside the accepted range (e.g. a "2" saved before the API checked)
+        # are treated as not stated rather than as a limit nobody can meet.
+        if is_valid_amount(amount):
+            budgets.append(amount)
     return min(budgets) if budgets else None
 
 

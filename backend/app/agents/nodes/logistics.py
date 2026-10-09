@@ -37,6 +37,7 @@ place no one in the party may be starting from.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
@@ -48,6 +49,7 @@ from app.agents.messages import RecommendationMessageContent, emit_npc_message
 from app.agents.proposals import FlightRecommendationProposal
 from app.agents.tools.base import FlightOption
 from app.agents.tools.flights import FlightSearchTool
+from app.core.budget import party_budget
 from app.core.config import get_settings
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -95,6 +97,39 @@ def _resolve_departure_origin(preferences: list[dict[str, Any]]) -> str | None:
                 if isinstance(value, str) and value.strip():
                     return value.strip()
     return None
+
+
+def _flight_ceiling(
+    context: dict[str, Any], profile: dict[str, Any], destination: dict[str, Any] | None
+) -> float | None:
+    """The most a flight may cost per person (``None`` = no hard limit).
+
+    The party's hard limit (the lowest typed budget, whole trip including flights)
+    minus the locked destination's estimated stay (daily estimate x shared days).
+    Without a stay estimate, or if the stay alone would use up the limit, the full
+    limit applies: an estimate must never shut out every flight on its own.
+    """
+    days = _longest_window_days(profile.get("availability_overlap") or [])
+    budget = party_budget(context["members"], context["preferences"], context["characters"], days)
+    if budget.limit is None:
+        return None
+    daily = (destination or {}).get("estimatedDailyCostSgd")
+    left = budget.money_for_flight(
+        budget.stay_estimate(daily if isinstance(daily, int | float) else None)
+    )
+    return left if left is not None and left > 0 else budget.limit
+
+
+def _longest_window_days(overlap: list[dict[str, str]]) -> int | None:
+    best: int | None = None
+    for entry in overlap:
+        try:
+            days = (date.fromisoformat(entry["end"]) - date.fromisoformat(entry["start"])).days + 1
+        except (KeyError, TypeError, ValueError):
+            continue
+        if days > 0 and (best is None or days > best):
+            best = days
+    return best
 
 
 def _option_cost(option: FlightOption) -> float:
@@ -290,6 +325,12 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
     profile = compute_group_profile(
         context["members"], context["preferences"], context["characters"]
     )
+    # For a flight run the ceiling is what the budget leaves once the stay is paid
+    # for; the filter below and the business guardrail both read it from the profile.
+    profile = {
+        **profile,
+        "budget_ceiling": _flight_ceiling(context, profile, destination_selection.get("data")),
+    }
     state = state.with_group_profile(profile)
 
     if not profile["availability_overlap"]:

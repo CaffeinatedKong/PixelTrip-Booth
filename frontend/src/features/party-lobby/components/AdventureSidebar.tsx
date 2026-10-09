@@ -31,6 +31,7 @@ import { buildStageSteps } from "../lib/stages";
 import { SidebarPartyPanel } from "./SidebarPartyPanel";
 import { SidebarPlaceholderPanel } from "./SidebarPlaceholderPanel";
 import { BudgetPanel } from "./BudgetPanel";
+import { useTripBudget } from "../hooks/useTripBudget";
 import { AdventureProgress } from "./AdventureProgress";
 
 export interface AdventureSidebarProps {
@@ -48,6 +49,7 @@ export function AdventureSidebar({
   selectedDestination = null,
 }: AdventureSidebarProps): ReactElement {
   const drawer = useAdventureDrawer();
+  const budget = useTripBudget(roomSession?.room.id);
 
   const roomCode = roomSession?.room.roomCode ?? null;
   const stage = roomSession?.room.planningStage ?? "setup";
@@ -100,7 +102,7 @@ export function AdventureSidebar({
           value={selectedDestination?.title}
         />
         <SidebarPlaceholderPanel title="FLIGHT" emptyLabel="Not selected" />
-        <BudgetPanel />
+        <BudgetPanel budget={budget} />
         <AdventureProgress steps={steps} />
       </div>
     </aside>

@@ -64,6 +64,7 @@ from app.agents.proposals import (
     ItineraryModel,
     ItineraryProposal,
 )
+from app.core.budget import party_budget
 from app.exceptions import RepositoryError
 from app.repositories.itinerary_version_repository import UniqueVersionViolation
 from app.services.trip_status_service import advance_trip_status
@@ -285,6 +286,11 @@ class _ItemDraft(BaseModel):
     time: str | None = Field(default=None, description="Start time, 24-hour HH:MM.")
     description: str = Field(default="", description="One or two sentences.")
     location: str | None = Field(default=None, description="Neighbourhood or venue name.")
+    estimated_cost_sgd: float | None = Field(
+        default=None,
+        description="Rough cost per person in SGD for this activity (tickets, tours, "
+        "entry, a special meal); 0 if free.",
+    )
 
 
 class _DayDraft(BaseModel):
@@ -330,11 +336,46 @@ def _items_from_draft(
                 time=clip_text(entry.time, MAX_TIME_CHARS),
                 description=description,
                 location=location,
+                cost=_activity_cost(entry.estimated_cost_sgd),
             )
         )
         if len(items) >= MAX_ITEMS_PER_DAY:
             break
     return items
+
+
+#: An activity estimate above this (SGD per person) is treated as junk, not a cost.
+MAX_ACTIVITY_COST = 5_000
+
+
+def _activity_cost(value: float | None) -> float | None:
+    if value is None or not 0 <= value <= MAX_ACTIVITY_COST:
+        return None
+    return round(float(value), 2)
+
+
+def _activities_ceiling(
+    context: dict[str, Any],
+    day_count: int,
+    destination: dict[str, Any] | None,
+    flight: dict[str, Any] | None,
+) -> float | None:
+    """What the hard limit leaves per person for paid activities (``None`` = no check).
+
+    The lowest typed budget minus the flight price and the destination's estimated
+    stay. No limit, or nothing left (the party is already over), means no check: the
+    itinerary cannot fix an overspend that the flight and stay already made.
+    """
+    budget = party_budget(
+        context["members"], context["preferences"], context["characters"], day_count
+    )
+    if budget.limit is None:
+        return None
+    daily = (destination or {}).get("estimatedDailyCostSgd")
+    stay = budget.stay_estimate(daily if isinstance(daily, int | float) else None) or 0.0
+    price = (flight or {}).get("price")
+    left = budget.limit - stay - (float(price) if isinstance(price, int | float) else 0.0)
+    return round(left, 2) if left > 0 else None
 
 
 def _day_label(day_number: int, day_count: int, day_date: date) -> str:
@@ -372,8 +413,11 @@ async def _draft_days_with_llm(
         "trip-planning game. For each requested day, list 3 to 5 activities in chronological "
         "order, with a 24-hour HH:MM start time, a one or two sentence description, and the "
         "neighbourhood or venue. Prefer well-known real places and typical local activities "
-        "for the destination. Never state prices, opening hours, flight details or booking "
-        "information. Never include anything that violates a stated hard constraint, and "
+        "for the destination. Give each activity a rough cost per person in SGD in "
+        "estimated_cost_sgd (0 if free) and keep the total within the money left for "
+        "activities when one is given; never write prices, opening hours, flight details or "
+        "booking information in the text. Never include anything that violates a stated "
+        "hard constraint, and "
         "include every required activity somewhere in the trip. Read each member's own "
         "profile and spread the days so every member gets some of what they asked for, "
         "not only the loudest interest; name who an activity is for in its description "
@@ -383,7 +427,8 @@ async def _draft_days_with_llm(
     context = (
         f"Destination: {' '.join(destination.split())[:MAX_TITLE_CHARS]}\n"
         f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
-        f"Budget ceiling per person: {ceiling if ceiling is not None else 'none stated'}\n"
+        f"Money left per person for paid activities: "
+        f"{f'SGD {ceiling:,.0f}' if ceiling is not None else 'no limit given'}\n"
         f"Interests: {clip_for_prompt(group_profile.get('interests'))}\n"
         f"Activities: {clip_for_prompt(group_profile.get('activities'))}\n"
         f"Required activities: {clip_for_prompt(group_profile.get('required_activities'))}\n"
@@ -514,6 +559,17 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
     state = state.with_group_profile(profile)
 
     day_count = _derive_day_count(flight_selection, profile)
+    # For an itinerary run the ceiling is what the budget leaves for paid activities
+    # once the flight and the stay are paid for; the business guardrail checks the
+    # itinerary's costed activities against it.
+    state = state.with_group_profile(
+        {
+            **profile,
+            "budget_ceiling": _activities_ceiling(
+                context, day_count, destination_selection.get("data"), flight_selection.get("data")
+            ),
+        }
+    )
 
     flight_data = flight_selection.get("data") or {}
     outbound = _parse_date(flight_data.get("depart_at") or flight_data.get("departAt"))

@@ -327,3 +327,54 @@ class MessageSchema(_Base):
     sender_id: str | None = Field(description="Member id, or null for the AI guide.")
     kind: Literal["text", "recommendation", "vote", "summary"]
     content: dict[str, Any]
+
+
+# --- Trip budget (sidebar) -----------------------------------------------------------
+
+
+class DailyRange(_Base):
+    """A budget level's spend per person per day in SGD, excluding flights."""
+
+    low: int
+    high: int | None = Field(description="None for the open-ended High level.")
+    typical: int
+
+
+class BudgetMember(_Base):
+    member_id: UUID
+    display_name: str
+    amount: float | None = Field(description="Typed budget (whole trip, incl. flights).")
+    level: Literal["low", "medium", "high"] | None
+
+
+class BudgetEstimates(_Base):
+    """What the trip is expected to cost per person so far. ``None`` = not known yet."""
+
+    stay: float | None = Field(
+        description="Destination's estimated daily cost x days (an AI estimate)."
+    )
+    flight: float | None = Field(description="The locked flight's price.")
+    activities: float | None = Field(description="Sum of costed itinerary activities.")
+    total: float | None = Field(description="Sum of the known parts.")
+
+
+class TripBudgetResponse(_Base):
+    """The party's budget for the sidebar card. All amounts are per person, in SGD."""
+
+    currency: str = "SGD"
+    days: int | None = Field(description="Trip length: the flight dates, else shared dates.")
+    is_hard_limit: bool = Field(description="True when at least one member typed an amount.")
+    limit: float | None = Field(description="The lowest typed amount (whole trip, incl. flights).")
+    limit_set_by: str | None
+    level: Literal["low", "medium", "high"] | None = Field(
+        description="The lowest budget level any member picked."
+    )
+    level_count: int
+    daily_range: DailyRange | None
+    level_estimate: float | None = Field(
+        description="Typical spend for the trip at the level (excluding flights); a guide."
+    )
+    estimates: BudgetEstimates
+    remaining: float | None = Field(description="limit - estimates.total, when both known.")
+    is_over_budget: bool
+    members: list[BudgetMember]

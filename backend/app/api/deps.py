@@ -46,6 +46,7 @@ from app.repositories.trip_repository import TripRepository
 from app.repositories.vote_repository import VoteRepository
 from app.repositories.vote_session_repository import VoteSessionRepository
 from app.services.agent_run_service import AgentRunService
+from app.services.budget_service import BudgetService
 from app.services.chat_service import ChatService
 from app.services.export_service import ExportService
 from app.services.itinerary_service import ItineraryService
@@ -276,6 +277,11 @@ def get_itinerary_service(repos: Repos) -> ItineraryService:
 def get_refine_service(repos: Repos) -> RefineService:
     """Provide the :class:`RefineService` (feedback and approve/reject)."""
     return RefineService(repos)
+
+
+def get_budget_service(repos: Repos) -> BudgetService:
+    """Provide the :class:`BudgetService`."""
+    return BudgetService(repos)
 
 
 def get_export_service(repos: Repos) -> ExportService:

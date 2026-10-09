@@ -33,7 +33,12 @@ import {
   GROUP_ROLES,
   TRIP_PRIORITIES,
 } from "../lib/characterOptions";
-import { FIXED_ORIGIN, type BudgetTier, type DateRange, type GroupRole } from "../types";
+import {
+  FIXED_ORIGIN,
+  type BudgetTier,
+  type DateRange,
+  type GroupRole,
+} from "../types";
 import { toSessionCharacter } from "../lib/draft";
 
 export interface CharacterCreatorProps {
@@ -81,6 +86,7 @@ export function CharacterCreator({
   // Submission state for the backend save (explicit loading + error handling).
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [budgetError, setBudgetError] = useState<string | null>(null);
   const [savedOnce, setSavedOnce] = useState(false);
 
   const handleSave = async (): Promise<void> => {
@@ -125,6 +131,11 @@ export function CharacterCreator({
       setSavedOnce(true);
       onSaved?.();
     } catch (error) {
+      if (error instanceof ApiError && error.code === "INVALID_BUDGET") {
+        // Shown under the funds field, where the member can fix it.
+        setBudgetError(error.message);
+        return;
+      }
       const message =
         error instanceof ApiError
           ? error.message
@@ -163,11 +174,7 @@ export function CharacterCreator({
           >
             {draft.tripPriorities.length > 0 ? (
               draft.tripPriorities.map((id) => (
-                <span
-                  key={id}
-                  title={id}
-                  className="text-xl leading-none"
-                >
+                <span key={id} title={id} className="text-xl leading-none">
                   {PRIORITY_EMOJI[id] ?? "⭐"}
                 </span>
               ))
@@ -233,15 +240,30 @@ export function CharacterCreator({
         <label htmlFor="pref-budget" className="font-display text-ink">
           ADVENTURE FUNDS
         </label>
+        <p id="pref-budget-hint" className="font-body text-muted">
+          SGD per person for the whole trip, including flights (100–50,000).
+          Leave empty if you are not sure.
+        </p>
         <input
           id="pref-budget"
           type="number"
-          min={0}
+          min={100}
+          max={50000}
           value={draft.budgetText}
-          onChange={(event) => setBudgetText(event.target.value)}
+          onChange={(event) => {
+            setBudgetError(null);
+            setBudgetText(event.target.value);
+          }}
           placeholder="1500"
+          aria-describedby="pref-budget-hint"
+          aria-invalid={budgetError !== null}
           className={INPUT_CLASSES}
         />
+        {budgetError !== null ? (
+          <p role="alert" className="font-body text-danger">
+            {budgetError}
+          </p>
+        ) : null}
       </div>
 
       {/* 9. Availability dates. */}

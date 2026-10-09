@@ -80,6 +80,10 @@ class InvalidDisplayNameError(ValidationError):
     """A display name was empty, whitespace-only, or over the length limit."""
 
 
+class InvalidBudgetError(ValidationError):
+    """A typed trip budget is outside the accepted range (see ``app.core.budget``)."""
+
+
 # --- 503 family: a dependency is unavailable -------------------------------
 
 

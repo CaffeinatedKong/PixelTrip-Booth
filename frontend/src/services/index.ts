@@ -17,6 +17,7 @@ import type { VoteService } from "./vote.contract";
 import type { ItineraryService } from "./itinerary.contract";
 import type { PreferencesService } from "./preferences.contract";
 import type { DestinationService } from "./destination.contract";
+import type { BudgetService } from "./budget.contract";
 
 import { ConfigError } from "@/lib/errors";
 
@@ -46,6 +47,7 @@ export interface ServiceRegistry {
   itinerary: ItineraryService;
   preferences: PreferencesService;
   destination: DestinationService;
+  budget: BudgetService;
 }
 
 /** Re-exported so callers keep importing it from the service selector. */

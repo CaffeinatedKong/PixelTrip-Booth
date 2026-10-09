@@ -12,9 +12,10 @@ Rules that are easy to get wrong:
   Only real places can ever become destination cards.
 * ``travel_style`` holds the member's group role (leader, planner, ...), not a
   travel style, and is labelled that way.
-* The budget level is the lowest tier anyone picked (``appearance.budgetTier``
-  on the character). A typed amount is only trusted from
-  :data:`MIN_RELIABLE_BUDGET` up; a "2" is a typo, not a plan.
+* Budget comes from :mod:`app.core.budget`: the level (Low/Medium/High) is shown
+  with its daily SGD range so it means something concrete, and the lowest typed
+  amount is the hard limit. An out-of-range amount saved before the API checked
+  is named as a likely typo, never used as a limit.
 """
 
 from __future__ import annotations
@@ -27,18 +28,23 @@ from typing import Any
 from app.agents.group_profile import is_region_word
 from app.agents.preference_labels import (
     ACTIVITIES,
-    BUDGET_TIERS,
     GROUP_ROLES,
     PRIORITIES,
     TRIP_TYPES,
     label_for,
 )
+from app.core.budget import (
+    CURRENCY,
+    TIER_LABELS,
+    PartyBudget,
+    band_text,
+    is_valid_amount,
+    party_budget,
+    tier_of,
+)
 
-#: A typed budget below this (SGD per person) is treated as not stated.
-MIN_RELIABLE_BUDGET = 100
 #: Every trip departs from here (the frontend fixes the origin).
 DEPARTURE_CITY = "Singapore"
-CURRENCY = "SGD"
 MAX_NAME_CHARS = 40
 MAX_PLACE_CHARS = 80
 
@@ -60,15 +66,22 @@ class PartyBrief:
     start: str | None
     end: str | None
     days: int | None
-    budget_level: str | None
-    budget_level_note: str
-    budget_amount: float | None
+    budget: PartyBudget
+    budget_typos: list[str]
     trip_types: list[tuple[str, int]]
     priorities: list[tuple[str, int]]
     activities: list[tuple[str, int]]
     roles: list[str]
     named_places: list[str]
     members: list[MemberBrief] = field(default_factory=list)
+
+    @property
+    def budget_level(self) -> str | None:
+        return TIER_LABELS.get(self.budget.tier) if self.budget.tier else None
+
+    @property
+    def budget_amount(self) -> float | None:
+        return self.budget.limit
 
     @property
     def member_names(self) -> list[str]:
@@ -84,17 +97,16 @@ def build_party_brief(
     """Summarise the party from raw rows (no I/O)."""
     prefs_by_member = {str(p.get("member_id")): p for p in preferences}
     tier_by_member = {
-        str(c.get("member_id")): _budget_tier(c) for c in characters or [] if isinstance(c, dict)
+        str(c.get("member_id")): tier_of(c) for c in characters or [] if isinstance(c, dict)
     }
 
     member_briefs: list[MemberBrief] = []
     trip_type_counts: Counter[str] = Counter()
     priority_counts: Counter[str] = Counter()
     activity_counts: Counter[str] = Counter()
-    tiers: list[str] = []
+    typos: list[str] = []
     roles: list[str] = []
     named_places: list[str] = []
-    amounts: list[float] = []
 
     for index, member in enumerate(members, start=1):
         member_id = str(member.get("id"))
@@ -122,20 +134,22 @@ def build_party_brief(
         trip_type_counts.update(trip_types)
         priority_counts.update(priorities)
         activity_counts.update(activities)
-        if tier:
-            tiers.append(tier)
         if role and role not in roles:
             roles.append(role)
         budget = prefs.get("budget")
-        if isinstance(budget, int | float) and budget >= MIN_RELIABLE_BUDGET:
-            amounts.append(float(budget))
+        if budget is not None and not is_valid_amount(budget):
+            typos.append(f"{name} entered {CURRENCY} {budget:,.0f}")
+        member_budget = TIER_LABELS.get(tier) if tier else None
+        if is_valid_amount(budget):
+            amount = f"{CURRENCY} {budget:,.0f} total"
+            member_budget = f"{member_budget}, {amount}" if member_budget else amount
 
         member_briefs.append(
             MemberBrief(
                 name=name,
                 is_leader=member.get("role") == "owner" or bool(member.get("is_owner")),
                 role=role,
-                budget_level=BUDGET_TIERS.get(tier) if tier else None,
+                budget_level=member_budget,
                 trip_types=trip_types,
                 priorities=priorities,
                 activities=activities,
@@ -143,15 +157,13 @@ def build_party_brief(
         )
 
     start, end, days = _window(availability_overlap or [])
-    budget_level, note = _budget_level(tiers, len(member_briefs))
     return PartyBrief(
         party_size=len(member_briefs),
         start=start,
         end=end,
         days=days,
-        budget_level=budget_level,
-        budget_level_note=note,
-        budget_amount=min(amounts) if amounts else None,
+        budget=party_budget(members, preferences, characters, days),
+        budget_typos=typos,
         trip_types=_ranked(trip_type_counts),
         priorities=_ranked(priority_counts),
         activities=_ranked(activity_counts),
@@ -174,18 +186,30 @@ def trip_text(brief: PartyBrief) -> str:
 
 
 def budget_text(brief: PartyBrief) -> str:
-    level = (
-        f"Budget level: {brief.budget_level.lower()} ({brief.budget_level_note})"
-        if brief.budget_level
-        else "Budget level: not stated"
-    )
-    amount = (
-        f"Budget per person for the whole trip: {CURRENCY} {brief.budget_amount:,.0f} "
-        "(the lowest in the party)"
-        if brief.budget_amount is not None
-        else "Budget per person: no reliable amount given"
-    )
-    return f"{level}\n{amount}"
+    budget = brief.budget
+    if budget.tier:
+        label = TIER_LABELS[budget.tier]
+        level = (
+            f"Budget level: {label.lower()} ({budget.tier_count} of {brief.party_size} chose "
+            f"{label} Budget), about {band_text(budget.tier)} per person per day, "
+            "excluding flights"
+        )
+    else:
+        level = "Budget level: not stated"
+    if budget.limit is not None:
+        amount = (
+            f"Budget per person for the whole trip, including flights: {CURRENCY} "
+            f"{budget.limit:,.0f} (a hard limit, set by {budget.limit_member}, the lowest "
+            "in the party)"
+        )
+    else:
+        amount = "Budget per person: no amount given, so treat the level as a guide"
+    lines = [level, amount]
+    if brief.budget_typos:
+        lines.append(
+            "Ignored as likely typos (outside SGD 100-50,000): " + "; ".join(brief.budget_typos)
+        )
+    return "\n".join(lines)
 
 
 def wants_text(brief: PartyBrief) -> str:
@@ -242,23 +266,6 @@ def _trip_type_label(value: Any) -> str:
         if key == "".join(ch for ch in trip_id if ch.isalpha()):
             return label
     return label_for(str(value).strip(), {})
-
-
-def _budget_tier(character: dict[str, Any]) -> str | None:
-    appearance = character.get("appearance")
-    if not isinstance(appearance, dict):
-        return None
-    tier = str(appearance.get("budgetTier") or "").strip().lower()
-    return tier if tier in BUDGET_TIERS else None
-
-
-def _budget_level(tiers: list[str], size: int) -> tuple[str | None, str]:
-    if not tiers:
-        return None, ""
-    order = list(BUDGET_TIERS)
-    lowest = min(tiers, key=order.index)
-    count = sum(1 for t in tiers if t == lowest)
-    return BUDGET_TIERS[lowest], f"{count} of {size} chose {BUDGET_TIERS[lowest]} Budget"
 
 
 def _window(overlap: list[dict[str, str]]) -> tuple[str | None, str | None, int | None]:

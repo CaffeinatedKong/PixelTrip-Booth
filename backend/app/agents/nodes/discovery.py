@@ -44,7 +44,6 @@ from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_text
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
 from app.agents.party_brief import (
-    CURRENCY,
     PartyBrief,
     budget_text,
     build_party_brief,
@@ -56,6 +55,7 @@ from app.agents.party_brief import (
 from app.agents.preference_labels import TRIP_TYPES
 from app.agents.prompts import render
 from app.agents.proposals import DestinationRecommendationProposal
+from app.core.budget import CURRENCY, TIER_LABELS, band_text
 from app.core.config import get_settings
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -224,8 +224,8 @@ class _DestinationCard(BaseModel):
         "the food scene, rough daily cost per person, where to stay or how to get around."
     )
     estimated_daily_cost_sgd: int = Field(
-        description="Rough cost per person per day in SGD for stay, food and activities, "
-        "excluding flights."
+        description="Rough cost per person per day in SGD for stay, food and local "
+        "transport, excluding flights and paid activities."
     )
     preference_match: int = Field(description="0-10")
     budget_fit: int = Field(description="0-10")
@@ -364,6 +364,14 @@ def _card_from_llm(
         },
     }
     meta = copy["meta"]
+    budget = brief.budget
+    if not budget.is_hard and budget.above_level(meta["estimatedDailyCostSgd"]):
+        # Soft guide: label, never drop.
+        note = (
+            f"Above the party's {TIER_LABELS[budget.tier or 'low']} budget level "
+            f"(about {band_text(budget.tier or 'low')} a day)."
+        )
+        meta["tradeOff"] = f"{meta['tradeOff']} {note}".strip()
     text = " ".join(
         [copy["description"], why, meta["tradeOff"], meta["details"], *meta["tags"]]
     ).lower()
@@ -446,10 +454,9 @@ def _choose_destinations(
 
 
 def _over_budget(card: dict[str, Any], brief: PartyBrief) -> bool:
-    cost = card["meta"].get("estimatedDailyCostSgd")
-    if not cost or brief.budget_amount is None or not brief.days:
-        return False
-    return cost * brief.days > brief.budget_amount
+    """The stay alone (daily estimate x days) is over the party's hard limit."""
+    budget = brief.budget
+    return budget.over_limit(budget.stay_estimate(card["meta"].get("estimatedDailyCostSgd")))
 
 
 def _mark_best_fit(items: list[dict[str, Any]]) -> None:

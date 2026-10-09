@@ -47,7 +47,8 @@ Shapes:
 - Travel preferences: `{ id, memberId, availableDates, destinations, travelStyle?,
   budget?, interests, activities, hardConstraints, origin?, submittedAt? }` — list fields
   are arrays (empty when new); `availableDates` is a list of `{ start, end }` date ranges;
-  `budget` is a number ≥ 0; `origin` is the departure city or
+  `budget` is SGD 100–50,000 per person for the whole trip (including flights) or null;
+  `origin` is the departure city or
   IATA code for flight search; `submittedAt` is null until the member first saves.
 - Trip: `{ id, roomId, title, summary?, status }` — one per room, created with it.
   `status` is the trip state (see "Stage & State"); the `tripId` is what AI-run and
@@ -155,8 +156,11 @@ is, or send it to replace it.
 
 - `availableDates`: up to 20 inclusive date ranges `{ start, end }` (ISO `YYYY-MM-DD`,
   `end` ≥ `start`). The AI plans for the dates where every member's ranges overlap.
-- `budget`: number ≥ 0 or `null`. The AI treats the lowest member budget as the party's
-  ceiling.
+- `budget`: SGD per person for the **whole trip, including flights**, from **100 to
+  50,000**, or `null` (not sure). Anything outside that range is refused with
+  `422 INVALID_BUDGET` and a message to show next to the field. The lowest amount in the
+  party becomes its hard limit; the budget level (Low/Medium/High, sent as
+  `character.appearance.budgetTier`) sets the spending style. See "Trip budget".
 - `travelStyle` (≤ 50 chars) and `origin` (≤ 100 chars): blank becomes `null`.
 - `activities`: objects with `"priority": "must_have"` (or `"required": true`) mark
   must-haves; any other priority is treated as optional.
@@ -172,6 +176,7 @@ member to save, `trip.status` is now `preferences_collected` (stage `discover`),
 party can start a `discovery` run.
 
 Errors: `404 ROOM_NOT_FOUND`, `422 MEMBER_NOT_RESOLVED` (member is not in this room),
+`422 INVALID_BUDGET` (budget outside SGD 100–50,000; nothing is saved),
 `422 VALIDATION_ERROR`, `503 DATABASE_ERROR`.
 
 ### `POST /votes/{voteSessionId}/cast` — cast or change a vote
@@ -398,6 +403,53 @@ Errors: `404 TRIP_NOT_FOUND`, `404 ITINERARY_VERSION_NOT_FOUND`, `409 VERSION_NO
 `409 DUPLICATE_APPROVAL` (another version is already approved), `422 MEMBER_NOT_RESOLVED`
 (not the owner), `422 VALIDATION_ERROR`, `503 DATABASE_ERROR`.
 
+### `GET /trips/{tripId}/budget` — the party's trip budget (sidebar card)
+
+Per-person budget, in SGD. Re-fetch when a member saves preferences, a vote locks a
+destination or flight, or an itinerary version arrives (the frontend's budget service
+does this from Realtime changes on `room_members`, `selections` and `itinerary_versions`).
+
+```json
+{
+  "currency": "SGD",
+  "days": 5,
+  "isHardLimit": true,
+  "limit": 1200,
+  "limitSetBy": "Priya",
+  "level": "low",
+  "levelCount": 1,
+  "dailyRange": { "low": 50, "high": 120, "typical": 80 },
+  "levelEstimate": 400,
+  "estimates": { "stay": 250, "flight": 320, "activities": 75.5, "total": 645.5 },
+  "remaining": 554.5,
+  "isOverBudget": false,
+  "members": [
+    { "memberId": "…", "displayName": "Priya", "amount": 1200, "level": "low" },
+    { "memberId": "…", "displayName": "Gerald", "amount": null, "level": "medium" }
+  ]
+}
+```
+
+- `days`: from the locked flight's dates, else the longest stretch of shared dates.
+- `isHardLimit` / `limit` / `limitSetBy`: the lowest typed amount and who typed it. When
+  nobody typed one, `isHardLimit` is `false`, `limit` and `remaining` are `null`, and the
+  level is a guide only.
+- `level` / `dailyRange` / `levelEstimate`: the lowest budget level anyone picked, its
+  daily range per person excluding flights (Low 50–120, Medium 120–250, High 250+;
+  `high` is `null` when open-ended), and the typical spend for the trip at that level.
+- `estimates`: what the trip is expected to cost so far. `stay` = the locked
+  destination's `estimatedDailyCostSgd` × `days` (an AI estimate), `flight` = the locked
+  flight's price, `activities` = the sum of costed itinerary items (approved version, else
+  the latest). Each is `null` until known; `total` sums the known parts.
+- `remaining` = `limit − estimates.total`; `isOverBudget` when it is negative.
+
+How the stages use the budget: DISCOVER drops suggestions whose stay alone exceeds the
+hard limit (or labels them in `tradeOff` when only a level is set); LOGISTICS drops flights
+above what the limit leaves after the stay; BUILD checks costed activities against what
+is left after the flight and the stay. A missing estimate never excludes anything.
+
+Errors: `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
+
 ### `POST /trips/{tripId}/export` — the final, shareable trip (WRAP)
 
 No body. `200` response:
@@ -490,6 +542,7 @@ Branch on `code`, not `message`. `message` is safe to log; it is not tuned for d
 | 409 | `MEMBER_ALREADY_EXISTS` | Name taken in a race; retry the join. |
 | 422 | `VALIDATION_ERROR` | Bad body or path; `message` names the fields. |
 | 422 | `INVALID_DISPLAY_NAME` | Display name is blank. |
+| 422 | `INVALID_BUDGET` | Budget is outside SGD 100–50,000. The message is safe to show the member. |
 | 422 | `MEMBER_NOT_RESOLVED` | `memberId` is not a member of this room (or not the owner, when closing a vote). |
 | 422 | `VOTE_SESSION_CLOSED` | The vote has already closed. |
 | 422 | `VOTE_TIE_PENDING` | The vote is tied; the room owner must pick the winner (`break-tie`). |
@@ -555,7 +608,7 @@ never become cards. Destination `meta` also carries:
 | --- | --- | --- |
 | `pick` | string | Badge: `"Best fit"` (exactly one, the top score), `"Budget pick"`, `"Hidden gem"`, `"Wildcard"`; fallback cards use `"Party pick"` (a place the party named) or `"Guide's pick"` |
 | `bestFor` | string[] | Display names of the members it suits best (may be empty) |
-| `estimatedDailyCostSgd` | number \| null | Rough cost per person per day in SGD (stay, food, activities; no flights) |
+| `estimatedDailyCostSgd` | number \| null | Rough cost per person per day in SGD for stay, food and local transport (no flights, no paid activities) |
 | `scoreBreakdown` | object \| null | `{ preferences, budget, season, tripLength }`, each 0–10 |
 
 `score` is computed by the backend from `scoreBreakdown`: 10 × (0.4 × preferences + 0.2 ×
@@ -629,8 +682,10 @@ itinerary object:
 - `days`: array of day plans, each:
   - `day`: number
   - `date?`
-  - `items`: ordered activities, each `{ id, time?, title, description?, location?, tags? }`.
-    `id` is stable across versions so feedback can target a specific activity.
+  - `items`: ordered activities, each `{ id, time?, title, description?, location?, tags?,
+    cost? }`. `id` is stable across versions so feedback can target a specific activity.
+    `cost` is the AI's rough cost per person in SGD for a paid activity (0 if free, absent
+    if unknown); prices never appear in the text.
 - `map?`: points array `{ label, lat, lng }` for the travel map view.
 
 The journal, quest log, timeline, and map are all derived from this single object.

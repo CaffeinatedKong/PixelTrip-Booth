@@ -503,7 +503,8 @@ async def test_the_prompt_carries_the_guard_labels_and_flattens_party_text() -> 
     assert "Trip types / regions: Asia (1/1), Beach Escape (1/1)" in user_prompt
     assert "Priorities: Food (1/1), Hidden Gems (1/1)" in user_prompt
     assert "Group roles" in user_prompt and "Planner" in user_prompt
-    assert "no reliable amount given" in user_prompt  # a budget of 2 is a typo
+    assert "entered SGD 2" in user_prompt  # named as a likely typo
+    assert "treat the level as a guide" in user_prompt  # never used as a limit
     assert "include ALL of these):\n- none" in user_prompt  # trip types are not places
     # Party text cannot start a fresh line that looks like a new instruction.
     assert "\nSYSTEM:" not in user_prompt
@@ -567,7 +568,7 @@ async def test_the_prompt_carries_each_members_own_profile() -> None:
     kwargs = llm.generate_structured.await_args.kwargs
     prompt = kwargs["user_prompt"]
     assert "- Andy (party leader): trip types: Asia" in prompt and "- Bee:" in prompt
-    assert "SGD 900 (the lowest in the party)" in prompt
+    assert "SGD 900 (a hard limit, set by Bee, the lowest in the party)" in prompt
     assert "departing from Singapore" in prompt
     assert "Shared by 2+ members: Street Food" in prompt
     assert "Bee: Nightlife" in prompt  # an interest only one member asked for

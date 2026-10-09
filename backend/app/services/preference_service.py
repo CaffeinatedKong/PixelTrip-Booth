@@ -11,7 +11,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.errors import UnresolvedMemberError
-from app.exceptions import RoomNotFoundError
+from app.core.budget import CURRENCY, MAX_BUDGET, MIN_BUDGET, is_valid_amount
+from app.exceptions import InvalidBudgetError, RoomNotFoundError
 from app.repositories.member_repository import MemberRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.room_repository import RoomRepository
@@ -59,6 +60,12 @@ class PreferenceService:
         self, room_code: str, member_id: str, request: SavePreferencesRequest
     ) -> SavePreferencesResponse:
         """Replace the member's preferences and return them with the (maybe advanced) trip."""
+        if request.budget is not None and not is_valid_amount(request.budget):
+            raise InvalidBudgetError(
+                f"Adventure funds must be between {CURRENCY} {MIN_BUDGET:,} and "
+                f"{CURRENCY} {MAX_BUDGET:,} per person for the whole trip "
+                f"(you entered {request.budget:,.0f}). Leave it empty if you are not sure."
+            )
         room = await self._room_repo.get_room_by_code(room_code)
         if room is None:
             raise RoomNotFoundError(f"Room '{room_code}' not found.")

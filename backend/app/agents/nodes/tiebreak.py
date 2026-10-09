@@ -40,6 +40,7 @@ from app.agents.messages import (
     SummaryMessageContent,
     emit_npc_message,
 )
+from app.core.budget import is_valid_amount
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.agents.state import AgentState, RepositoryBundle
@@ -465,7 +466,7 @@ def _fallback_advice(
                     why.append("on their wish list")
             else:
                 price, budget = info.get("price"), prefs.get("budget")
-                if isinstance(price, int | float) and isinstance(budget, int | float):
+                if isinstance(price, int | float) and is_valid_amount(budget):
                     within = price <= budget
                     score += 25 if within else -25
                     why.append("within their budget" if within else "over their budget")

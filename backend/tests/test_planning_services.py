@@ -133,6 +133,27 @@ async def test_save_preferences_stores_json_ready_fields(repos):
     assert fields["travel_style"] is None
 
 
+@pytest.mark.parametrize("budget", [2, 99.5, 50_001])
+async def test_save_preferences_refuses_a_budget_outside_100_to_50000(repos, budget):
+    from app.exceptions import InvalidBudgetError
+
+    request = SavePreferencesRequest(budget=budget)
+
+    with pytest.raises(InvalidBudgetError, match="between SGD 100 and SGD 50,000"):
+        await preference_service(repos).save("ABC123", M1, request)
+
+    repos.profile_repo.save_preferences.assert_not_called()
+
+
+@pytest.mark.parametrize("budget", [None, 100, 50_000])
+async def test_save_preferences_accepts_no_budget_or_the_range_edges(repos, budget):
+    repos.profile_repo.list_preferences_by_member_ids.return_value = [prefs_row(M1, True)]
+
+    await preference_service(repos).save("ABC123", M1, SavePreferencesRequest(budget=budget))
+
+    repos.profile_repo.save_preferences.assert_awaited_once()
+
+
 async def test_save_preferences_mirrors_origin_into_hard_constraints(repos):
     repos.profile_repo.list_preferences_by_member_ids.return_value = [prefs_row(M1, True)]
     request = SavePreferencesRequest(

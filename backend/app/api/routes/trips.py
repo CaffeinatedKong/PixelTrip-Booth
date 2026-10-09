@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 
 from app.api.deps import (
+    get_budget_service,
     get_export_service,
     get_itinerary_service,
     get_refine_service,
@@ -24,10 +25,12 @@ from app.schemas.planning import (
     StartRunRequest,
     SubmitFeedbackRequest,
     SubmitFeedbackResponse,
+    TripBudgetResponse,
     TripExportResponse,
     VersionDecisionRequest,
     VersionDecisionResponse,
 )
+from app.services.budget_service import BudgetService
 from app.services.export_service import ExportService
 from app.services.itinerary_service import ItineraryService
 from app.services.refine_service import RefineService
@@ -201,3 +204,27 @@ async def decide_version(
 async def export_trip(trip_id: UUID, service: ExportServiceDep) -> TripExportResponse:
     """Return the final trip."""
     return await service.export(str(trip_id))
+
+
+# --- Budget (sidebar card) --------------------------------------------------------------
+
+BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
+
+
+@router.get(
+    "/trips/{trip_id}/budget",
+    response_model=TripBudgetResponse,
+    summary="The party's trip budget",
+    description="Per-person budget for the sidebar: the hard limit (lowest typed amount) "
+    "or the budget level as a guide, what the trip is estimated to cost so far (stay, "
+    "flight, activities), and what is left. Re-fetch after a vote locks a destination or "
+    "flight, or when an itinerary version arrives.",
+    responses={
+        200: {"description": "The budget"},
+        404: {"model": ErrorResponse, "description": "Trip not found"},
+        503: {"model": ErrorResponse, "description": "Database unavailable"},
+    },
+)
+async def get_trip_budget(trip_id: UUID, service: BudgetServiceDep) -> TripBudgetResponse:
+    """The trip's budget readout."""
+    return await service.get(str(trip_id))
