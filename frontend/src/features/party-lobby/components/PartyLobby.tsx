@@ -12,7 +12,7 @@
  * imports, no data fetching). Submits on Enter, shows pending states, and surfaces
  * safe error/validation messages via an `aria-live` region. Token styling only.
  */
-import { useState, type FormEvent, type ReactElement } from "react";
+import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
 
@@ -47,6 +47,15 @@ export function PartyLobby({
   const [displayName, setDisplayName] = useState("");
   const [roomName, setRoomName] = useState("");
   const [roomCode, setRoomCode] = useState("");
+
+  // An invite link (`/?code=ABC123`) opens the join form with the code filled in.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("code");
+    if (code && code.trim() !== "") {
+      setTab("join");
+      setRoomCode(code.trim().toUpperCase());
+    }
+  }, []);
 
   const creating = view === "creating";
   const joining = view === "joining";

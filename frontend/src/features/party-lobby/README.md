@@ -83,8 +83,8 @@ optional live room code via `roomSession`) and composes, in order:
 (Destination + Flight "Not selected" empty states), `BudgetPanel`, and
 `AdventureProgress`. On desktop it is a fixed column; on mobile it collapses into
 a drawer driven by `hooks/useAdventureDrawer.ts` (a toggle exposing
-`aria-expanded`). It imports no service and makes no network call — `onInvite` is
-a local no-op.
+`aria-expanded`). It imports no service and makes no network call — the party panel's
+invite buttons only copy the invite link or room code to the clipboard.
 
 ### Layered character model and LayerMap
 

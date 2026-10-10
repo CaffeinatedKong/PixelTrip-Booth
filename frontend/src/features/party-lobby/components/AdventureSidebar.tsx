@@ -9,7 +9,7 @@
  * Presentational only: the view model arrives via `adventure` and the optional
  * `roomSession` prop supplies the live room code and planning stage. It performs
  * NO data fetching and imports NO concrete service — the room code is read solely
- * from the `roomSession` prop passed in, and `onInvite` is a local no-op.
+ * from the `roomSession` prop passed in; the party panel copies it (or an invite link).
  *
  * Responsive behaviour (Req 17.2, 17.4, 17.5):
  * - Desktop (>= `lg` breakpoint): a fixed right column whose content is always
@@ -61,11 +61,6 @@ export function AdventureSidebar({
   const stage = roomSession?.room.planningStage ?? "setup";
   const steps = buildStageSteps(stage);
 
-  /** Invite affordance — purely local, performs NO network request (Req 13.4). */
-  const handleInvite = (): void => {
-    // Intentionally a no-op: inviting is not wired to any service in this feature.
-  };
-
   const contentId = "adventure-sidebar-content";
 
   return (
@@ -100,7 +95,6 @@ export function AdventureSidebar({
           members={adventure.members}
           capacity={adventure.capacity}
           roomCode={roomCode}
-          onInvite={handleInvite}
         />
         <SidebarPlaceholderPanel
           title="DESTINATION"
