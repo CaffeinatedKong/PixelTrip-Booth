@@ -9,6 +9,10 @@
   (:mod:`app.agents.tools.skyscanner_rapidapi`).
 * ``booking_rapidapi``: the Booking COM listing on RapidAPI
   (:mod:`app.agents.tools.booking_rapidapi`).
+* ``booking18_rapidapi``: a second Booking COM listing, prices converted on our side
+  (:mod:`app.agents.tools.booking18_rapidapi`).
+* ``priceline_rapidapi``: Priceline COM, a last resort with no return flight times
+  (:mod:`app.agents.tools.priceline_rapidapi`).
 
 **Fallback.** Each provider is tried in turn until one returns flights:
 
@@ -31,7 +35,9 @@ from typing import Any
 import httpx
 
 from app.agents.tools.base import ExternalTool, FlightSearchResponse
+from app.agents.tools.booking18_rapidapi import Booking18RapidApiClient
 from app.agents.tools.booking_rapidapi import BookingRapidApiClient
+from app.agents.tools.priceline_rapidapi import PricelineRapidApiClient
 from app.agents.tools.skyscanner_rapidapi import SkyscannerRapidApiClient
 
 logger = logging.getLogger(__name__)
@@ -99,6 +105,10 @@ class FlightSearchTool(ExternalTool):
     async def _search(self, provider: str, **params: Any) -> dict[str, Any]:
         if provider == "booking_rapidapi":
             return await BookingRapidApiClient(self._settings).search(**params)
+        if provider == "booking18_rapidapi":
+            return await Booking18RapidApiClient(self._settings).search(**params)
+        if provider == "priceline_rapidapi":
+            return await PricelineRapidApiClient(self._settings).search(**params)
         if provider == "skyscanner_rapidapi":
             return await SkyscannerRapidApiClient(self._settings).search(**params)
 

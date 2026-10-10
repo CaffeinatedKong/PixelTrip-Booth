@@ -208,3 +208,202 @@ async def test_all_providers_resting_fails_fast_without_a_request():
 async def test_each_provider_gets_the_full_timeout():
     tool = FakeChain("booking_rapidapi,skyscanner_rapidapi", {})
     assert tool._call_timeout_seconds() == 2 * tool._settings.external_tool_timeout_seconds
+
+
+# --- booking-com18 (v2 search, prices converted on our side) -------------------------
+
+B18_FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "booking_com18_v2_search.json").read_text()
+)
+
+
+def b18_transport(requests: list[httpx.Request], body: dict[str, Any] | None = None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("auto-complete"):
+            return httpx.Response(200, json={"data": [{"iataCode": "PEN"}], "status": True})
+        return httpx.Response(200, json=body or B18_FIXTURE)
+
+    return httpx.MockTransport(handler)
+
+
+def b18_client(requests, body=None, **overrides):
+    from app.agents.tools.booking18_rapidapi import Booking18RapidApiClient
+
+    s = settings("booking18_rapidapi").model_copy(update=overrides)
+    return Booking18RapidApiClient(s, transport=b18_transport(requests, body))
+
+
+@pytest.fixture(autouse=True)
+def fresh_b18_cache():
+    from app.agents.tools import booking18_rapidapi
+
+    booking18_rapidapi._place_cache.clear()
+    yield
+    booking18_rapidapi._place_cache.clear()
+
+
+async def test_booking18_searches_cheapest_first_and_converts_to_sgd():
+    requests: list[httpx.Request] = []
+
+    result = await b18_client(requests).search(**QUERY)
+
+    first = result["options"][0]
+    assert first["carrier"] == "Scoot" and first["flight_number"] == "TR430"
+    assert first["price"] == round(156.98 * 0.93, 2)  # CAD -> SGD at the configured rate
+    FlightSearchResponse.model_validate(result)
+    # "SIN" is used as it is; only the destination name is looked up (by its city part).
+    lookups = [r for r in requests if r.url.path.endswith("auto-complete")]
+    assert [r.url.params["query"] for r in lookups] == ["Penang"]
+    search = requests[-1]
+    assert search.url.path == "/flights/v2/search-roundtrip"
+    assert dict(search.url.params) == {
+        "departId": "SIN",
+        "arrivalId": "PEN",
+        "departDate": "2026-11-12",
+        "returnDate": "2026-11-16",
+        "adults": "1",
+        "cabinClass": "ECONOMY",
+        "sort": "CHEAPEST",
+        "page": "1",
+    }
+    assert search.headers["x-rapidapi-host"] == "booking-com18.p.rapidapi.com"
+
+
+async def test_booking18_uses_the_rate_for_whatever_currency_comes_back():
+    usd = json.loads(json.dumps(B18_FIXTURE))
+    for offer in usd["data"]["flightOffers"]:
+        offer["priceBreakdown"]["total"] = {"currencyCode": "USD", "units": 101, "nanos": 0}
+
+    result = await b18_client([], usd, flight_fx_rates="USD:1.28").search(**QUERY)
+
+    assert result["options"][0]["price"] == 129.28
+
+
+async def test_booking18_refuses_a_currency_it_has_no_rate_for():
+    from app.agents.tools.booking18_rapidapi import UnsupportedSearchError
+
+    with pytest.raises(UnsupportedSearchError):
+        await b18_client([], flight_fx_rates="USD:1.28").search(**QUERY)  # fixture is CAD
+
+
+async def test_booking18_searches_one_way_without_a_return_date():
+    requests: list[httpx.Request] = []
+
+    await b18_client(requests).search(
+        origin="SIN", destination="PEN", depart_after="2026-11-12", depart_before=None
+    )
+
+    assert requests[-1].url.path == "/flights/v2/search-oneway"
+    assert "returnDate" not in requests[-1].url.params
+
+
+async def test_booking18_tries_the_citys_next_airport_when_the_first_has_no_flights():
+    """Yogyakarta's first code (JOG) is its old airport; flights go to YIA."""
+    from app.agents.tools.booking18_rapidapi import Booking18RapidApiClient
+
+    searched: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("auto-complete"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"type": "CITY", "cityCode": "JOG", "iataCode": "JOG"},
+                        {"type": "AIRPORT", "cityCode": "JOG", "iataCode": "JOG"},
+                        {"type": "AIRPORT", "cityCode": "JOG", "iataCode": "YIA"},
+                        {"type": "AIRPORT", "cityCode": "SOC", "iataCode": "SOC"},
+                    ]
+                },
+            )
+        arrival = request.url.params["arrivalId"]
+        searched.append(arrival)
+        body = B18_FIXTURE if arrival == "YIA" else {"data": {"flightOffers": []}, "status": True}
+        return httpx.Response(200, json=body)
+
+    client = Booking18RapidApiClient(
+        settings("booking18_rapidapi"), transport=httpx.MockTransport(handler)
+    )
+    result = await client.search(
+        origin="SIN",
+        destination="Yogyakarta, Indonesia",
+        depart_after="2026-10-13",
+        depart_before="2026-10-18",
+    )
+
+    assert searched == ["JOG", "YIA"]  # other cities' airports (SOC) are never tried
+    assert len(result["options"]) == 3
+
+
+async def test_fx_rates_setting_is_parsed_and_validated():
+    assert settings().model_copy(
+        update={"flight_fx_rates": "usd:1.28, CAD:0.93"}
+    ).flight_fx_rate_table == {
+        "USD": 1.28,
+        "CAD": 0.93,
+    }
+    with pytest.raises(ValueError):
+        Settings(
+            supabase_url="https://x.supabase.co",
+            supabase_service_role_key="k",
+            flight_fx_rates="USD=1.28",
+        )
+
+
+# --- priceline-com2 (last resort: outbound flight + round-trip price) -----------------
+
+PRICELINE_FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "priceline_com2_search.json").read_text()
+)
+
+
+def priceline_client(requests: list[httpx.Request], **overrides: Any):
+    from app.agents.tools import priceline_rapidapi
+
+    priceline_rapidapi._place_cache.clear()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("auto-complete"):
+            return httpx.Response(
+                200, json={"data": {"searchItems": [{"type": "AIRPORT", "id": "PEN"}]}}
+            )
+        return httpx.Response(200, json=PRICELINE_FIXTURE)
+
+    s = settings("priceline_rapidapi").model_copy(update=overrides)
+    return priceline_rapidapi.PricelineRapidApiClient(s, transport=httpx.MockTransport(handler))
+
+
+async def test_priceline_maps_listings_and_converts_usd_to_sgd():
+    requests: list[httpx.Request] = []
+
+    result = await priceline_client(requests).search(**QUERY)
+
+    first = result["options"][0]
+    assert first["carrier"] == "AirAsia" and first["flight_number"] == "AK1722"
+    assert (first["origin"], first["destination"]) == ("SIN", "PEN")
+    assert first["depart_at"] == "2026-11-12T13:50:00"
+    assert first["price"] == round(109.36 * 1.28, 2)
+    assert first["duration_minutes"] == 80 and first["stops"] == 0
+    assert "return_depart_at" not in first  # Priceline does not give the return flight here
+    assert result["options"][-1]["stops"] == 1  # a two-segment journey
+    FlightSearchResponse.model_validate(result)
+    search = requests[-1]
+    assert search.url.path == "/flights/search-roundtrip"
+    assert search.url.params["originAirportCode"] == "SIN"
+    assert search.url.params["destinationAirportCode"] == "PEN"
+    assert search.url.params["returnDate"] == "2026-11-16"
+
+
+async def test_priceline_one_way_and_unknown_currency():
+    from app.agents.tools.priceline_rapidapi import UnsupportedCurrencyError
+
+    requests: list[httpx.Request] = []
+    await priceline_client(requests).search(
+        origin="SIN", destination="PEN", depart_after="2026-11-12", depart_before=None
+    )
+    assert requests[-1].url.path == "/flights/search-one-way"
+
+    with pytest.raises(UnsupportedCurrencyError):
+        await priceline_client([], flight_fx_rates="CAD:0.93").search(**QUERY)  # fixture is USD

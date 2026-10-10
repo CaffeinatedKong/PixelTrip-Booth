@@ -23,7 +23,13 @@ class ConfigError(RuntimeError):
 
 
 #: Flight providers ``FLIGHT_PROVIDER`` may list.
-FLIGHT_PROVIDERS: tuple[str, ...] = ("generic", "skyscanner_rapidapi", "booking_rapidapi")
+FLIGHT_PROVIDERS: tuple[str, ...] = (
+    "generic",
+    "skyscanner_rapidapi",
+    "booking_rapidapi",
+    "booking18_rapidapi",
+    "priceline_rapidapi",
+)
 
 
 class Settings(BaseSettings):
@@ -77,6 +83,20 @@ class Settings(BaseSettings):
     flight_provider: str = Field(default="generic")
     flight_api_url: str = Field(default="")
     booking_flight_api_url: str = Field(default="")
+    # "booking18_rapidapi": a second Booking COM listing (booking-com18). It answers in
+    # whichever currency its server picks, so prices are converted with flight_fx_rates.
+    booking18_flight_api_url: str = Field(default="")
+    # "priceline_rapidapi": Priceline COM on RapidAPI. A last resort: for round trips it
+    # gives the outbound flight and the round-trip price, but no return flight times.
+    priceline_flight_api_url: str = Field(default="")
+    # How many units of FLIGHT_CURRENCY one unit of another currency is worth, e.g.
+    # "USD:1.28,CAD:0.93". Used only by providers that cannot be asked for a currency;
+    # a price in a currency missing here is refused rather than guessed. Approximate:
+    # update the rates when they drift.
+    flight_fx_rates: str = Field(default="USD:1.28,CAD:0.93,EUR:1.48,GBP:1.72,AUD:0.85")
+    # Result pages to fetch per search from providers that page (15 offers each). One
+    # page of cheapest-first results is plenty: the party is shown 3-5 flights.
+    flight_result_pages: int = Field(default=1, ge=1, le=5)
     flight_api_key: str = Field(default="", repr=False)
     flight_currency: str = Field(default="SGD", min_length=3, max_length=3)
     flight_market: str = Field(default="en-US")
@@ -129,6 +149,28 @@ class Settings(BaseSettings):
                 f"FLIGHT_PROVIDER must list one or more of {', '.join(FLIGHT_PROVIDERS)}"
             )
         return ",".join(names)
+
+    @field_validator("flight_fx_rates")
+    @classmethod
+    def _validate_fx_rates(cls, v: str) -> str:
+        for pair in (p for p in v.split(",") if p.strip()):
+            code, _, rate = pair.partition(":")
+            try:
+                ok = len(code.strip()) == 3 and float(rate) > 0
+            except ValueError:
+                ok = False
+            if not ok:
+                raise ValueError('FLIGHT_FX_RATES must look like "USD:1.28,CAD:0.93"')
+        return v
+
+    @property
+    def flight_fx_rate_table(self) -> dict[str, float]:
+        """``{"USD": 1.28, ...}``: other currencies in units of ``flight_currency``."""
+        table: dict[str, float] = {}
+        for pair in (p for p in self.flight_fx_rates.split(",") if p.strip()):
+            code, _, rate = pair.partition(":")
+            table[code.strip().upper()] = float(rate)
+        return table
 
     @property
     def flight_provider_chain(self) -> tuple[str, ...]:
