@@ -24,6 +24,11 @@ import { buildAdventureView } from "../lib/adventureMocks";
 import { stageMeta } from "../lib/stages";
 import { SetupStageContent } from "./SetupStageContent";
 import { DestinationStageContent } from "./DestinationStageContent";
+import { FlightStageContent } from "./FlightStageContent";
+import { LateJoinStageContent } from "./LateJoinStageContent";
+import { GuideActivityBar } from "./GuideActivityBar";
+import { useActiveGuideRun } from "../hooks/useActiveGuideRun";
+import { useRoomSelections } from "../hooks/useRoomSelections";
 import { StagePlaceholder } from "./StagePlaceholder";
 
 export interface PartyRoomShellProps {
@@ -52,6 +57,23 @@ export function PartyRoomShell({
     setDiscover(state);
   }, []);
   const adventure = buildAdventureView(members);
+  const selections = useRoomSelections(session.room.id);
+  // A member who joined after SETUP has no character yet: they create one before
+  // seeing (and voting in) the current stage. `savedHere` covers a character saved
+  // in this tab, since the session from joining still says "not submitted".
+  const [savedHere, setSavedHere] = useState(false);
+  const markSaved = useCallback(() => setSavedHere(true), []);
+  const activeRun = useActiveGuideRun(session.room.id);
+  // DISCOVER and LOGISTICS explain their own runs (and ties) in place; the bar is
+  // for everything else, so there is never more than one indicator on screen.
+  const explainedInPlace =
+    activeRun !== null &&
+    ((activeStage === "discover" &&
+      (activeRun.runType === "discovery" || activeRun.runType === "tiebreak")) ||
+      (activeStage === "logistics" &&
+        (activeRun.runType === "logistics" || activeRun.runType === "tiebreak")));
+  const needsCharacter =
+    activeStage !== "setup" && !session.travelPreferences?.submittedAt && !savedHere;
 
   return (
     <main className="bg-bg text-ink font-body min-h-screen p-24">
@@ -64,12 +86,16 @@ export function PartyRoomShell({
         {/* Two columns: chatbot-style stage flow (left) + persistent sidebar (right). */}
         <div className="flex flex-col gap-24 lg:grid lg:grid-cols-[2fr_1fr] lg:items-start lg:gap-24">
           <div className="flex flex-col gap-24">
-            {activeStage === "setup" ? (
+            {activeRun && !explainedInPlace ? <GuideActivityBar run={activeRun} /> : null}
+            {needsCharacter ? (
+              <LateJoinStageContent session={session} onSaved={markSaved} />
+            ) : activeStage === "setup" ? (
               <SetupStageContent
                 session={session}
                 members={members}
                 copied={copied}
                 onCopyCode={onCopyCode}
+                onCharacterSaved={markSaved}
               />
             ) : activeStage === "discover" ? (
               <DestinationStageContent
@@ -77,6 +103,8 @@ export function PartyRoomShell({
                 members={members}
                 onDiscoverChange={handleDiscoverChange}
               />
+            ) : activeStage === "logistics" ? (
+              <FlightStageContent session={session} members={members} />
             ) : (
               <StagePlaceholder stage={stageMeta(activeStage)} />
             )}
@@ -85,7 +113,10 @@ export function PartyRoomShell({
           <AdventureSidebar
             adventure={adventure}
             roomSession={session}
-            selectedDestination={discover?.selectedDestination ?? null}
+            selectedDestination={
+              selections.destination ?? discover?.selectedDestination ?? null
+            }
+            selectedFlight={selections.flight}
           />
         </div>
       </div>

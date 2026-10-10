@@ -29,7 +29,7 @@ export interface DestinationMatchCardProps {
 }
 
 /** Read a numeric fit score from any of the keys the backend might use. */
-function readScore(meta: Record<string, unknown> | undefined): number | null {
+export function readScore(meta: Record<string, unknown> | undefined): number | null {
   if (!meta) return null;
   for (const key of ["score", "fit", "fitScore", "match"]) {
     const value = meta[key];
@@ -42,7 +42,7 @@ function readScore(meta: Record<string, unknown> | undefined): number | null {
 }
 
 /** Read a string from the first present key. */
-function readText(
+export function readText(
   meta: Record<string, unknown> | undefined,
   keys: readonly string[],
 ): string | null {
@@ -55,7 +55,7 @@ function readText(
 }
 
 /** Read a string[] from the first present key. */
-function readTags(
+export function readTags(
   meta: Record<string, unknown> | undefined,
   keys: readonly string[],
 ): string[] {

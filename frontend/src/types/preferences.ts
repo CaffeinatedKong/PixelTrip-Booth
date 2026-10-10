@@ -18,4 +18,6 @@ export interface TravelPreferences {
   interests: unknown[];
   activities: unknown[];
   hardConstraints: unknown[];
+  /** When the member first saved; `null`/absent until then. */
+  submittedAt?: string | null;
 }

@@ -59,6 +59,28 @@ const config: Config = {
         "48": "48px",
         "64": "64px",
       },
+      // Stepped (not smooth) motion so loaders feel like 8-bit sprites. Pair every
+      // use with `motion-reduce:animate-none`.
+      keyframes: {
+        "pixel-dot": {
+          "0%, 100%": { opacity: "0.25" },
+          "50%": { opacity: "1" },
+        },
+        "pixel-scan": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(400%)" },
+        },
+        // Eyes closed for ~4% of the cycle: a quick idle blink.
+        "pixel-blink": {
+          "0%, 93%, 100%": { opacity: "0" },
+          "95%, 98%": { opacity: "1" },
+        },
+      },
+      animation: {
+        "pixel-dot": "pixel-dot 1.2s steps(2, jump-none) infinite",
+        "pixel-scan": "pixel-scan 1.6s steps(10) infinite",
+        "pixel-blink": "pixel-blink 4.5s steps(1, end) infinite",
+      },
       fontFamily: {
         // Pixel/bitmap display font for headings and NPC dialogue.
         display: ["'Press Start 2P'", "monospace"],

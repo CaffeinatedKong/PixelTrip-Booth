@@ -18,6 +18,9 @@ import { ApiError } from "@/lib/errors";
 import type { DiscoverState } from "@/services/destination.contract";
 import type { RoomMember, RoomSession } from "@/types";
 
+import { useGuideRun } from "../hooks/useGuideRun";
+import { GuideThinking } from "./GuideThinking";
+import { SkeletonCards } from "./SkeletonCards";
 import { WaitingForParty } from "./WaitingForParty";
 import { DestinationMatchCard } from "./DestinationMatchCard";
 import { StageChat, GuideSay, GuideMessage } from "./StageChat";
@@ -54,6 +57,7 @@ export function DestinationStageContent({
   // Owner's tie-break submission state.
   const [deciding, setDeciding] = useState(false);
   const [tieError, setTieError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +89,42 @@ export function DestinationStageContent({
   }, [roomId, memberId, isOwner, onDiscoverChange]);
 
   const vote = discover.vote;
+  const { run, refresh } = useGuideRun(
+    roomId,
+    "discovery",
+    discover.options.length === 0,
+  );
+
+  const advicePending = discover.tiePending && discover.tiebreak?.pending === true;
+  const tieRun = useGuideRun(roomId, "tiebreak", advicePending);
+  const [retryingAdvice, setRetryingAdvice] = useState(false);
+  const retryAdvice = async (): Promise<void> => {
+    setRetryingAdvice(true);
+    try {
+      await getServices().run.startRun(roomId, memberId, "tiebreak");
+    } catch {
+      // The leader can still choose without the advice.
+    } finally {
+      setRetryingAdvice(false);
+      tieRun.refresh();
+    }
+  };
+
+  const handleRetry = async (): Promise<void> => {
+    setRetrying(true);
+    try {
+      const service = getServices().destination;
+      const tripId = await service.getTripId(roomId);
+      if (tripId)
+        await service.startDiscovery({ tripId, memberId, retry: true });
+    } catch {
+      // The run status will still show the failure.
+    } finally {
+      setRetrying(false);
+      refresh();
+    }
+  };
+
   const viewer = members.find((m) => m.id === memberId);
   const viewerReady = voted || viewer?.stageReady === true;
 
@@ -144,11 +184,11 @@ export function DestinationStageContent({
       : (vote?.options ?? []).map((o) => ({ id: o.id, title: o.label }));
 
   const hasMatches = matches.length > 0;
+  const finishedEmpty = !hasMatches && run?.status === "completed";
 
   return (
     <StageChat>
       <GuideSay text="The party is formed! Let's find where your journey begins." />
-      <GuideSay text="Putting your group's preferences together — this takes a moment." />
 
       {discover.tiePending && discover.tiebreak ? (
         <GuideMessage>
@@ -160,6 +200,17 @@ export function DestinationStageContent({
             onBreakTie={(optionId) => {
               void handleBreakTie(optionId);
             }}
+            thinking={
+              <GuideThinking
+                runType="tiebreak"
+                run={tieRun.run}
+                isOwner={isOwner}
+                retrying={retryingAdvice}
+                onRetry={() => {
+                  void retryAdvice();
+                }}
+              />
+            }
           />
         </GuideMessage>
       ) : viewerReady ? (
@@ -169,17 +220,46 @@ export function DestinationStageContent({
       ) : (
         <GuideMessage>
           <div className="flex flex-col gap-16">
-            <p className="font-body">
-              Here are your best destination matches. Pick the one that excites
-              you most, then lock in your vote.
-            </p>
+            {hasMatches ? (
+              <p className="font-body">
+                Here are your best destination matches. Pick the one that
+                excites you most, then lock in your vote.
+              </p>
+            ) : null}
 
-            {!hasMatches ? (
-              <div className="border-2 border-dashed border-muted p-16">
-                <p className="font-body text-muted">
-                  No destinations generated yet
-                  {discover.loading ? " — the guide is still thinking…" : "."}
+            {finishedEmpty ? (
+              <div className="flex flex-col gap-16 border-2 border-dashed border-muted p-16">
+                <p className="font-body">
+                  {discover.guideNote ??
+                    "The guide couldn't find destinations this time."}
                 </p>
+                {isOwner ? (
+                  <PixelButton
+                    variant="primary"
+                    label={retrying ? "ASKING AGAIN…" : "ASK AGAIN"}
+                    disabled={retrying}
+                    onClick={() => {
+                      void handleRetry();
+                    }}
+                  />
+                ) : (
+                  <p className="font-body text-muted">
+                    The party leader can ask the guide again.
+                  </p>
+                )}
+              </div>
+            ) : !hasMatches ? (
+              <div className="flex flex-col gap-16">
+                <GuideThinking
+                  runType="discovery"
+                  run={run}
+                  isOwner={isOwner}
+                  retrying={retrying}
+                  onRetry={() => {
+                    void handleRetry();
+                  }}
+                />
+                {run?.status !== "failed" ? <SkeletonCards count={3} /> : null}
               </div>
             ) : (
               <div className="flex flex-col gap-16">

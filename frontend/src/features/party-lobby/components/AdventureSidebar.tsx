@@ -41,12 +41,15 @@ export interface AdventureSidebarProps {
   roomSession?: RoomSession | null;
   /** The destination locked by the resolved vote, when available. */
   selectedDestination?: SelectedDestination | null;
+  /** The flight locked by the resolved vote, when available. */
+  selectedFlight?: { id: string; title: string } | null;
 }
 
 export function AdventureSidebar({
   adventure,
   roomSession,
   selectedDestination = null,
+  selectedFlight = null,
 }: AdventureSidebarProps): ReactElement {
   const drawer = useAdventureDrawer();
   const budget = useTripBudget(roomSession?.room.id);
@@ -101,7 +104,11 @@ export function AdventureSidebar({
           emptyLabel="Not selected"
           value={selectedDestination?.title}
         />
-        <SidebarPlaceholderPanel title="FLIGHT" emptyLabel="Not selected" />
+        <SidebarPlaceholderPanel
+          title="FLIGHT"
+          emptyLabel="Not selected"
+          value={selectedFlight?.title}
+        />
         <BudgetPanel budget={budget} />
         <AdventureProgress steps={steps} />
       </div>

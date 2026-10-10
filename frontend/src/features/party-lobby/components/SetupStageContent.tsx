@@ -21,6 +21,8 @@ import { StageChat, GuideSay, GuideMessage } from "./StageChat";
 export interface SetupStageContentProps {
   /** The active session (room + the viewer's member record). */
   session: RoomSession;
+  /** Called once the viewer's character is saved. */
+  onCharacterSaved?: () => void;
   /** Live roster of members in the room. */
   members: RoomMember[];
   /** True briefly after a successful copy of the room code. */
@@ -34,6 +36,7 @@ export function SetupStageContent({
   members,
   copied,
   onCopyCode,
+  onCharacterSaved,
 }: SetupStageContentProps): ReactElement {
   const codeRef = useRef<HTMLSpanElement>(null);
   const isHost = session.member.role === "owner";
@@ -99,7 +102,10 @@ export function SetupStageContent({
         <GuideMessage>
           <CharacterCreator
             session={session}
-            onSaved={() => setSavedLocally(true)}
+            onSaved={() => {
+              setSavedLocally(true);
+              onCharacterSaved?.();
+            }}
           />
         </GuideMessage>
       )}

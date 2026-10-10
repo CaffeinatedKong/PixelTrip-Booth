@@ -27,7 +27,12 @@ function makeMember(overrides: Partial<RoomMember> = {}): RoomMember {
   };
 }
 
-function makeSession(planningStage: PlanningStage): RoomSession {
+function makeSession(
+  planningStage: PlanningStage,
+  submittedAt: string | null = planningStage === "setup"
+    ? null
+    : "2026-10-10T00:00:00Z",
+): RoomSession {
   return {
     room: {
       id: "room-1",
@@ -39,7 +44,18 @@ function makeSession(planningStage: PlanningStage): RoomSession {
     member: makeMember(),
     guest: { id: "guest-1", displayName: "Aria", avatarUrl: null },
     character: null,
-    travelPreferences: null,
+    travelPreferences: {
+      id: "prefs-1",
+      memberId: "member-1",
+      availableDates: [],
+      destinations: [],
+      travelStyle: null,
+      budget: null,
+      interests: [],
+      activities: [],
+      hardConstraints: [],
+      submittedAt,
+    },
   };
 }
 
@@ -95,6 +111,28 @@ describe("PartyRoomShell", () => {
     ).not.toBeInTheDocument();
 
     // The sidebar's quest progress still renders, with DISCOVER current.
+    const sidebar = screen.getByRole("list", { name: "Quest progress" });
+    expect(
+      within(sidebar).getByText("Choose the destination").closest("li"),
+    ).toHaveAttribute("aria-current", "step");
+  });
+
+  it("asks a member who joined after SETUP to create a character first", () => {
+    render(
+      <PartyRoomShell
+        session={makeSession("discover", null)}
+        members={[makeMember({ role: "member" })]}
+        copied={false}
+        onCopyCode={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/party has already set off/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /save character/i }),
+    ).toBeInTheDocument();
+    // The sidebar still shows where the party is.
     const sidebar = screen.getByRole("list", { name: "Quest progress" });
     expect(
       within(sidebar).getByText("Choose the destination").closest("li"),

@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * TiebreakPanel — shown when a destination/flight vote ties and the AI has posted
- * leader-facing advice. Everyone sees the advice + the scored tied options; only
- * the room OWNER sees "Choose for the party" buttons (calling break-tie). Others
- * see a "waiting for the leader" note. Presentational: data in via props, the
- * owner's pick raised through `onBreakTie`.
+ * TiebreakPanel — shown as soon as a destination/flight vote ties. Everyone sees
+ * the tied options and who backed them; once the AI's advice arrives it adds the
+ * advice paragraph, scores and reasons (until then `thinking` shows the guide at
+ * work). Only the room OWNER sees "Choose" buttons (calling break-tie), and can
+ * choose without waiting for the advice. Others see a "waiting for the leader"
+ * note. Presentational: data in via props, the owner's pick raised through
+ * `onBreakTie`.
  */
-import { useState, type ReactElement } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
 import type { TiebreakAdvice } from "@/services/destination.contract";
@@ -22,6 +24,8 @@ export interface TiebreakPanelProps {
   error: string | null;
   /** Raised with the chosen option id (owner only). */
   onBreakTie: (optionId: string) => void;
+  /** Shown in place of the advice while it is still being written. */
+  thinking?: ReactNode;
 }
 
 export function TiebreakPanel({
@@ -30,6 +34,7 @@ export function TiebreakPanel({
   deciding,
   error,
   onBreakTie,
+  thinking,
 }: TiebreakPanelProps): ReactElement {
   const [picked, setPicked] = useState<string | null>(null);
 
@@ -37,10 +42,18 @@ export function TiebreakPanel({
     <div className="flex flex-col gap-16">
       <div className="flex flex-col gap-8">
         <span className="font-display text-warning">IT'S A TIE</span>
-        <p className="font-body">{tiebreak.advice}</p>
+        {tiebreak.pending ? (
+          thinking
+        ) : (
+          <p className="font-body">{tiebreak.advice}</p>
+        )}
         {!isOwner ? (
           <p className="font-body text-muted">
             Waiting for the party leader to make the final call…
+          </p>
+        ) : tiebreak.pending ? (
+          <p className="font-body text-muted">
+            You're the leader. Choose now, or wait for the guide's advice.
           </p>
         ) : (
           <p className="font-body text-muted">

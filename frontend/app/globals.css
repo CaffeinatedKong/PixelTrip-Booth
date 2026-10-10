@@ -17,6 +17,9 @@
   /* Keep the retro art crisp: never smooth pixel sprites/backgrounds. */
   html {
     image-rendering: pixelated;
+    /* Room for the sticky "MILO is working" bar, so it never hides a focused or
+       scrolled-to control. */
+    scroll-padding-top: 64px;
   }
 
   body {
