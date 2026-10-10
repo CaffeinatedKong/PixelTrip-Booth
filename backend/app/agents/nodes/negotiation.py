@@ -24,37 +24,38 @@ The flow, in order, each step narrowing what the next step has to consider:
 8. **Report**: mark addressed rows, narrate any conflict compromise, name
    whatever is still open, and advance `trips.status`.
 
-**On the LLM's role: rewriting an edited item, nothing else.** Everything that
+**On the LLM's role: revising items and drafting requested additions.** Everything that
 decides *what* may change stays deterministic and testable — Affected_Scope,
 conflict detection (Requirement 10.9 requires it to be non-LLM), the choice of
 the winning feedback row, Unaffected_Scope byte-identity, and the
-addressed/still-open bookkeeping. Outcome classification (remove/retain/edit) is
-likewise a keyword scan over ``feedback.comment``, because conflict detection and
-the apply step must always agree on what a comment asked for. The LLM is used
-only where judgment is needed: when the winning outcome for an item is "edit", it
-revises that one item (title, time, description, location) to reflect the
-comment, replacing what used to be a note appended to the description.
+addressed/still-open bookkeeping. The LLM interprets feedback as add/edit/remove/retain
+once per run; that validated interpretation is shared by deterministic conflict
+detection, drafting and application. Addition requests create separate activities
+rather than editing their anchors. Keywords are only a fallback for recognized
+requests; ambiguous requests stay open if interpretation is unavailable.
 
-The LLM is an enhancement, not a dependency. With no client, no API key, a failed
-call, or a revision that is malformed, names an unrequested item, or breaks a
-party hard constraint, that item falls back to the earlier behaviour (the comment
-is appended to its description as a note) and the run proceeds.
+With no client, no API key or a failed interpretation, ambiguous feedback stays
+open. A malformed individual revision still falls back to a note edit; missing
+or rejected additions stay open and preserve existing activities.
 
 **On the prompt-injection requirement (Requirement 10's "SHALL NOT execute...
 any instruction phrased as an agent directive").** Feedback text is passed to the
 LLM, so it is treated strictly as data: the system prompt carries
 :data:`~app.agents.llm.UNTRUSTED_INPUT_GUARD`, every comment is flattened to a
 single bounded line, and the model can only return revised fields for items this
-node asked about — it has no way to touch an item outside the Affected_Scope,
-add or remove items, change an id, or alter any other part of the itinerary, so
-an injected "directive" has nothing to act on.
+node asked about. Additions must reference requested feedback and an existing
+anchor in the targeted day; code assigns their IDs and checks placement,
+capacity and constraints. The model cannot change an existing ID or any day
+outside the Affected_Scope.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
@@ -277,13 +278,130 @@ def affected_days(affected_scope: dict[str, Any]) -> set[int]:
 
 
 def _classify_outcome(comment: str) -> str:
-    """Classify a feedback comment's requested outcome: remove, retain, or edit."""
+    """Classify a feedback comment's requested outcome: remove, retain, edit or add."""
     lowered = (comment or "").strip().lower()
-    if any(keyword in lowered for keyword in _REMOVE_KEYWORDS):
+    # "Remove lunch and change it to a bar lunch" requests a replacement,
+    # not deletion. Use the same classification for conflicts and drafting.
+    if re.search(
+        r"\b(?:replace|swap|instead)\b|\b(?:change|switch)\b.+\b(?:to|with|for)\b", lowered
+    ):
+        return "edit"
+    removal_text = lowered.replace("don't remove", "").replace("do not remove", "")
+    if any(re.search(rf"\b{keyword}\b", removal_text) for keyword in _REMOVE_KEYWORDS):
         return "remove"
+    explicit_addition = re.search(r"\b(?:add|insert|include|schedule)\b", lowered)
+    extra_activity = re.search(
+        r"\b(?:extra|additional|another|more|new|separate)\s+"
+        r"(?:(?:\d+|one|two|three)\s+)?(?:activit(?:y|ies)|stops?|rows?|visits?|events?)\b",
+        lowered,
+    )
+    planned_visit = re.search(
+        r"\b(?:plan|suggest)\s+(?:\d+|one|two|three)\s+"
+        r"(?:\w+\s+){0,2}(?:clubs?|activities|activity|visits?|stops?)\b",
+        lowered,
+    )
+    if explicit_addition or extra_activity or planned_visit:
+        return "add"
     if any(keyword in lowered for keyword in _RETAIN_KEYWORDS):
         return "retain"
     return "edit"
+
+
+def _feedback_outcome(row: dict[str, Any]) -> str:
+    """Use the validated semantic interpretation consistently throughout a run."""
+    return row.get("_interpreted_outcome") or _classify_outcome(row.get("comment", ""))
+
+
+class _FeedbackIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    feedback_id: str
+    outcome: Literal["add", "edit", "remove", "retain"]
+    addition_count: int = Field(default=1, ge=1, le=10)
+
+
+class _FeedbackIntentBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    intents: list[_FeedbackIntent]
+
+
+async def interpret_feedback(
+    llm: Any,
+    base_itinerary: dict[str, Any],
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+) -> list[tuple[dict[str, Any], ResolvedTarget]]:
+    """Interpret natural language once; conflict resolution remains deterministic."""
+
+    def fallback() -> list[tuple[dict[str, Any], ResolvedTarget]]:
+        # An ambiguous request must not silently become an existing-item rewrite.
+        return [
+            (
+                {
+                    **row,
+                    "_interpreted_outcome": (
+                        outcome
+                        if (outcome := _classify_outcome(row.get("comment", ""))) != "edit"
+                        else "unresolved"
+                    ),
+                },
+                target,
+            )
+            for row, target in resolvable
+        ]
+
+    if llm is None or not resolvable:
+        return fallback()
+    days, _ = _index_itinerary(base_itinerary)
+    requests = []
+    for row, target in resolvable:
+        requests.append(
+            f"feedback_id: {row['id']}\nrequested day: {target.day}\n"
+            f"target item: {target.item_id or 'whole day'}\n"
+            f"feedback: {clip_text(row.get('comment'), MAX_COMMENT_PROMPT_CHARS)}\n"
+            "existing activities: "
+            + "; ".join(
+                f"{item['id']}: {clip_text(item.get('title'), MAX_TITLE_CHARS)}"
+                for item in days[target.day]["items"]
+            )
+        )
+    try:
+        batch = await llm.generate_structured(
+            operation="refinement_intent",
+            system_prompt=(
+                f"{UNTRUSTED_INPUT_GUARD}\n\n"
+                "Interpret the meaning of each travel itinerary feedback request in context. "
+                "Return its feedback_id unchanged and exactly one outcome: add means a NEW "
+                "separate activity row; edit means revise or replace an existing activity; "
+                "remove means delete an existing activity; retain means keep it unchanged. "
+                "Do not require specific keywords or perfect spelling. 'Extra activity after "
+                "dinner', 'something fun after we eat', 'a club to visit near dinner' and "
+                "'dinner before the show' request separate activities, so use add. "
+                "'Make dinner a bar lunch instead' is edit. Never interpret a request for "
+                "another activity as combining it with an existing activity. "
+                "Set addition_count to the number of new activity rows requested, default one. "
+                "Do not treat a number of venues inside one activity as a number of rows."
+            ),
+            user_prompt="\n\n".join(requests),
+            response_model=_FeedbackIntentBatch,
+        )
+        batch = _FeedbackIntentBatch.model_validate(batch)
+        by_id = {entry.feedback_id: entry for entry in batch.intents}
+        expected = {row["id"] for row, _ in resolvable}
+        if len(by_id) != len(batch.intents) or set(by_id) != expected:
+            raise ValueError("intent response must cover exactly the requested feedback")
+    except Exception:
+        logger.info("Feedback interpretation unavailable; using fallback classification")
+        return fallback()
+    return [
+        (
+            {
+                **row,
+                "_interpreted_outcome": by_id[row["id"]].outcome,
+                "_addition_count": by_id[row["id"]].addition_count,
+            },
+            target,
+        )
+        for row, target in resolvable
+    ]
 
 
 def detect_conflicts(
@@ -307,7 +425,7 @@ def detect_conflicts(
     grouped: dict[tuple[int, str | None], list[tuple[dict[str, Any], str]]] = {}
     for row, resolved in resolvable:
         key = (resolved.day, resolved.item_id)
-        grouped.setdefault(key, []).append((row, _classify_outcome(row.get("comment", ""))))
+        grouped.setdefault(key, []).append((row, _feedback_outcome(row)))
 
     conflicts: list[dict[str, Any]] = []
     for (day, item_id), entries in grouped.items():
@@ -315,11 +433,11 @@ def detect_conflicts(
             continue
         outcomes = {outcome for _row, outcome in entries}
         edit_texts = {
-            row.get("comment", "").strip() for row, outcome in entries if outcome == "edit"
+            row.get("comment", "").strip() for row, outcome in entries if outcome in {"edit", "add"}
         }
         is_conflict = (
             ("remove" in outcomes and "retain" in outcomes)
-            or ("remove" in outcomes and "edit" in outcomes)
+            or ("remove" in outcomes and bool(outcomes & {"edit", "add"}))
             or len(edit_texts) > 1
         )
         if not is_conflict:
@@ -402,6 +520,7 @@ def regenerate_affected_only(
     resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
     conflicts: list[dict[str, Any]],
     revisions: dict[str, dict[str, Any]] | None = None,
+    additions: dict[str, list[dict[str, Any]]] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Build the new itinerary dict, touching only the Affected_Scope.
 
@@ -411,15 +530,16 @@ def regenerate_affected_only(
     they are a time-slot neighbour or an adjacent item are carried forward
     unchanged — scope membership permits a change, it does not require one.
 
-    A day-only target (no specific item id) marks its whole day in scope but
-    applies no change: there is nothing in it to concretely act on. Its
-    feedback row therefore stays open rather than being marked addressed, which
-    is the honest answer while day-level rewriting is not implemented.
+    Day-level edits are drafted with the whole day in scope. A day-level
+    deletion without a replacement stays open: it cannot identify which item
+    to delete. Deletions that would empty a day also stay open.
 
     Args:
         revisions: LLM-drafted rewrites keyed by item id, from
             :func:`draft_item_revisions`. Optional: an item without one falls
             back to the note-appending edit.
+        additions: Validated new activities keyed by feedback id. Missing or
+            inapplicable additions leave feedback open and existing items intact.
 
     Returns:
         ``(new_itinerary, addressed_feedback_ids)``.
@@ -427,6 +547,7 @@ def regenerate_affected_only(
     winners = _winning_feedback(resolvable, conflicts)
     in_scope_days = affected_days(affected_scope)
     revisions = revisions or {}
+    additions = additions or {}
 
     new_days: list[dict[str, Any]] = []
     addressed_ids: list[str] = []
@@ -438,12 +559,20 @@ def regenerate_affected_only(
             continue
 
         new_items: list[dict[str, Any]] = []
+        day_addressed_ids: list[str] = []
         for item in day.get("items") or []:
-            winning_row = winners.get((day_num, item["id"]))
+            winning_row = winners.get((day_num, item["id"])) or winners.get((day_num, None))
             if winning_row is None:
                 new_items.append(item)
                 continue
-            outcome = _classify_outcome(winning_row.get("comment", ""))
+            outcome = _feedback_outcome(winning_row)
+            if outcome in {"add", "unresolved"}:
+                # Inserting an activity must never rewrite the anchor activity.
+                new_items.append(item)
+                continue
+            if outcome == "remove" and winning_row is winners.get((day_num, None)):
+                new_items.append(item)
+                continue
             updated = _apply_outcome(
                 item,
                 outcome,
@@ -452,11 +581,39 @@ def regenerate_affected_only(
             )
             if updated is not None:
                 new_items.append(updated)
-            addressed_ids.append(winning_row["id"])
+            day_addressed_ids.append(winning_row["id"])
+
+        for (target_day, _item_id), row in winners.items():
+            if target_day != day_num or _feedback_outcome(row) != "add":
+                continue
+            inserted = additions.get(row["id"], [])
+            anchors = {item["id"] for item in new_items}
+            if not inserted or len(new_items) + len(inserted) > 10:
+                continue
+            if any(entry["anchor_item_id"] not in anchors for entry in inserted):
+                continue
+            expanded: list[dict[str, Any]] = []
+            for item in new_items:
+                for placement in ("before", "after"):
+                    if placement == "after":
+                        expanded.append(item)
+                    expanded.extend(
+                        entry["item"]
+                        for entry in sorted(inserted, key=lambda e: e["item"]["time"])
+                        if entry["anchor_item_id"] == item["id"] and entry["placement"] == placement
+                    )
+            new_items = expanded
+            day_addressed_ids.append(row["id"])
+
+        if not new_items:
+            # Never publish an invalid empty day or settle unapplied feedback.
+            new_days.append(day)
+            continue
+        addressed_ids.extend(day_addressed_ids)
 
         new_days.append({**day, "items": new_items})
 
-    return {**base_itinerary, "days": new_days}, addressed_ids
+    return {**base_itinerary, "days": new_days}, list(dict.fromkeys(addressed_ids))
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +641,153 @@ class _RevisionBatch(BaseModel):
     revisions: list[_ItemRevision] = Field(min_length=1)
 
 
+class _ActivityAddition(BaseModel):
+    """A separate new activity, positioned relative to an existing activity."""
+
+    model_config = ConfigDict(extra="forbid")
+    feedback_id: str
+    anchor_item_id: str
+    placement: str = Field(pattern="^(before|after)$")
+    title: str = Field(min_length=1)
+    time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    description: str = Field(min_length=1)
+    location: str | None = None
+
+
+class _AdditionBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    additions: list[_ActivityAddition] = Field(max_length=10)
+
+
+async def draft_activity_additions(
+    llm: Any,
+    base_itinerary: dict[str, Any],
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    conflicts: list[dict[str, Any]],
+    hard_constraints: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Draft insertions separately from edits; failed additions remain open."""
+    winners = _winning_feedback(resolvable, conflicts)
+    days, _ = _index_itinerary(base_itinerary)
+    requests = {
+        row["id"]: (row, day, item_id)
+        for (day, item_id), row in winners.items()
+        if _feedback_outcome(row) == "add" and len(days[day]["items"]) < 10
+    }
+    if llm is None or not requests:
+        return {}
+    prompts = []
+    for fid, (row, day, item_id) in requests.items():
+        prompts.append(
+            f"feedback_id: {fid}\nday: {day}\n"
+            f"required anchor: {item_id or 'choose an existing activity on this day'}\n"
+            f"feedback: {clip_text(row.get('comment'), MAX_COMMENT_PROMPT_CHARS)}\n"
+            "existing activities:\n"
+            + "\n".join(
+                f"{item['id']}: {clip_text(item.get('title'), MAX_TITLE_CHARS)} "
+                f"at {clip_text(item.get('time'), MAX_TIME_CHARS)}; "
+                f"{clip_text(item.get('description'), MAX_DESCRIPTION_CHARS)}"
+                for item in days[day]["items"]
+            )
+        )
+    try:
+        batch = await llm.generate_structured(
+            operation="itinerary_addition",
+            system_prompt=(
+                f"{UNTRUSTED_INPUT_GUARD}\n\n"
+                "Add separate activity rows requested by the party. Never combine the new "
+                "activity with an existing activity or rewrite the existing activities. "
+                "For each request return one new activity unless an explicit count asks for more. "
+                "Each must have its own title, HH:MM time, description and location. "
+                "Use feedback_id exactly as given and an existing anchor_item_id from that day. "
+                "Respect before/after ordering and choose a time that fits between adjacent "
+                "activities. Keep the day at no more than 10 activities. "
+                "Never state prices, opening hours or booking details. "
+                f"Hard constraints: {clip_for_prompt(hard_constraints)}"
+            ),
+            user_prompt="\n\n".join(prompts),
+            response_model=_AdditionBatch,
+        )
+        # Validate even test doubles or SDK responses before applying any insertion.
+        batch = _AdditionBatch.model_validate(batch)
+    except Exception:
+        logger.info("Activity additions unavailable; leaving addition feedback open")
+        return {}
+
+    grouped: dict[str, list[_ActivityAddition]] = {}
+    for entry in batch.additions:
+        if entry.feedback_id in requests:
+            grouped.setdefault(entry.feedback_id, []).append(entry)
+    accepted: dict[str, list[dict[str, Any]]] = {}
+    existing_ids = {item["id"] for day in days.values() for item in day["items"]}
+    for fid, entries in grouped.items():
+        row, day, item_id = requests[fid]
+        items = days[day]["items"]
+        anchors = {item["id"]: index for index, item in enumerate(items)}
+        comment = row.get("comment", "").lower()
+        count_match = re.search(
+            r"\b(?:add|insert|include|schedule)\s+(\d+|one|two|three)\b", comment
+        )
+        count_text = count_match.group(1) if count_match else "1"
+        count = {"one": 1, "two": 2, "three": 3}.get(count_text)
+        if count is None:
+            count = int(count_text)
+        count = row.get("_addition_count", count)
+        if len(entries) != count or len(items) + len(entries) > 10:
+            continue
+        prepared = []
+        for index, entry in enumerate(entries):
+            if entry.anchor_item_id not in anchors or (item_id and entry.anchor_item_id != item_id):
+                break
+            directions = set(re.findall(r"\b(before|after)\b", comment))
+            if len(directions) == 1 and entry.placement not in directions:
+                break
+            anchor_index = anchors[entry.anchor_item_id]
+            gap = anchor_index if entry.placement == "before" else anchor_index + 1
+            previous_time = items[gap - 1].get("time") if gap else None
+            next_time = items[gap].get("time") if gap < len(items) else None
+            valid_time = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+            if (
+                previous_time
+                and re.fullmatch(valid_time, previous_time)
+                and entry.time <= previous_time
+            ):
+                break
+            if next_time and re.fullmatch(valid_time, next_time) and entry.time >= next_time:
+                break
+            title = clip_text(entry.title, MAX_TITLE_CHARS)
+            description = clip_text(entry.description, MAX_DESCRIPTION_CHARS)
+            location = clip_text(entry.location, MAX_LOCATION_CHARS)
+            if not title or not description:
+                break
+            if _violates_hard_constraints(
+                " ".join(filter(None, (title, description, location))), hard_constraints
+            ):
+                break
+            new_id = f"d{day}-added-{uuid5(NAMESPACE_URL, f'{fid}:{index}').hex}"
+            if new_id in existing_ids:
+                break
+            prepared.append(
+                {
+                    "anchor_item_id": entry.anchor_item_id,
+                    "placement": entry.placement,
+                    "item": {
+                        "id": new_id,
+                        "title": title,
+                        "time": entry.time,
+                        "description": description,
+                        "location": location,
+                        "location_id": None,
+                        "tags": [],
+                        "cost": None,
+                    },
+                }
+            )
+        else:
+            accepted[fid] = prepared
+    return accepted
+
+
 def _items_needing_revision(
     base_itinerary: dict[str, Any],
     affected_scope: dict[str, Any],
@@ -501,12 +805,13 @@ def _items_needing_revision(
     for day in base_itinerary.get("days") or []:
         if int(day["day"]) not in in_scope_days:
             continue
+        day_feedback = winners.get((int(day["day"]), None))
         for item in day.get("items") or []:
-            row = winners.get((int(day["day"]), item["id"]))
+            row = winners.get((int(day["day"]), item["id"])) or day_feedback
             if row is None:
                 continue
             comment = row.get("comment", "")
-            if _classify_outcome(comment) == "edit" and comment.strip():
+            if _feedback_outcome(row) == "edit" and comment.strip():
                 needing.append((item, comment))
     return needing
 
@@ -536,6 +841,7 @@ async def draft_item_revisions(
     entries = []
     for item, comment in needing:
         entries.append(
+            f"requested day: {item['id'].split('-')[0].removeprefix('d')}\n"
             f"item_id: {item['id']}\n"
             f"current title: {clip_text(item.get('title'), MAX_TITLE_CHARS) or ''}\n"
             f"current time: {item.get('time') or 'not set'}\n"
@@ -549,7 +855,10 @@ async def draft_item_revisions(
         "You are an in-world NPC travel guide revising individual items of a group trip "
         "itinerary after party feedback. For each item below, return a revised version that "
         "reflects the feedback. Change only what the feedback asks for and keep the rest of "
-        "the item as it is. Return exactly one revision per item, repeating its item_id "
+        "the requested day coherent: day-level feedback applies to the activities on that "
+        "day, while item-level feedback applies only to the named item. "
+        "Keep unrelated fields of each item as they are. Return exactly one revision per item, "
+        "repeating its item_id "
         "unchanged. Never state prices, opening hours or booking details, and never include "
         "anything that violates a stated hard constraint.\n"
         f"Hard constraints: {clip_for_prompt(hard_constraints)}"
@@ -728,6 +1037,8 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
         return state
 
     await report_phase(repos, state, "weighing_feedback")
+    await report_phase(repos, state, "asking_guide")
+    resolvable = await interpret_feedback(repos.llm, base_itinerary, resolvable)
     affected_scope = compute_affected_scope(resolvable, base_itinerary)
     conflicts = detect_conflicts(resolvable)
     await report_phase(repos, state, "asking_guide")
@@ -739,8 +1050,16 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
         conflicts,
         _hard_constraints(context.get("preferences") or []),
     )
+    additions = await draft_activity_additions(
+        repos.llm,
+        base_itinerary,
+        resolvable,
+        conflicts,
+        _hard_constraints(context.get("preferences") or []),
+    )
+    await report_phase(repos, state, "checking_answer")
     new_itinerary_dict, addressed_ids = regenerate_affected_only(
-        base_itinerary, affected_scope, resolvable, conflicts, revisions
+        base_itinerary, affected_scope, resolvable, conflicts, revisions, additions
     )
     change_summary = build_change_summary(affected_scope, conflicts)
 
@@ -748,7 +1067,9 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
         itinerary=ItineraryModel(**new_itinerary_dict),
         change_summary=change_summary,
         addressed_feedback_ids=addressed_ids,
-        unresolved_feedback_ids=[row["id"] for row in unresolvable],
+        unresolved_feedback_ids=[
+            row["id"] for row in open_feedback if row["id"] not in addressed_ids
+        ],
         affected_scope=affected_scope,
         conflicts=conflicts,
     )

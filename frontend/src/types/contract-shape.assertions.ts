@@ -244,15 +244,17 @@ type _ItineraryVersionSource = Expect<
 
 const _feedbackInput = {
   tripId: "",
-  version: 1,
-  target: "",
+  itineraryVersionId: "",
+  memberId: "",
+  target: { day: 1 },
   comment: "",
 } satisfies FeedbackInput;
 const _feedback = {
   id: "",
   tripId: "",
-  version: 1,
-  target: "",
+  itineraryVersionId: "",
+  memberId: "",
+  target: { day: 1 },
   comment: "",
   status: "open",
 } satisfies Feedback;

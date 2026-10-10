@@ -85,8 +85,9 @@ export const mockCurrentVersionByTripId: Readonly<
 export const mockFeedback: Feedback = {
   id: "ccccccc0-cccc-4ccc-8ccc-ccccccccccc0",
   tripId: mockItinerary.tripId,
-  version: 1,
-  target: "day-1",
+  itineraryVersionId: mockCurrentVersion.id ?? "version-1",
+  memberId: "member-1",
+  target: { day: 1 },
   comment: "Can we add more free time on the first day?",
   status: "open",
 };

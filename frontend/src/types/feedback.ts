@@ -9,9 +9,10 @@
 /** The feedback a party member submits against an itinerary version. */
 export interface FeedbackInput {
   tripId: string;
-  version: number;
-  /** Section reference the feedback applies to (e.g. a day or item id/label). */
-  target: string;
+  itineraryVersionId: string;
+  memberId: string;
+  /** At least a day or item id is required by the backend. */
+  target: { day?: number; itemId?: string; section?: string };
   comment: string;
 }
 

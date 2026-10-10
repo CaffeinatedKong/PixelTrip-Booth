@@ -7,6 +7,7 @@ import type { Unsubscribe } from "@/types";
 export interface LockedChoice {
   id: string;
   title: string;
+  data?: Record<string, unknown>;
 }
 
 export interface RoomSelections {

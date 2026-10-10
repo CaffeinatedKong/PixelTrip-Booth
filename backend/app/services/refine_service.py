@@ -16,6 +16,8 @@ from app.exceptions import BackendError, ItineraryVersionNotFoundError, VersionN
 from app.schemas.planning import (
     FeedbackSchema,
     ItineraryVersionSchema,
+    ReviewItineraryRequest,
+    ReviewItineraryResponse,
     SubmitFeedbackRequest,
     SubmitFeedbackResponse,
     VersionDecisionRequest,
@@ -61,6 +63,56 @@ class RefineService:
 
         return SubmitFeedbackResponse(
             feedback=FeedbackSchema.model_validate(row), trip=TripSchema.model_validate(trip)
+        )
+
+    async def review(
+        self, trip_id: str, version_id: str, request: ReviewItineraryRequest
+    ) -> ReviewItineraryResponse:
+        """Record a member's review and approve only after the whole party agrees."""
+        trip = await self._require_trip(trip_id)
+        member_id = str(request.member_id)
+        await self._require_member_of(trip, member_id)
+        version = await self._require_proposed_version(trip_id, version_id)
+
+        if request.decision == "refine":
+            await self._repos.member_repo.set_stage_ready(member_id, True)
+            members = await self._repos.member_repo.list_members_by_room(trip["room_id"])
+            all_ready = bool(members) and all(bool(member.get("stage_ready")) for member in members)
+            needs_refinement = bool(await self._repos.feedback_repo.list_open_by_trip(trip_id))
+            return ReviewItineraryResponse(
+                version=ItineraryVersionSchema.model_validate(version),
+                trip=TripSchema.model_validate(trip),
+                all_ready=all_ready,
+                needs_refinement=all_ready and needs_refinement,
+            )
+
+        await self._repos.member_repo.set_stage_ready(member_id, True)
+        members = await self._repos.member_repo.list_members_by_room(trip["room_id"])
+        all_ready = bool(members) and all(bool(member.get("stage_ready")) for member in members)
+        needs_refinement = bool(await self._repos.feedback_repo.list_open_by_trip(trip_id))
+        if not all_ready:
+            return ReviewItineraryResponse(
+                version=ItineraryVersionSchema.model_validate(version),
+                trip=TripSchema.model_validate(trip),
+                all_ready=False,
+                needs_refinement=False,
+            )
+        if needs_refinement:
+            return ReviewItineraryResponse(
+                version=ItineraryVersionSchema.model_validate(version),
+                trip=TripSchema.model_validate(trip),
+                all_ready=True,
+                needs_refinement=True,
+            )
+
+        approved = await self._repos.itinerary_version_repo.mark_approved(version_id)
+        trip = await advance_trip(self._repos.trip_repo, trip, "trip_approved")
+        await self._announce_wrap(trip_id)
+        return ReviewItineraryResponse(
+            version=ItineraryVersionSchema.model_validate(approved),
+            trip=TripSchema.model_validate(trip),
+            all_ready=True,
+            needs_refinement=False,
         )
 
     async def decide(

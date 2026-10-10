@@ -265,6 +265,23 @@ class SubmitFeedbackResponse(_Base):
     trip: TripSchema
 
 
+class ReviewItineraryRequest(_Base):
+    member_id: UUID = Field(description="The reviewing room member.")
+    decision: Literal["approve", "refine"] = Field(examples=["approve"])
+
+
+class ReviewItineraryResponse(_Base):
+    version: ItineraryVersionSchema
+    trip: TripSchema
+    all_ready: bool = Field(
+        description="True when every room member has approved this itinerary version."
+    )
+    needs_refinement: bool = Field(
+        default=False,
+        description="True when everyone locked in and open feedback requires the refinement agent.",
+    )
+
+
 class VersionDecisionRequest(_Base):
     member_id: UUID = Field(
         description="Must be the room owner's member id.", examples=[_MEMBER_ID_EXAMPLE]

@@ -22,6 +22,8 @@ from app.schemas.agent_run import AgentRunProgressSchema, AgentRunSchema
 from app.schemas.errors import ErrorResponse
 from app.schemas.planning import (
     ItineraryVersionSchema,
+    ReviewItineraryRequest,
+    ReviewItineraryResponse,
     StartRunRequest,
     SubmitFeedbackRequest,
     SubmitFeedbackResponse,
@@ -147,6 +149,32 @@ async def list_itinerary_versions(
 
 RefineServiceDep = Annotated[RefineService, Depends(get_refine_service)]
 ExportServiceDep = Annotated[ExportService, Depends(get_export_service)]
+
+
+@router.post(
+    "/trips/{trip_id}/itinerary/versions/{version_id}/review",
+    response_model=ReviewItineraryResponse,
+    summary="Review an itinerary version",
+    description=(
+        "Records one member's approval of the proposed itinerary. The version is approved "
+        "and the trip moves to WRAP only after every room member approves."
+    ),
+    responses={
+        200: {"description": "Review recorded"},
+        404: {"model": ErrorResponse, "description": "Trip or itinerary version not found"},
+        409: {"model": ErrorResponse, "description": "Version is not under review"},
+        422: {"model": ErrorResponse, "description": "Member is not in the room"},
+        503: {"model": ErrorResponse, "description": "Database unavailable"},
+    },
+)
+async def review_itinerary(
+    trip_id: UUID,
+    version_id: UUID,
+    body: ReviewItineraryRequest,
+    service: RefineServiceDep,
+) -> ReviewItineraryResponse:
+    """Record a party member's approve/refine review."""
+    return await service.review(str(trip_id), str(version_id), body)
 
 
 @router.post(

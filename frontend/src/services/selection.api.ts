@@ -20,7 +20,7 @@ function toChoice(
   const id = data.id ?? data.option_id;
   const title = data.title ?? data.label;
   return typeof id === "string" && typeof title === "string"
-    ? { id, title }
+    ? { id, title, data }
     : null;
 }
 

@@ -79,4 +79,16 @@ describe("GuideThinking", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByText(/party leader can ask/)).toBeInTheDocument();
   });
+
+  it("describes a refinement failure without assuming AI downtime", () => {
+    render(
+      <GuideThinking
+        runType="refinement"
+        run={run({ runType: "refinement", status: "failed", phase: "asking_guide" })}
+        isOwner={false}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("couldn't finish updating your itinerary");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("AI service is busy");
+  });
 });

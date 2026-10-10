@@ -395,6 +395,7 @@ async def _draft_days_with_llm(
     destination: str,
     outbound: date,
     day_count: int,
+    flight_data: dict[str, Any] | None = None,
     group_profile: dict[str, Any],
 ) -> dict[int, list[ItineraryItemModel]]:
     """Ask the LLM to draft the days, a chunk at a time.
@@ -408,6 +409,21 @@ async def _draft_days_with_llm(
 
     hard_constraints = [str(c) for c in (group_profile.get("hard_constraints") or [])]
     ceiling = group_profile.get("budget_ceiling")
+    flight_data = flight_data or {}
+    depart_at = flight_data.get("depart_at") or flight_data.get("departAt") or "unknown"
+    arrive_at = flight_data.get("arrive_at") or flight_data.get("arriveAt") or "unknown"
+    return_depart_at = (
+        flight_data.get("return_depart_at")
+        or flight_data.get("returnDepartAt")
+        or flight_data.get("return_at")
+        or flight_data.get("returnAt")
+        or "unknown"
+    )
+    return_arrive_at = (
+        flight_data.get("return_arrive_at")
+        or flight_data.get("returnArriveAt")
+        or "unknown"
+    )
     system_prompt = (
         f"{UNTRUSTED_INPUT_GUARD}\n\n"
         "You are an in-world NPC travel guide drafting a day-by-day itinerary for a group "
@@ -417,7 +433,10 @@ async def _draft_days_with_llm(
         "for the destination. Give each activity a rough cost per person in SGD in "
         "estimated_cost_sgd (0 if free) and keep the total within the money left for "
         "activities when one is given; never write prices, opening hours, flight details or "
-        "booking information in the text. Never include anything that violates a stated "
+        "booking information in the text. Treat the flight schedule as fixed: keep arrival "
+        "day light, schedule the first activity after arrival, keep departure day short, "
+        "and finish activities before the return departure. Never schedule activities during "
+        "a flight or before outbound arrival. Never include anything that violates a stated "
         "hard constraint, and "
         "include every required activity somewhere in the trip. Read each member's own "
         "profile and spread the days so every member gets some of what they asked for, "
@@ -427,6 +446,10 @@ async def _draft_days_with_llm(
     )
     context = (
         f"Destination: {' '.join(destination.split())[:MAX_TITLE_CHARS]}\n"
+        f"Outbound flight departure: {depart_at}\n"
+        f"Outbound flight arrival: {arrive_at}\n"
+        f"Return flight departure: {return_depart_at}\n"
+        f"Return flight arrival: {return_arrive_at}\n"
         f"Party size: {group_profile.get('member_count') or 'unknown'}\n"
         f"Money left per person for paid activities: "
         f"{f'SGD {ceiling:,.0f}' if ceiling is not None else 'no limit given'}\n"
@@ -585,6 +608,7 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
         destination=destination_title,
         outbound=outbound,
         day_count=day_count,
+        flight_data=flight_data,
         group_profile=profile,
     )
     itinerary = _build_itinerary(

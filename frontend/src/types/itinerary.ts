@@ -8,6 +8,7 @@
 
 /** A single ordered activity within a day plan. */
 export interface ItineraryItem {
+  id?: string;
   time?: string;
   title: string;
   description?: string;
@@ -36,9 +37,11 @@ export interface Itinerary {
 
 /** A versioned wrapper around an itinerary. Only one is current. */
 export interface ItineraryVersion {
+  id?: string;
   version: number;
   source: "build" | "refine";
   isCurrent: boolean;
+  status?: "proposed" | "approved" | "rejected" | "superseded";
   itinerary: Itinerary;
   changeSummary?: string;
 }

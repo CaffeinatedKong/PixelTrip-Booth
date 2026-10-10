@@ -37,12 +37,15 @@ export const RUN_STEPS: Record<RunType, readonly RunPhase[]> = {
     "posting",
   ],
   itinerary: ["reading_party", "drafting_days", "posting"],
-  refinement: ["reading_party", "weighing_feedback", "asking_guide", "posting"],
+  refinement: ["reading_party", "weighing_feedback", "asking_guide", "checking_answer", "posting"],
   tiebreak: ["weighing_options", "posting"],
 };
 
 /** What went wrong, from the step a failed run stopped on. */
 export function failureLine(run: RunProgress): string {
+  if (run.runType === "refinement") {
+    return "The guide couldn't finish updating your itinerary. Your previous plan is still saved.";
+  }
   if (run.phase === "searching_flights") {
     return "The flight search is unavailable right now (the flight service may be out of searches for this month).";
   }

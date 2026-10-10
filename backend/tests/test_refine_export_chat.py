@@ -26,7 +26,12 @@ from app.repositories.profile_repository import ProfileRepository
 from app.repositories.room_repository import RoomRepository
 from app.repositories.selection_repository import SelectionRepository
 from app.repositories.trip_repository import TripRepository
-from app.schemas.planning import SendMessageRequest, SubmitFeedbackRequest, VersionDecisionRequest
+from app.schemas.planning import (
+    ReviewItineraryRequest,
+    SendMessageRequest,
+    SubmitFeedbackRequest,
+    VersionDecisionRequest,
+)
 from app.services import refine_service
 from app.services.chat_service import ChatService
 from app.services.export_service import ExportService
@@ -161,6 +166,57 @@ async def test_feedback_on_unknown_trip():
 
     with pytest.raises(TripNotFoundError):
         await RefineService(r).submit_feedback(TRIP_ID, feedback_request())
+
+
+@pytestmark_async
+async def test_all_keep_review_approves_directly_without_refinement(monkeypatch):
+    """A fully positive lock-in moves straight to WRAP; no refinement is needed."""
+    r = bundle()
+    r.member_repo.list_members_by_room.return_value = [
+        {"id": OWNER, "room_id": ROOM_ID, "stage_ready": True},
+        {"id": MEMBER, "room_id": ROOM_ID, "stage_ready": True},
+    ]
+    r.itinerary_version_repo.mark_approved.return_value = version(status="approved")
+    r.trip_repo.update_status.return_value = {**TRIP, "status": "trip_approved"}
+    r.feedback_repo.list_open_by_trip.return_value = []
+    summary = AsyncMock()
+    monkeypatch.setattr(refine_service, "produce_wrap_summary", summary)
+
+    response = await RefineService(r).review(
+        TRIP_ID,
+        VERSION,
+        ReviewItineraryRequest(member_id=MEMBER, decision="approve"),
+    )
+
+    r.itinerary_version_repo.mark_approved.assert_awaited_once_with(VERSION)
+    r.trip_repo.update_status.assert_awaited_once_with(TRIP_ID, "trip_approved", "wrap")
+    r.feedback_repo.list_open_by_trip.assert_awaited_once_with(TRIP_ID)
+    summary.assert_awaited_once()
+    assert response.all_ready is True
+    assert response.trip.status == "trip_approved"
+
+
+@pytestmark_async
+async def test_all_locked_with_open_feedback_requests_refinement_without_approving():
+    """The final lock-in reports refinement separately from party readiness."""
+    r = bundle()
+    r.member_repo.list_members_by_room.return_value = [
+        {"id": OWNER, "room_id": ROOM_ID, "stage_ready": True},
+        {"id": MEMBER, "room_id": ROOM_ID, "stage_ready": True},
+    ]
+    r.feedback_repo.list_open_by_trip.return_value = [{"id": "feedback-1", "status": "open"}]
+    r.trip_repo.update_status.return_value = {**TRIP, "status": "feedback_collected"}
+
+    response = await RefineService(r).review(
+        TRIP_ID,
+        VERSION,
+        ReviewItineraryRequest(member_id=MEMBER, decision="approve"),
+    )
+
+    r.itinerary_version_repo.mark_approved.assert_not_awaited()
+    r.trip_repo.update_status.assert_not_awaited()
+    assert response.all_ready is True
+    assert response.needs_refinement is True
 
 
 def test_blank_feedback_comment_is_invalid():

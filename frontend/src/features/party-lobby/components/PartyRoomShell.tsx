@@ -25,6 +25,7 @@ import { stageMeta } from "../lib/stages";
 import { SetupStageContent } from "./SetupStageContent";
 import { DestinationStageContent } from "./DestinationStageContent";
 import { FlightStageContent } from "./FlightStageContent";
+import { BuildStageContent } from "./BuildStageContent";
 import { LateJoinStageContent } from "./LateJoinStageContent";
 import { GuideActivityBar } from "./GuideActivityBar";
 import { useActiveGuideRun } from "../hooks/useActiveGuideRun";
@@ -71,7 +72,9 @@ export function PartyRoomShell({
     ((activeStage === "discover" &&
       (activeRun.runType === "discovery" || activeRun.runType === "tiebreak")) ||
       (activeStage === "logistics" &&
-        (activeRun.runType === "logistics" || activeRun.runType === "tiebreak")));
+        (activeRun.runType === "logistics" || activeRun.runType === "tiebreak")) ||
+      (activeStage === "build" && activeRun.runType === "itinerary") ||
+      (activeStage === "refine" && activeRun.runType === "refinement"));
   const needsCharacter =
     activeStage !== "setup" && !session.travelPreferences?.submittedAt && !savedHere;
 
@@ -105,6 +108,20 @@ export function PartyRoomShell({
               />
             ) : activeStage === "logistics" ? (
               <FlightStageContent session={session} members={members} />
+            ) : activeStage === "build" || activeStage === "refine" ? (
+              <BuildStageContent
+                session={session}
+                members={members}
+                selectedFlight={selections.flight}
+                canStartRun={activeStage === "build"}
+              />
+            ) : activeStage === "wrap" ? (
+              <BuildStageContent
+                session={session}
+                members={members}
+                selectedFlight={selections.flight}
+                canStartRun={false}
+              />
             ) : (
               <StagePlaceholder stage={stageMeta(activeStage)} />
             )}

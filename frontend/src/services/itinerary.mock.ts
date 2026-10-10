@@ -15,11 +15,16 @@ import type {
 } from "@/types";
 import {
   mockCurrentVersionByTripId,
+  mockCurrentVersion,
   mockExportPayload,
   mockFeedback,
   mockItineraryVersions,
 } from "@/mocks";
-import type { ApproveInput, ItineraryService } from "./itinerary.contract";
+import type {
+  ApproveInput,
+  ItineraryService,
+  ReviewInput,
+} from "./itinerary.contract";
 
 export class MockItineraryService implements ItineraryService {
   async getCurrent(tripId: string): Promise<ItineraryVersion | null> {
@@ -38,12 +43,22 @@ export class MockItineraryService implements ItineraryService {
     const feedback: Feedback = {
       id: crypto.randomUUID(),
       tripId: input.tripId,
-      version: input.version,
+      itineraryVersionId: input.itineraryVersionId,
+      memberId: input.memberId,
       target: input.target,
       comment: input.comment,
       status: mockFeedback.status,
     };
     return Promise.resolve(feedback);
+  }
+
+  async review(input: ReviewInput) {
+    const version = await this.getCurrent(input.tripId);
+    return {
+      version: version ?? mockCurrentVersion,
+      allReady: input.decision === "approve",
+      needsRefinement: false,
+    };
   }
 
   async approve(_input: ApproveInput): Promise<void> {
