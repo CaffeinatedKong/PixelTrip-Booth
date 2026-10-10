@@ -56,6 +56,7 @@ from app.agents.group_profile import compute_group_profile, format_party_for_pro
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import SummaryMessageContent, emit_npc_message
 from app.agents.nodes.discovery import _violates_hard_constraints
+from app.agents.progress import report_phase
 from app.agents.proposals import (
     DateRange,
     DestinationRef,
@@ -578,6 +579,7 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
         outbound = _parse_date(overlap[0]["start"]) if overlap else date.today()
 
     destination_title = _destination_title(destination_selection)
+    await report_phase(repos, state, "drafting_days")
     drafted_items = await _draft_days_with_llm(
         repos.llm,
         destination=destination_title,
@@ -596,6 +598,7 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
     proposal = ItineraryProposal(itinerary=itinerary, affected_scope={})
     state = state.with_proposal(proposal.model_dump(mode="json"))
 
+    await report_phase(repos, state, "posting")
     row, state = await persist_itinerary_version(
         state,
         repos,

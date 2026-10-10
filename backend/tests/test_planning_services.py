@@ -465,3 +465,44 @@ async def test_get_run_unknown_is_404(run_repos):
 
     with pytest.raises(RunNotFoundError):
         await run_service(run_repos).get_run(RUN_ID)
+
+
+async def test_latest_run_reports_its_phase_and_elapsed_time(run_repos):
+    run_repos.agent_run_repo.get_latest_for_trip.return_value = {
+        **pending_run(),
+        "status": "failed",
+        "run_type": "logistics",
+        "phase": "searching_flights",
+        "created_at": "2026-10-10T08:00:00+00:00",
+        "started_at": "2026-10-10T08:00:02+00:00",
+        "completed_at": "2026-10-10T08:00:14+00:00",
+    }
+
+    progress = await run_service(run_repos).get_latest_run(TRIP_ID, "logistics")
+
+    run_repos.agent_run_repo.get_latest_for_trip.assert_awaited_once_with(TRIP_ID, "logistics")
+    assert progress.model_dump(by_alias=True) == {
+        "id": pending_run()["id"],
+        "runType": "logistics",
+        "status": "failed",
+        "phase": "searching_flights",
+        "elapsedSeconds": 12,
+    }
+
+
+async def test_latest_run_is_none_before_any_run(run_repos):
+    run_repos.agent_run_repo.get_latest_for_trip.return_value = None
+
+    assert await run_service(run_repos).get_latest_run(TRIP_ID, None) is None
+
+
+async def test_report_phase_never_raises():
+    from app.agents.progress import report_phase
+
+    repos = SimpleNamespace(agent_run_repo=AsyncMock())
+    repos.agent_run_repo.set_phase.side_effect = RuntimeError("column missing")
+    state = SimpleNamespace(run_id="r1")
+
+    await report_phase(repos, state, "asking_guide")  # swallowed
+
+    repos.agent_run_repo.set_phase.assert_awaited_once_with("r1", "asking_guide")

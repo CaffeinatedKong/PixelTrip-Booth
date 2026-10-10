@@ -324,7 +324,9 @@ tied option), `503 DATABASE_ERROR`.
 - `runType`: `"discovery" | "logistics" | "itinerary" | "refinement" | "tiebreak"`
   (`tiebreak` normally starts by itself when a vote ties; see "Ties").
 - `idempotencyKey` (optional, 1–200 chars): send the same key on a retry to get the same
-  run back.
+  run back. The same key always returns that run, **even a failed one**, so a "Try
+  again" after a failure must send a new key (the frontend uses
+  `discovery-{tripId}-retry-{timestamp}`).
 
 `202` response: the run (see "AI Runs"), normally with `status: "pending"`. The AI works in
 the background, which can take a minute or more. If a run of this type is already in
@@ -343,6 +345,28 @@ fail this request; they show up as the run's `status: "failed"` with a safe `err
 ### `GET /runs/{runId}` — AI run status
 
 `200` response: the run. Errors: `404 RUN_NOT_FOUND`, `503 DATABASE_ERROR`.
+
+### `GET /trips/{tripId}/runs/latest` — what the guide is doing now
+
+Query: `runType` (optional): `discovery`, `logistics`, `itinerary`, `refinement` or
+`tiebreak`. Returns the trip's most recent run of that type, or `null` before any run:
+
+```json
+{ "id": "…", "runType": "logistics", "status": "running",
+  "phase": "searching_flights", "elapsedSeconds": 7 }
+```
+
+- `phase` is the real step the run is on, or the step it failed on:
+  `reading_party`, `asking_guide`, `searching_flights`, `checking_budget`,
+  `checking_answer`, `drafting_days`, `weighing_feedback`, `weighing_options`, `posting`
+  (`null` until the first step). The frontend maps these to in-world lines
+  (`frontend/src/features/party-lobby/lib/guidePhases.ts`).
+- Poll every ~2s while the guide is working (every ~6s once finished, to catch a
+  retry). `agent_runs` itself stays backend-only.
+- A `failed` run whose `phase` is `searching_flights` means the flight provider was
+  unavailable (e.g. out of monthly searches).
+
+Errors: `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
 
 ### `GET /trips/{tripId}/itinerary/versions` — list itinerary versions
 

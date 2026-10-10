@@ -149,6 +149,9 @@ async def test_a_hard_constraint_eliminating_every_candidate_escalates() -> None
         ],
     )
     client.queue("rpc:insert_message_turn", [{"id": "m1", "kind": "text"}])
+    # Two progress writes (asking/searching, then checking_budget) come first.
+    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
+    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
     client.queue("agent_runs", [{"id": RUN, "status": "running", "started_at": "T0"}])
     client.queue("agent_runs", [{"id": RUN, "status": "completed"}])
 

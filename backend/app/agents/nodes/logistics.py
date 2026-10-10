@@ -46,6 +46,7 @@ from app.agents.errors import DestinationNotSelectedError
 from app.agents.group_profile import compute_group_profile
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
+from app.agents.progress import report_phase
 from app.agents.proposals import FlightRecommendationProposal
 from app.agents.tools.base import FlightOption
 from app.agents.tools.flights import FlightSearchTool
@@ -365,8 +366,10 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
     }
 
     tool = FlightSearchTool()
+    await report_phase(repos, state, "searching_flights")
     response, state = await tool.invoke(state, **search_params)
 
+    await report_phase(repos, state, "checking_budget")
     survivors, eliminating_reason = _filter_and_rank(response.options, profile)
     if not survivors:
         await perform_human_escalation(
@@ -396,6 +399,7 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
         await _load_context(repair_state, repos)
         return _build_proposal(survivors)
 
+    await report_phase(repos, state, "checking_answer")
     loop_outcome = await run_guardrail_loop(
         state,
         repos,
@@ -412,6 +416,7 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
     proposal: FlightRecommendationProposal = loop_outcome.proposal
     state = state.with_proposal(proposal.model_dump(mode="json"))
 
+    await report_phase(repos, state, "posting")
     await _close_prior_vote_session(repos, context["room_id"])
     message = await emit_npc_message(
         repos,

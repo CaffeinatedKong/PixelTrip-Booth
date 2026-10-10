@@ -55,3 +55,22 @@ class AgentRunSchema(BaseModel):
             result_version_id=row.get("result_version_id"),
             error=row.get("error"),
         )
+
+
+class AgentRunProgressSchema(BaseModel):
+    """Progress of a trip's latest run, for the "guide is thinking" UI.
+
+    Separate from :class:`AgentRunSchema` (whose seven fields are fixed by
+    Requirement 4.6): it adds the run's current ``phase`` and how long it has been
+    going, and still exposes no internal column or timestamp.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, alias_generator=_to_camel)
+
+    id: str
+    run_type: Literal["discovery", "logistics", "itinerary", "refinement", "tiebreak"]
+    status: Literal["pending", "running", "completed", "failed"]
+    #: The step the run is on, or failed on (see ``app.agents.progress``).
+    phase: str | None = None
+    #: Seconds since the run started (or was created), rounded.
+    elapsed_seconds: int

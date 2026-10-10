@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from app.agents.errors import TripNotFoundError, UnresolvedMemberError
@@ -26,7 +27,7 @@ from app.agents.graph import run_agent_graph
 from app.agents.messages import emit_progress_message
 from app.agents.state import AgentState
 from app.exceptions import RunNotFoundError
-from app.schemas.agent_run import AgentRunSchema
+from app.schemas.agent_run import AgentRunProgressSchema, AgentRunSchema
 from app.services.agent_run_service import RUN_FAILED_ERROR, AgentRunService
 
 logger = logging.getLogger(__name__)
@@ -117,9 +118,39 @@ class RunEndpointService(AgentRunService):
             except Exception as mark_exc:
                 logger.error("Could not mark run %s failed: %s", run_id, type(mark_exc).__name__)
 
+    async def get_latest_run(
+        self, trip_id: str, run_type: str | None
+    ) -> AgentRunProgressSchema | None:
+        """The trip's most recent run (optionally of one type) and its step, or ``None``."""
+        if await self.trip_repo.get_by_id(trip_id) is None:
+            raise TripNotFoundError(trip_id)
+        run = await self.agent_run_repo.get_latest_for_trip(trip_id, run_type)
+        if run is None:
+            return None
+        started = _parse_time(run.get("started_at") or run.get("created_at"))
+        end = _parse_time(run.get("completed_at")) or datetime.now(UTC)
+        elapsed = max(0, round((end - started).total_seconds())) if started else 0
+        return AgentRunProgressSchema(
+            id=run["id"],
+            run_type=run["run_type"],
+            status=run["status"],
+            phase=run.get("phase"),
+            elapsed_seconds=elapsed,
+        )
+
     async def get_run(self, run_id: str) -> AgentRunSchema:
         """Return the run's current state."""
         run = await self.agent_run_repo.get_by_id(run_id)
         if run is None:
             raise RunNotFoundError("Run not found.")
         return AgentRunSchema.from_row(run)
+
+
+def _parse_time(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

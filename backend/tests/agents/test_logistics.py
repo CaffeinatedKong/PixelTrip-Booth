@@ -248,6 +248,9 @@ async def test_every_option_over_budget_escalates(monkeypatch: pytest.MonkeyPatc
         preferences=[preference_row(MEMBER_1, budget=100)],
     )
     client.queue("rpc:insert_message_turn", [{"id": "m1", "kind": "text"}])
+    # Two progress writes (asking/searching, then checking_budget) come first.
+    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
+    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
     client.queue("agent_runs", [{"id": RUN, "status": "running", "started_at": "T0"}])
     client.queue("agent_runs", [{"id": RUN, "status": "completed"}])
 
@@ -272,6 +275,9 @@ async def test_every_option_outside_dates_escalates(monkeypatch: pytest.MonkeyPa
         ],
     )
     client.queue("rpc:insert_message_turn", [{"id": "m1", "kind": "text"}])
+    # Two progress writes (asking/searching, then checking_budget) come first.
+    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
+    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
     client.queue("agent_runs", [{"id": RUN, "status": "running", "started_at": "T0"}])
     client.queue("agent_runs", [{"id": RUN, "status": "completed"}])
 

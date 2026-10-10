@@ -6,10 +6,10 @@ the party as chat messages and itinerary versions over Realtime; ``GET /runs/{ru
 reports the run's status.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from app.api.deps import (
     get_budget_service,
@@ -18,7 +18,7 @@ from app.api.deps import (
     get_refine_service,
     get_run_endpoint_service,
 )
-from app.schemas.agent_run import AgentRunSchema
+from app.schemas.agent_run import AgentRunProgressSchema, AgentRunSchema
 from app.schemas.errors import ErrorResponse
 from app.schemas.planning import (
     ItineraryVersionSchema,
@@ -77,6 +77,34 @@ async def start_run(
     if started.execute is not None:
         background_tasks.add_task(started.execute)
     return started.run
+
+
+@router.get(
+    "/trips/{trip_id}/runs/latest",
+    response_model=AgentRunProgressSchema | None,
+    summary="The trip's latest AI run and its step",
+    description="The most recent run for the trip (optionally of one `runType`), with "
+    "its `status` and `phase`, the step it is on or failed on (`reading_party`, "
+    "`asking_guide`, `searching_flights`, `checking_budget`, `checking_answer`, "
+    "`drafting_days`, `weighing_feedback`, `weighing_options`, `posting`). `null` when "
+    "the trip has no run yet. `elapsedSeconds` is how long it has been going. Poll it "
+    "every few seconds while the guide is working.",
+    responses={
+        200: {"description": "The run, or null"},
+        404: {"model": ErrorResponse, "description": "Trip not found"},
+        503: {"model": ErrorResponse, "description": "Database unavailable"},
+    },
+)
+async def get_latest_run(
+    trip_id: UUID,
+    service: RunServiceDep,
+    run_type: Annotated[
+        Literal["discovery", "logistics", "itinerary", "refinement", "tiebreak"] | None,
+        Query(alias="runType"),
+    ] = None,
+) -> AgentRunProgressSchema | None:
+    """Return the trip's latest AI run."""
+    return await service.get_latest_run(str(trip_id), run_type)
 
 
 @router.get(

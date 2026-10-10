@@ -205,6 +205,23 @@ class AgentRunRepository(BaseRepository):
             operation="mark_failed",
         )
 
+    async def set_phase(self, run_id: str, phase: str) -> dict[str, Any]:
+        """Record the step the run is on (see ``app.agents.progress``)."""
+        return await self._apply(run_id, {"phase": phase}, operation="set_phase")
+
+    async def get_latest_for_trip(
+        self, trip_id: str, run_type: str | None = None
+    ) -> dict[str, Any] | None:
+        """The trip's most recent run, optionally of one type."""
+        try:
+            query = self._client.table(_TABLE).select("*").eq("trip_id", trip_id)
+            if run_type is not None:
+                query = query.eq("run_type", run_type)
+            response = await query.order("created_at", desc=True).limit(1).execute()
+        except Exception as exc:
+            self._handle_error(exc, operation="get_latest_for_trip", table=_TABLE)
+        return self._first_row(response)
+
     async def update_base_version(self, run_id: str, base_version: int) -> dict[str, Any]:
         """Record the version a run actually worked from after a lost race.
 

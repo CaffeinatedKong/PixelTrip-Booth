@@ -53,6 +53,7 @@ from app.agents.party_brief import (
     wants_text,
 )
 from app.agents.preference_labels import TRIP_TYPES
+from app.agents.progress import report_phase
 from app.agents.prompts import render
 from app.agents.proposals import DestinationRecommendationProposal
 from app.core.budget import CURRENCY, TIER_LABELS, band_text
@@ -614,11 +615,13 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
         )
         return state
 
+    await report_phase(repos, state, "asking_guide")
     brief = build_party_brief(
         context["members"], context["preferences"], context["characters"],
         profile["availability_overlap"],
     )  # fmt: skip
     answer = await _ask_llm(brief, repos.llm)
+    await report_phase(repos, state, "checking_budget")
     candidates, cards = _choose_destinations(brief, answer, profile)
     survivors, eliminating_reason = _filter_candidates(candidates, profile)
     if not survivors:
@@ -648,6 +651,7 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
         fresh_survivors, _reason = _filter_candidates(candidates, fresh_profile)
         return _build_proposal(fresh_survivors or survivors, cards, brief)
 
+    await report_phase(repos, state, "checking_answer")
     loop_outcome = await run_guardrail_loop(
         state,
         repos,
@@ -664,6 +668,7 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
     proposal: DestinationRecommendationProposal = loop_outcome.proposal
     state = state.with_proposal(proposal.model_dump(mode="json"))
 
+    await report_phase(repos, state, "posting")
     await _close_prior_vote_session(repos, context["room_id"])
     message = await emit_npc_message(
         repos,

@@ -64,6 +64,7 @@ from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import SummaryMessageContent, TextMessageContent, emit_npc_message
 from app.agents.nodes.discovery import _violates_hard_constraints
 from app.agents.nodes.itinerary import persist_itinerary_version
+from app.agents.progress import report_phase
 from app.agents.proposals import ItineraryModel, RefinementProposal
 from app.services.trip_status_service import advance_trip_status
 
@@ -726,8 +727,10 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
     if not resolvable:
         return state
 
+    await report_phase(repos, state, "weighing_feedback")
     affected_scope = compute_affected_scope(resolvable, base_itinerary)
     conflicts = detect_conflicts(resolvable)
+    await report_phase(repos, state, "asking_guide")
     revisions = await draft_item_revisions(
         repos.llm,
         base_itinerary,
@@ -754,6 +757,7 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
     async def _applicable(latest_row: dict[str, Any]) -> bool:
         return await _is_still_applicable(repos, state, affected_scope, resolvable, latest_row)
 
+    await report_phase(repos, state, "posting")
     row, state = await persist_itinerary_version(
         state,
         repos,
