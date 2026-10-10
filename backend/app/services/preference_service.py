@@ -42,7 +42,12 @@ def _to_columns(request: SavePreferencesRequest) -> dict[str, Any]:
 
 
 class PreferenceService:
-    """Saves preferences and advances the trip once every member has submitted."""
+    """Saves preferences and advances the trip once every member has submitted.
+
+    Saving also marks the member "ready" on ``room_members`` (anon-readable, so every
+    client sees it live; ``travel_preferences`` stays backend-only), see
+    20261005000000_stage_readiness.sql.
+    """
 
     def __init__(
         self,
@@ -74,18 +79,27 @@ class PreferenceService:
         if member is None or member.get("room_id") != room["id"]:
             raise UnresolvedMemberError(member_id)
 
-        saved = await self._profile_repo.save_preferences(member_id, _to_columns(request))
+        # Mark the member ready BEFORE saving, and only while the room is in SETUP.
+        # Order matters when two members save at the same time: the stage change to
+        # DISCOVER (which clears everyone's ready flag) can only happen after this
+        # member's preferences exist, so it always lands after this mark and never
+        # leaves anyone "ready" in DISCOVER. A late joiner (room already past SETUP) is
+        # not marked: there, ready means "has voted".
+        in_setup = room.get("planning_stage", "setup") == "setup"
+        if in_setup:
+            await self._member_repo.set_stage_ready(member_id, True)
+        try:
+            saved = await self._profile_repo.save_preferences(member_id, _to_columns(request))
+        except Exception:
+            if in_setup:
+                await self._member_repo.set_stage_ready(member_id, False)
+            raise
         if request.character is not None:
             character = await self._profile_repo.save_character(
                 member_id, request.character.appearance, request.character.sprite_key
             )
         else:
             character = await self._profile_repo.get_character_by_member_id(member_id)
-
-        # Mirror this member's SETUP completion onto the anon-readable room_members row
-        # so every client sees "ready" live over Realtime (travel_preferences stays
-        # backend-only). See 20261005000000_stage_readiness.sql.
-        await self._member_repo.set_stage_ready(member_id, True)
 
         trip = await require_room_trip(self._trip_repo, room["id"])
         if await self._everyone_submitted(room["id"]):

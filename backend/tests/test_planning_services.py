@@ -506,3 +506,40 @@ async def test_report_phase_never_raises():
     await report_phase(repos, state, "asking_guide")  # swallowed
 
     repos.agent_run_repo.set_phase.assert_awaited_once_with("r1", "asking_guide")
+
+
+async def test_ready_is_marked_before_saving_so_a_concurrent_stage_change_clears_it(repos):
+    """Two members saving at once must not leave anyone 'ready' in DISCOVER."""
+    order: list[str] = []
+    repos.member_repo.set_stage_ready.side_effect = lambda *_: order.append("ready")
+    repos.profile_repo.save_preferences.side_effect = lambda *_: (
+        order.append("save") or {**prefs_row(M1, True)}
+    )
+    repos.profile_repo.list_preferences_by_member_ids.return_value = [prefs_row(M1, True)]
+
+    await preference_service(repos).save("ABC123", M1, SavePreferencesRequest())
+
+    assert order == ["ready", "save"]
+
+
+async def test_a_late_joiner_is_not_marked_ready(repos):
+    """Past SETUP, ready means 'has voted'; saving a character must not count as a vote."""
+    repos.room_repo.get_room_by_code.return_value = {**ROOM, "planning_stage": "discover"}
+    repos.profile_repo.list_preferences_by_member_ids.return_value = [prefs_row(M1, True)]
+
+    await preference_service(repos).save("ABC123", M1, SavePreferencesRequest())
+
+    repos.member_repo.set_stage_ready.assert_not_called()
+    repos.profile_repo.save_preferences.assert_awaited_once()
+
+
+async def test_a_failed_save_undoes_the_ready_mark(repos):
+    repos.profile_repo.save_preferences.side_effect = RuntimeError("db down")
+
+    with pytest.raises(RuntimeError):
+        await preference_service(repos).save("ABC123", M1, SavePreferencesRequest())
+
+    assert [c.args for c in repos.member_repo.set_stage_ready.await_args_list] == [
+        (M1, True),
+        (M1, False),
+    ]
