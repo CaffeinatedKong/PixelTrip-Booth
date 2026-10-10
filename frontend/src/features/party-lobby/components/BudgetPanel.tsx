@@ -76,7 +76,7 @@ export function BudgetPanel({ budget = null }: BudgetPanelProps): ReactElement {
       : null;
 
   return (
-    <PixelCard title="Budget">
+    <PixelCard title="BUDGET">
       <div className="font-body flex flex-col gap-8" data-testid="budget-panel">
         {budget.isHardLimit && budget.limit !== null ? (
           <p>
