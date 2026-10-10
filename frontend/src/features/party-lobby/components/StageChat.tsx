@@ -11,7 +11,7 @@
  */
 import type { ReactElement, ReactNode } from "react";
 
-import { CharacterSprite } from "@/components/CharacterSprite";
+import { GuidePortrait } from "@/components/GuidePortrait";
 
 const GUIDE_NAME = "MILO";
 
@@ -22,11 +22,8 @@ export function StageChat({ children }: { children: ReactNode }): ReactElement {
 
 function GuideAvatar(): ReactElement {
   return (
-    <span
-      aria-hidden
-      className="shrink-0 border-2 border-accent bg-bg-alt p-8"
-    >
-      <CharacterSprite spriteKey="guide" label="Guide" size="sm" decorative />
+    <span aria-hidden className="shrink-0 border-2 border-accent bg-bg-alt">
+      <GuidePortrait scale={2} />
     </span>
   );
 }
