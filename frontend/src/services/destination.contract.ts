@@ -71,6 +71,9 @@ export interface TiebreakAdvice {
   recommendedOptionId: string | null;
   /** The tied options, scored. */
   options: readonly TiebreakOption[];
+  /** True while the guide's advice is still being written: the options come from
+   * the vote (no scores yet) and the leader may already choose. */
+  pending?: boolean;
 }
 
 /** A snapshot of the DISCOVER stage for a room. */
@@ -87,11 +90,15 @@ export interface DiscoverState {
   tiePending: boolean;
   /** The AI's tiebreak advice, or null when there is no pending tie. */
   tiebreak: TiebreakAdvice | null;
+  /** The guide's latest plain-text message (e.g. a question it needs answered). */
+  guideNote?: string | null;
 }
 
 export interface StartDiscoveryInput {
   tripId: string;
   memberId: string;
+  /** Start a fresh run even if an earlier one (e.g. a failed one) exists. */
+  retry?: boolean;
 }
 
 export interface CastDestinationVoteInput {

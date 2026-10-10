@@ -18,6 +18,9 @@ import type { ItineraryService } from "./itinerary.contract";
 import type { PreferencesService } from "./preferences.contract";
 import type { DestinationService } from "./destination.contract";
 import type { BudgetService } from "./budget.contract";
+import type { FlightService } from "./flight.contract";
+import type { RunService } from "./run.contract";
+import type { SelectionService } from "./selection.contract";
 
 import { ConfigError } from "@/lib/errors";
 
@@ -48,6 +51,9 @@ export interface ServiceRegistry {
   preferences: PreferencesService;
   destination: DestinationService;
   budget: BudgetService;
+  flight: FlightService;
+  run: RunService;
+  selection: SelectionService;
 }
 
 /** Re-exported so callers keep importing it from the service selector. */

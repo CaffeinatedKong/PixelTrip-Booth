@@ -20,6 +20,9 @@ import { itineraryApiService } from "./itinerary.api";
 import { preferencesApiService } from "./preferences.api";
 import { destinationApiService } from "./destination.api";
 import { budgetApiService } from "./budget.api";
+import { flightApiService } from "./flight.api";
+import { runApiService } from "./run.api";
+import { selectionApiService } from "./selection.api";
 
 export function buildRealRegistry(): ServiceRegistry {
   return {
@@ -31,5 +34,8 @@ export function buildRealRegistry(): ServiceRegistry {
     preferences: preferencesApiService,
     destination: destinationApiService,
     budget: budgetApiService,
+    flight: flightApiService,
+    run: runApiService,
+    selection: selectionApiService,
   };
 }

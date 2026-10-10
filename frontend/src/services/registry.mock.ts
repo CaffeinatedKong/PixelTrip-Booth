@@ -17,6 +17,9 @@ import { MockItineraryService } from "./itinerary.mock";
 import { MockPreferencesService } from "./preferences.mock";
 import { MockDestinationService } from "./destination.mock";
 import { MockBudgetService } from "./budget.mock";
+import { MockFlightService } from "./flight.mock";
+import { MockRunService } from "./run.mock";
+import { MockSelectionService } from "./selection.mock";
 
 export function buildMockRegistry(): ServiceRegistry {
   return {
@@ -28,5 +31,8 @@ export function buildMockRegistry(): ServiceRegistry {
     preferences: new MockPreferencesService(),
     destination: new MockDestinationService(),
     budget: new MockBudgetService(),
+    flight: new MockFlightService(),
+    run: new MockRunService(),
+    selection: new MockSelectionService(),
   };
 }
