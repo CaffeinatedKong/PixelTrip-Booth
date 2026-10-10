@@ -11,6 +11,9 @@ from app.agents.errors import LLMGenerationError, NoItineraryToRefineError
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, LLMClient
 from app.agents.nodes.negotiation import (
     _apply_outcome,
+    _classify_outcome,
+    _FeedbackIntent,
+    _FeedbackIntentBatch,
     _ItemRevision,
     _RevisionBatch,
     compute_affected_scope,
@@ -584,10 +587,48 @@ def revision(item_id: str, title: str, **fields: Any) -> _ItemRevision:
 
 
 def llm_double(*results: Any) -> AsyncMock:
-    """A ``LLMClient`` double returning (or raising) each of ``results`` in turn."""
+    """A ``LLMClient`` double returning (or raising) each of ``results`` in turn.
+
+    Refinement first asks the model what each feedback means (``refinement_intent``).
+    The double answers that call by itself, the way a sensible model would: with the
+    same keyword reading the node falls back to, so an "edit" stays an edit. Every
+    other call (the revisions the tests are about) takes the next of ``results``.
+    """
     llm = AsyncMock(spec=LLMClient)
-    llm.generate_structured.side_effect = list(results)
+    queue = list(results)
+
+    async def answer(**kwargs: Any) -> Any:
+        if kwargs["response_model"] is _FeedbackIntentBatch:
+            return _intents_for(kwargs["user_prompt"])
+        result = queue.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    llm.generate_structured.side_effect = answer
     return llm
+
+
+def _intents_for(user_prompt: str) -> _FeedbackIntentBatch:
+    intents = []
+    for block in user_prompt.split("\n\n"):
+        fields = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)
+        intents.append(
+            _FeedbackIntent(
+                feedback_id=fields["feedback_id"],
+                outcome=_classify_outcome(fields.get("feedback", "")),
+            )
+        )
+    return _FeedbackIntentBatch(intents=intents)
+
+
+def revision_calls(llm: AsyncMock) -> list[Any]:
+    """The model calls that revise items (everything but the intent reading)."""
+    return [
+        call
+        for call in llm.generate_structured.await_args_list
+        if call.kwargs["operation"] != "refinement_intent"
+    ]
 
 
 def batch(*revisions: _ItemRevision) -> _RevisionBatch:
@@ -653,18 +694,27 @@ async def test_an_edit_is_rewritten_by_the_llm_and_only_that_item_changes() -> N
     assert new["days"][1] == base["days"][1]
     mark_call = next(c for c in client.calls_for("feedback") if c.op == "update")
     assert "f1" in mark_call.filters[0][2]
-    llm.generate_structured.assert_awaited_once()
+    assert len(revision_calls(llm)) == 1
 
 
-async def test_an_llm_failure_falls_back_to_the_note_edit() -> None:
-    """A Gemini outage or missing key must never break the REFINE stage."""
+async def test_a_failed_revision_falls_back_to_the_note_edit() -> None:
+    """A Gemini outage mid-run must never break the REFINE stage: when the request was
+    understood but the rewrite failed, the feedback is kept on the item as a note."""
     feedback = [feedback_row("f1", {"itemId": "d1-i2"}, EDIT_COMMENT)]
-    baseline, _ = await refine(feedback, None)
     failed, client = await refine(feedback, llm_double(LLMGenerationError("itinerary_revision")))
 
-    assert failed == baseline
     assert f"(Updated per feedback: {EDIT_COMMENT})" in item(failed, "d1-i2")["description"]
     assert any(c.op == "update" for c in client.calls_for("feedback"))  # still addressed
+
+
+async def test_without_any_llm_an_unclear_edit_is_left_alone() -> None:
+    """With no model to read the request, an ambiguous edit must not silently rewrite
+    an activity: the item stays exactly as it was."""
+    feedback = [feedback_row("f1", {"itemId": "d1-i2"}, EDIT_COMMENT)]
+
+    unchanged, _ = await refine(feedback, None)
+
+    assert item(unchanged, "d1-i2") == item(base_itinerary(), "d1-i2")
 
 
 async def test_an_unexpected_llm_error_also_falls_back() -> None:
@@ -714,7 +764,7 @@ async def test_blank_fields_in_a_revision_keep_the_original_values() -> None:
     assert edited["time"] == "12:00"  # untouched by the model
 
 
-async def test_removal_and_retention_never_call_the_llm() -> None:
+async def test_removal_and_retention_never_ask_the_llm_for_a_revision() -> None:
     llm = llm_double()
 
     await refine(
@@ -725,15 +775,21 @@ async def test_removal_and_retention_never_call_the_llm() -> None:
         llm,
     )
 
-    llm.generate_structured.assert_not_called()
+    assert revision_calls(llm) == []
 
 
-async def test_a_day_only_target_is_not_sent_to_the_llm() -> None:
-    llm = llm_double()
+async def test_day_level_feedback_revises_that_days_items_only() -> None:
+    """Feedback on a whole day is sent for revision with every item of that day."""
+    llm = llm_double(batch(revision("d2-i1", "Evening museum", time="18:00")))
 
-    await refine([feedback_row("f1", {"day": 2}, EDIT_COMMENT)], llm)
+    new, _ = await refine([feedback_row("f1", {"day": 2}, EDIT_COMMENT)], llm)
 
-    llm.generate_structured.assert_not_called()
+    assert len(revision_calls(llm)) == 1
+    prompt = revision_calls(llm)[0].kwargs["user_prompt"]
+    assert "item_id: d2-i1" in prompt and "item_id: d2-i2" in prompt
+    assert "item_id: d1-" not in prompt  # other days are never offered for rewriting
+    assert item(new, "d2-i1")["title"] == "Evening museum"
+    assert new["days"][0] == base_itinerary()["days"][0]
 
 
 async def test_every_edited_item_is_revised_in_one_call() -> None:
@@ -747,7 +803,7 @@ async def test_every_edited_item_is_revised_in_one_call() -> None:
         llm,
     )
 
-    assert llm.generate_structured.await_count == 1
+    assert len(revision_calls(llm)) == 1
     assert item(new, "d1-i1")["title"] == "Late arrival"
     assert item(new, "d2-i1")["title"] == "Garden walk"
 
@@ -763,7 +819,7 @@ async def test_only_the_winning_side_of_a_conflict_reaches_the_llm() -> None:
         llm,
     )
 
-    user_prompt = llm.generate_structured.await_args.kwargs["user_prompt"]
+    user_prompt = revision_calls(llm)[-1].kwargs["user_prompt"]
     assert "much later in the day" in user_prompt  # oldest row wins
     assert "cooking class" not in user_prompt
 
@@ -778,7 +834,7 @@ async def test_the_prompt_carries_the_guard_and_treats_feedback_as_data() -> Non
         hard_constraints=["no nightclubs"],
     )
 
-    kwargs = llm.generate_structured.await_args.kwargs
+    kwargs = revision_calls(llm)[-1].kwargs
     assert UNTRUSTED_INPUT_GUARD in kwargs["system_prompt"]
     assert "no nightclubs" in kwargs["system_prompt"]
     assert kwargs["operation"] == "itinerary_revision"
