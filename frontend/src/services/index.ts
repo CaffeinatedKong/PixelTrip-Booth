@@ -21,6 +21,7 @@ import type { BudgetService } from "./budget.contract";
 import type { FlightService } from "./flight.contract";
 import type { RunService } from "./run.contract";
 import type { SelectionService } from "./selection.contract";
+import type { TripDatesService } from "./tripDates.contract";
 
 import { ConfigError } from "@/lib/errors";
 
@@ -54,6 +55,7 @@ export interface ServiceRegistry {
   flight: FlightService;
   run: RunService;
   selection: SelectionService;
+  tripDates: TripDatesService;
 }
 
 /** Re-exported so callers keep importing it from the service selector. */

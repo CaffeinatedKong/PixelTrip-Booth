@@ -80,6 +80,14 @@ class InvalidDisplayNameError(ValidationError):
     """A display name was empty, whitespace-only, or over the length limit."""
 
 
+class TripDatesLockedError(ConflictError):
+    """The trip's dates can no longer change (the flight is already locked)."""
+
+
+class InvalidTripDatesError(ValidationError):
+    """The requested trip length or dates do not fit when the party is free."""
+
+
 class InvalidBudgetError(ValidationError):
     """A typed trip budget is outside the accepted range (see ``app.core.budget``)."""
 

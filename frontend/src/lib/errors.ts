@@ -32,6 +32,10 @@ export type ApiErrorCode =
   | "INVALID_DISPLAY_NAME"
   /** Budget outside SGD 100–50,000; the message is safe to show next to the field. */
   | "INVALID_BUDGET"
+  /** Trip length or dates do not fit when the party is free; safe to show. */
+  | "INVALID_TRIP_DATES"
+  /** The dates cannot change now (flight locked or a search running); safe to show. */
+  | "TRIP_DATES_LOCKED"
   | "ROOM_CODE_EXHAUSTED"
   | "INTERNAL_ERROR"
   | "DATABASE_ERROR"

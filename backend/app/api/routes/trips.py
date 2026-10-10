@@ -17,10 +17,12 @@ from app.api.deps import (
     get_itinerary_service,
     get_refine_service,
     get_run_endpoint_service,
+    get_trip_dates_service,
 )
 from app.schemas.agent_run import AgentRunProgressSchema, AgentRunSchema
 from app.schemas.errors import ErrorResponse
 from app.schemas.planning import (
+    ChangeTripDatesRequest,
     ItineraryVersionSchema,
     ReviewItineraryRequest,
     ReviewItineraryResponse,
@@ -28,6 +30,7 @@ from app.schemas.planning import (
     SubmitFeedbackRequest,
     SubmitFeedbackResponse,
     TripBudgetResponse,
+    TripDatesResponse,
     TripExportResponse,
     VersionDecisionRequest,
     VersionDecisionResponse,
@@ -37,6 +40,7 @@ from app.services.export_service import ExportService
 from app.services.itinerary_service import ItineraryService
 from app.services.refine_service import RefineService
 from app.services.run_endpoint_service import RunEndpointService
+from app.services.trip_dates_service import TripDatesService
 
 router = APIRouter(tags=["ai-runs"])
 
@@ -284,3 +288,48 @@ BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
 async def get_trip_budget(trip_id: UUID, service: BudgetServiceDep) -> TripBudgetResponse:
     """The trip's budget readout."""
     return await service.get(str(trip_id))
+
+
+# --- Trip dates (sidebar card + change dialog) -------------------------------------------
+
+TripDatesServiceDep = Annotated[TripDatesService, Depends(get_trip_dates_service)]
+
+
+@router.get(
+    "/trips/{trip_id}/trip-dates",
+    response_model=TripDatesResponse,
+    summary="The trip's length and dates",
+    description="The chosen destination's trip plan, when the whole party is free, the "
+    "allowed length, and whether the dates can still be changed.",
+    responses={
+        200: {"description": "The trip dates"},
+        404: {"model": ErrorResponse, "description": "Trip not found"},
+        503: {"model": ErrorResponse, "description": "Database unavailable"},
+    },
+)
+async def get_trip_dates(trip_id: UUID, service: TripDatesServiceDep) -> TripDatesResponse:
+    """The trip's dates and what they may be changed to."""
+    return await service.get(str(trip_id))
+
+
+@router.put(
+    "/trips/{trip_id}/trip-dates",
+    response_model=TripDatesResponse,
+    summary="Change the trip's length and dates (owner only)",
+    description="The party leader sets how long the trip is and when it starts. The dates "
+    "must fit inside when the whole party is free. Any open flight vote is closed, because "
+    "its flights were for the old dates: start a new `logistics` run afterwards. Not "
+    "allowed once a flight is locked.",
+    responses={
+        200: {"description": "The new trip dates"},
+        404: {"model": ErrorResponse, "description": "Trip or destination not found"},
+        409: {"model": ErrorResponse, "description": "A flight is already locked"},
+        422: {"model": ErrorResponse, "description": "Not the owner, or dates do not fit"},
+        503: {"model": ErrorResponse, "description": "Database unavailable"},
+    },
+)
+async def change_trip_dates(
+    trip_id: UUID, body: ChangeTripDatesRequest, service: TripDatesServiceDep
+) -> TripDatesResponse:
+    """Set the trip's dates (party leader only)."""
+    return await service.change(str(trip_id), body)

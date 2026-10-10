@@ -20,6 +20,7 @@ import { MockBudgetService } from "./budget.mock";
 import { MockFlightService } from "./flight.mock";
 import { MockRunService } from "./run.mock";
 import { MockSelectionService } from "./selection.mock";
+import { MockTripDatesService } from "./tripDates.mock";
 
 export function buildMockRegistry(): ServiceRegistry {
   return {
@@ -34,5 +35,6 @@ export function buildMockRegistry(): ServiceRegistry {
     flight: new MockFlightService(),
     run: new MockRunService(),
     selection: new MockSelectionService(),
+    tripDates: new MockTripDatesService(),
   };
 }

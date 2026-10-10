@@ -395,3 +395,35 @@ class TripBudgetResponse(_Base):
     remaining: float | None = Field(description="limit - estimates.total, when both known.")
     is_over_budget: bool
     members: list[BudgetMember]
+
+
+# --- Trip dates (sidebar card + change dialog) ---------------------------------------
+
+
+class TripDatesResponse(_Base):
+    """The trip's own length and dates, and what the leader may change them to."""
+
+    destination: str | None = Field(description="The chosen destination, if any.")
+    trip_days: int | None
+    trip_start: date | None
+    trip_end: date | None
+    why_this_long: str | None
+    windows: list[DateRange] = Field(
+        description="When the whole party is free; the trip must fit inside one of these."
+    )
+    min_days: int
+    max_days: int
+    daily_cost_sgd: float | None = Field(
+        description="The destination's estimated daily cost, for a stay-cost preview."
+    )
+    budget_limit: float | None = Field(description="The party's hard budget limit, if any.")
+    can_change: bool
+    locked_reason: str | None = Field(
+        description="Why the dates cannot change right now, when can_change is false."
+    )
+
+
+class ChangeTripDatesRequest(_Base):
+    member_id: UUID = Field(description="Must be the room owner (the party leader).")
+    days: int = Field(ge=1, le=30, examples=[4])
+    start: date = Field(examples=["2026-10-16"])

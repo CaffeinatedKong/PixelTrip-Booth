@@ -3,8 +3,8 @@
 /**
  * AdventureSidebar — the persistent "YOUR ADVENTURE" right-panel host.
  *
- * Composes the sidebar panels in order: party panel, destination + flight
- * placeholders, budget (shown as not-yet-set until confirmed), and the six-stage
+ * Composes the sidebar panels in order: party panel, destination, trip dates (the
+ * leader can change them until a flight is locked), flight, budget (shown as not-yet-set until confirmed), and the six-stage
  * quest progress. (Trip header + dates are omitted until the trip is confirmed.)
  * Presentational only: the view model arrives via `adventure` and the optional
  * `roomSession` prop supplies the live room code and planning stage. It performs
@@ -32,6 +32,8 @@ import { SidebarPartyPanel } from "./SidebarPartyPanel";
 import { SidebarPlaceholderPanel } from "./SidebarPlaceholderPanel";
 import { BudgetPanel } from "./BudgetPanel";
 import { useTripBudget } from "../hooks/useTripBudget";
+import { useTripDates } from "../hooks/useTripDates";
+import { TripDatesPanel } from "./TripDatesPanel";
 import { AdventureProgress } from "./AdventureProgress";
 
 export interface AdventureSidebarProps {
@@ -53,6 +55,7 @@ export function AdventureSidebar({
 }: AdventureSidebarProps): ReactElement {
   const drawer = useAdventureDrawer();
   const budget = useTripBudget(roomSession?.room.id);
+  const tripDates = useTripDates(roomSession?.room.id);
 
   const roomCode = roomSession?.room.roomCode ?? null;
   const stage = roomSession?.room.planningStage ?? "setup";
@@ -103,6 +106,12 @@ export function AdventureSidebar({
           title="DESTINATION"
           emptyLabel="Not selected"
           value={selectedDestination?.title}
+        />
+        <TripDatesPanel
+          dates={tripDates}
+          roomId={roomSession?.room.id}
+          memberId={roomSession?.member.id}
+          isOwner={roomSession?.member.role === "owner"}
         />
         <SidebarPlaceholderPanel
           title="FLIGHT"

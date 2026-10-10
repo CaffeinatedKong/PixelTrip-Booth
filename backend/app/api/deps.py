@@ -54,6 +54,7 @@ from app.services.preference_service import PreferenceService
 from app.services.refine_service import RefineService
 from app.services.room_service import RoomService
 from app.services.run_endpoint_service import RunEndpointService
+from app.services.trip_dates_service import TripDatesService
 from app.services.voting_endpoint_service import VotingEndpointService
 
 
@@ -277,6 +278,11 @@ def get_itinerary_service(repos: Repos) -> ItineraryService:
 def get_refine_service(repos: Repos) -> RefineService:
     """Provide the :class:`RefineService` (feedback and approve/reject)."""
     return RefineService(repos)
+
+
+def get_trip_dates_service(repos: Repos) -> TripDatesService:
+    """Provide the :class:`TripDatesService`."""
+    return TripDatesService(repos)
 
 
 def get_budget_service(repos: Repos) -> BudgetService:

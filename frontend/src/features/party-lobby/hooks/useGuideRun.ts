@@ -17,6 +17,8 @@ const IDLE_MS = 6000;
 
 export interface GuideRun {
   run: RunProgress | null;
+  /** True once the first read has answered, so `run: null` means "no run yet". */
+  loaded: boolean;
   refresh: () => void;
 }
 
@@ -26,6 +28,7 @@ export function useGuideRun(
   active: boolean,
 ): GuideRun {
   const [run, setRun] = useState<RunProgress | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
@@ -38,7 +41,10 @@ export function useGuideRun(
       let next: RunProgress | null = null;
       try {
         next = await getServices().run.getLatestRun(roomId, runType);
-        if (!cancelled) setRun(next);
+        if (!cancelled) {
+          setRun(next);
+          setLoaded(true);
+        }
       } catch {
         // Keep the last known run; try again on the next tick.
       }
@@ -55,5 +61,5 @@ export function useGuideRun(
     };
   }, [roomId, runType, active, tick]);
 
-  return { run, refresh };
+  return { run, loaded, refresh };
 }

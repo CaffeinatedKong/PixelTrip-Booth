@@ -454,7 +454,8 @@ does this from Realtime changes on `room_members`, `selections` and `itinerary_v
 }
 ```
 
-- `days`: from the locked flight's dates, else the longest stretch of shared dates.
+- `days`: the trip's own length, from the locked flight's dates, else the chosen
+  destination's `tripDays`. `null` until a destination is chosen (so is `levelEstimate`).
 - `isHardLimit` / `limit` / `limitSetBy`: the lowest typed amount and who typed it. When
   nobody typed one, `isHardLimit` is `false`, `limit` and `remaining` are `null`, and the
   level is a guide only.
@@ -468,11 +469,65 @@ does this from Realtime changes on `room_members`, `selections` and `itinerary_v
 - `remaining` = `limit − estimates.total`; `isOverBudget` when it is negative.
 
 How the stages use the budget: DISCOVER drops suggestions whose stay alone exceeds the
-hard limit (or labels them in `tradeOff` when only a level is set); LOGISTICS drops flights
-above what the limit leaves after the stay; BUILD checks costed activities against what
+hard limit (or labels them in `tradeOff` when only a level is set); LOGISTICS searches on
+the trip's dates and drops flights above what the limit leaves after the stay, but if that
+leaves none it still shows the cheapest ones, tagged "Over budget" with how far over in
+`tradeOff`, so the party can always move on; BUILD checks costed activities against what
 is left after the flight and the stay. A missing estimate never excludes anything.
 
 Errors: `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
+
+### `GET /trips/{tripId}/trip-dates` — the trip's dates (sidebar card)
+
+The trip's own length and dates (not the party's availability), plus what they may be
+changed to. Re-fetch on Realtime changes to the room's `selections`.
+
+```json
+{
+  "destination": "Penang, Malaysia",
+  "tripDays": 4,
+  "tripStart": "2026-10-15",
+  "tripEnd": "2026-10-18",
+  "whyThisLong": "Four days covers George Town and the hill.",
+  "windows": [{ "start": "2026-10-12", "end": "2026-11-10" }],
+  "minDays": 2,
+  "maxDays": 14,
+  "dailyCostSgd": 32,
+  "budgetLimit": 1200,
+  "canChange": true,
+  "lockedReason": null
+}
+```
+
+- `tripDays` / `tripStart` / `tripEnd` / `whyThisLong` are `null` until a destination is
+  chosen. `whyThisLong` is `"Set by the party leader."` after a change.
+- `windows`: the date ranges when the whole party is free; the trip must sit inside one.
+- `minDays` / `maxDays`: 2–14, capped by the longest window.
+- `dailyCostSgd` / `budgetLimit`: for previewing the stay cost against the hard limit;
+  either may be `null`.
+- `canChange` is `false` before a destination is chosen and after a flight is locked;
+  `lockedReason` then says why. Only the room owner may change (the UI checks the role).
+
+Errors: `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
+
+### `PUT /trips/{tripId}/trip-dates` — change the trip's dates (owner only)
+
+```json
+{ "memberId": "…", "days": 6, "start": "2026-10-20" }
+```
+
+Returns the same body as the `GET`. The end date is `start + days − 1`. On success the
+destination selection carries the new plan, any open flight vote is closed (its flights
+were for the old dates) and every member's `stageReady` is reset, and the guide posts a
+note. The caller then starts a fresh `logistics` run (a new idempotency key) to search
+flights for the new dates. A flight vote that is `closed` with no flight selection means
+"dates changed, search again": the frontend hides those flights.
+
+Errors: `422 MEMBER_NOT_RESOLVED` (not the owner), `404 NOT_FOUND` (no destination chosen yet),
+`422 INVALID_TRIP_DATES` (length outside `minDays`–`maxDays`, start in the past, or
+outside every window; the message is safe to show), `409 TRIP_DATES_LOCKED` (flight
+already locked, or a flight search is running; the message is safe to show),
+`404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
 
 ### `POST /trips/{tripId}/export` — the final, shareable trip (WRAP)
 
@@ -564,9 +619,11 @@ Branch on `code`, not `message`. `message` is safe to log; it is not tuned for d
 | 409 | `DUPLICATE_APPROVAL` | Another version of this trip is already approved. |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | Key already used for a different trip or run type. |
 | 409 | `MEMBER_ALREADY_EXISTS` | Name taken in a race; retry the join. |
+| 409 | `TRIP_DATES_LOCKED` | The dates cannot change now (flight locked, or a flight search is running). The message is safe to show. |
 | 422 | `VALIDATION_ERROR` | Bad body or path; `message` names the fields. |
 | 422 | `INVALID_DISPLAY_NAME` | Display name is blank. |
 | 422 | `INVALID_BUDGET` | Budget is outside SGD 100–50,000. The message is safe to show the member. |
+| 422 | `INVALID_TRIP_DATES` | Trip length or dates do not fit when the party is free. The message is safe to show. |
 | 422 | `MEMBER_NOT_RESOLVED` | `memberId` is not a member of this room (or not the owner, when closing a vote). |
 | 422 | `VOTE_SESSION_CLOSED` | The vote has already closed. |
 | 422 | `VOTE_TIE_PENDING` | The vote is tied; the room owner must pick the winner (`break-tie`). |
@@ -634,6 +691,17 @@ never become cards. Destination `meta` also carries:
 | `bestFor` | string[] | Display names of the members it suits best (may be empty) |
 | `estimatedDailyCostSgd` | number \| null | Rough cost per person per day in SGD for stay, food and local transport (no flights, no paid activities) |
 | `scoreBreakdown` | object \| null | `{ preferences, budget, season, tripLength }`, each 0–10 |
+| `tripDays` | number \| null | How long this trip is: the AI's suggested length for this place, checked by the backend |
+| `tripStart` / `tripEnd` | ISO date \| null | The trip's dates, inside when the whole party is free |
+| `whyThisLong` | string \| null | Why that length (and a note if it was shortened) |
+
+**Trip length.** Members' dates say when they are *free*, not how long the trip is. The
+AI suggests a length per destination; the backend keeps it within 2–14 days and within the
+days the party is free, shortens it if the stay would use more than 60% of a hard budget,
+and picks dates that cover the most weekend days (earliest first on a tie; a trip can
+start as soon as tomorrow). The vote is on the destination *with* its trip plan; the
+locked selection keeps `tripDays` / `tripStart` / `tripEnd`, and the flight search, budget
+and itinerary all use them. Cards without a plan get a default 5-day trip.
 
 `score` is computed by the backend from `scoreBreakdown`: 10 × (0.4 × preferences + 0.2 ×
 budget + 0.2 × season + 0.2 × tripLength). Suggestions whose cost for the trip clearly

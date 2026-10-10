@@ -29,6 +29,7 @@ from app.exceptions import (
     ConflictError,
     InvalidBudgetError,
     InvalidDisplayNameError,
+    InvalidTripDatesError,
     ItineraryVersionNotFoundError,
     MemberAlreadyExistsError,
     NotFoundError,
@@ -36,6 +37,7 @@ from app.exceptions import (
     RoomCodeExhaustedError,
     RoomNotFoundError,
     RunNotFoundError,
+    TripDatesLockedError,
     ValidationError,
     VersionNotProposedError,
     VoteSessionNotFoundError,
@@ -96,6 +98,8 @@ ERROR_CODES: dict[type[BackendError], tuple[int, str]] = {
     MemberAlreadyExistsError: (409, "MEMBER_ALREADY_EXISTS"),
     InvalidDisplayNameError: (422, "INVALID_DISPLAY_NAME"),
     InvalidBudgetError: (422, "INVALID_BUDGET"),
+    InvalidTripDatesError: (422, "INVALID_TRIP_DATES"),
+    TripDatesLockedError: (409, "TRIP_DATES_LOCKED"),
 }
 
 #: Exceptions whose own message must never reach the client. For these the
