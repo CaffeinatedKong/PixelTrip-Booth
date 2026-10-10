@@ -12,7 +12,6 @@ LangGraph/AI configuration is included by design.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
@@ -21,6 +20,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ConfigError(RuntimeError):
     """Raised when required configuration is missing or invalid at startup."""
+
+
+#: Flight providers ``FLIGHT_PROVIDER`` may list.
+FLIGHT_PROVIDERS: tuple[str, ...] = ("generic", "skyscanner_rapidapi", "booking_rapidapi")
 
 
 class Settings(BaseSettings):
@@ -62,11 +65,18 @@ class Settings(BaseSettings):
 
     # --- External_Tool configuration (spec 03, Requirement 19.4) ---
     external_tool_timeout_seconds: int = Field(default=10, ge=1, le=60)
+    # One provider, or several tried in order (comma-separated), e.g.
+    # "booking_rapidapi,skyscanner_rapidapi". A provider that is out of quota (HTTP 429)
+    # or not subscribed (403) is skipped until it resets.
     # "generic": GET flight_api_url returning {"options": [...]} directly.
-    # "skyscanner_rapidapi": the Sky Scrapper listing on RapidAPI; flight_api_key is the
-    # RapidAPI key and flight_api_url defaults to https://sky-scrapper.p.rapidapi.com.
-    flight_provider: Literal["generic", "skyscanner_rapidapi"] = Field(default="generic")
+    # "skyscanner_rapidapi": the Sky Scrapper listing on RapidAPI; flight_api_url
+    #   defaults to https://sky-scrapper.p.rapidapi.com.
+    # "booking_rapidapi": the Booking COM listing on RapidAPI; booking_flight_api_url
+    #   defaults to https://booking-com15.p.rapidapi.com.
+    # flight_api_key is the RapidAPI key (one key covers every subscribed RapidAPI API).
+    flight_provider: str = Field(default="generic")
     flight_api_url: str = Field(default="")
+    booking_flight_api_url: str = Field(default="")
     flight_api_key: str = Field(default="", repr=False)
     flight_currency: str = Field(default="SGD", min_length=3, max_length=3)
     flight_market: str = Field(default="en-US")
@@ -108,6 +118,22 @@ class Settings(BaseSettings):
         if not v.strip():
             raise ValueError("SUPABASE_SERVICE_ROLE_KEY must not be empty")
         return v
+
+    @field_validator("flight_provider")
+    @classmethod
+    def _validate_flight_provider(cls, v: str) -> str:
+        names = [n.strip() for n in v.split(",") if n.strip()]
+        unknown = [n for n in names if n not in FLIGHT_PROVIDERS]
+        if not names or unknown:
+            raise ValueError(
+                f"FLIGHT_PROVIDER must list one or more of {', '.join(FLIGHT_PROVIDERS)}"
+            )
+        return ",".join(names)
+
+    @property
+    def flight_provider_chain(self) -> tuple[str, ...]:
+        """The flight providers to try, in order, de-duplicated."""
+        return tuple(dict.fromkeys(n for n in self.flight_provider.split(",") if n))
 
     @property
     def llm_model_chain(self) -> tuple[str, ...]:

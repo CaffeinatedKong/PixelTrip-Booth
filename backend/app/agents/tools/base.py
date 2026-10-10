@@ -211,7 +211,7 @@ class ExternalTool:
             try:
                 raw = await asyncio.wait_for(
                     self._call(**params),
-                    timeout=self._settings.external_tool_timeout_seconds,
+                    timeout=self._call_timeout_seconds(),
                 )
             except TRANSPORT_ERRORS:
                 if attempt == MAX_ATTEMPTS - 1:
@@ -238,6 +238,11 @@ class ExternalTool:
         # future refactor that breaks that invariant fails loudly instead of
         # returning ``None``.
         raise ExternalToolUnavailableError(self.name)  # pragma: no cover
+
+    def _call_timeout_seconds(self) -> float:
+        """How long one :meth:`_call` may take. Tools that try several providers in
+        turn override this so each provider gets the configured timeout."""
+        return float(self._settings.external_tool_timeout_seconds)
 
     async def _call(self, **params: Any) -> dict[str, Any]:
         """Perform the actual request and return the raw, unvalidated payload.
