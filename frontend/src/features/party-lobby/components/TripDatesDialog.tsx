@@ -4,11 +4,12 @@
  * TripDatesDialog — the party leader changes how long the trip is and when it
  * starts. Opened from the sidebar TRIP DATES card and from the flight screen.
  *
- * The leader picks a length (stepper, within the allowed range) and a start date;
- * the end date, the stay's estimated cost and what that leaves of the budget
- * update as they go. Dates must sit inside when the whole party is free; the
- * problem, if any, is shown under the field. Saving stores the dates and starts
- * a fresh flight search, since flights found so far were for the old dates.
+ * The leader picks the first and last day on a calendar (TripCalendar), which
+ * sets the dates and the length in one go. Only days the whole party is free can
+ * be picked, and the trip must be an allowed length. The trip's dates, its
+ * length, the stay's estimated cost and what that leaves of the budget update as
+ * they go. Saving stores the dates and starts a fresh flight search, since
+ * flights found so far were for the old dates.
  *
  * A modal dialog: focus moves in on open and back on close, Tab stays inside,
  * and Esc or CANCEL closes it without saving.
@@ -28,18 +29,16 @@ import { getServices } from "@/services";
 import type { TripDates } from "@/services/tripDates.contract";
 
 import {
-  addDays,
+  daysBetween,
   formatDay,
   formatWindows,
   stayPreview,
   todayIso,
   tripDatesProblem,
 } from "../lib/tripDates";
+import { TripCalendar } from "./TripCalendar";
 
-const INPUT_CLASSES =
-  "font-body text-ink bg-bg border-2 border-muted px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
-
-const FOCUSABLE = "button:not([disabled]), input:not([disabled])";
+const FOCUSABLE = "button:not([disabled])";
 
 function money(amount: number): string {
   return `SGD ${Math.abs(amount).toLocaleString("en-SG")}`;
@@ -62,55 +61,37 @@ export function TripDatesDialog({
   onSaved,
 }: TripDatesDialogProps): ReactElement {
   const titleId = useId();
-  const startId = useId();
   const helpId = useId();
-  const errorId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
-  const startRef = useRef<HTMLInputElement>(null);
+  const firstDayRef = useRef<HTMLButtonElement | null>(null);
 
   const today = todayIso();
-  const [days, setDays] = useState(
-    Math.min(dates.maxDays, Math.max(dates.minDays, dates.tripDays ?? 5)),
-  );
-  const [start, setStart] = useState(
-    dates.tripStart ?? dates.windows[0]?.start ?? today,
-  );
-  const [touched, setTouched] = useState(false);
+  const [start, setStart] = useState<string | null>(dates.tripStart);
+  const [end, setEnd] = useState<string | null>(dates.tripEnd);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Move focus in on open; hand it back to whatever opened the dialog on close.
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
-    startRef.current?.focus();
+    firstDayRef.current?.focus();
     return () => opener?.focus?.();
   }, []);
 
-  const problem = tripDatesProblem(dates, days, start, today);
-  const validStart = /^\d{4}-\d{2}-\d{2}$/.test(start);
-  const end = validStart ? addDays(start, days - 1) : null;
-  const preview = stayPreview(dates, days);
-  const unchanged = days === dates.tripDays && start === dates.tripStart;
-  const showProblem = problem !== null && (touched || saveError !== null);
-
-  const earliest = dates.windows.reduce<string | undefined>(
-    (min, w) => (min === undefined || w.start < min ? w.start : min),
-    undefined,
-  );
-  const latestEnd = dates.windows.reduce<string | undefined>(
-    (max, w) => (max === undefined || w.end > max ? w.end : max),
-    undefined,
-  );
-
-  const changeDays = (next: number): void => {
-    setDays(Math.min(dates.maxDays, Math.max(dates.minDays, next)));
-    setTouched(true);
-    setSaveError(null);
-  };
+  const days = start !== null && end !== null ? daysBetween(start, end) + 1 : null;
+  const problem =
+    start !== null && days !== null
+      ? tripDatesProblem(dates, days, start, today)
+      : null;
+  const preview = days !== null ? stayPreview(dates, days) : null;
+  const unchanged = start === dates.tripStart && end === dates.tripEnd;
+  const lengthRule =
+    dates.minDays === dates.maxDays
+      ? `${dates.minDays} days`
+      : `${dates.minDays} to ${dates.maxDays} days`;
 
   const handleSave = async (): Promise<void> => {
-    setTouched(true);
-    if (problem !== null || saving) return;
+    if (start === null || days === null || problem !== null || saving) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -179,83 +160,55 @@ export function TripDatesDialog({
         </div>
 
         <div className="flex flex-col gap-8">
-          <span className="font-display" id={`${titleId}-days`}>
-            Trip length
-          </span>
-          <div
-            role="group"
-            aria-labelledby={`${titleId}-days`}
-            className="flex items-center gap-16"
-          >
-            <PixelButton
-              variant="secondary"
-              label="−"
-              ariaLabel="One day shorter"
-              disabled={saving || days <= dates.minDays}
-              onClick={() => changeDays(days - 1)}
-            />
-            <output
-              aria-live="polite"
-              className="font-display text-accent"
-              data-testid="trip-days"
-            >
-              {days} DAYS
-            </output>
-            <PixelButton
-              variant="secondary"
-              label="+"
-              ariaLabel="One day longer"
-              disabled={saving || days >= dates.maxDays}
-              onClick={() => changeDays(days + 1)}
-            />
-          </div>
-          <p className="font-body text-muted">
-            {dates.minDays} to {dates.maxDays} days.
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-8">
-          <label htmlFor={startId} className="font-display">
-            Start date
-          </label>
-          <input
-            ref={startRef}
-            id={startId}
-            type="date"
-            value={start}
-            min={earliest && earliest > today ? earliest : today}
-            max={latestEnd ? addDays(latestEnd, -(days - 1)) : undefined}
+          <TripCalendar
+            dates={dates}
+            start={start}
+            end={end}
+            today={today}
             disabled={saving}
-            aria-invalid={showProblem}
-            aria-describedby={showProblem ? `${helpId} ${errorId}` : helpId}
-            onChange={(event) => {
-              setStart(event.target.value);
+            focusRef={(element) => {
+              firstDayRef.current = element;
+            }}
+            onChange={(nextStart, nextEnd) => {
+              setStart(nextStart);
+              setEnd(nextEnd);
               setSaveError(null);
             }}
-            onBlur={() => setTouched(true)}
-            className={INPUT_CLASSES}
           />
           <p id={helpId} className="font-body text-muted">
             {dates.windows.length > 0
-              ? `The whole party is free ${formatWindows(dates.windows)}.`
+              ? `The whole party is free ${formatWindows(dates.windows)}. A trip is ${lengthRule}.`
               : "The party has no shared free dates yet."}
           </p>
-          {showProblem ? (
-            <p id={errorId} role="alert" className="font-body text-danger">
-              {problem}
-            </p>
-          ) : null}
         </div>
 
         <div
           className="flex flex-col gap-8 border-2 border-ink bg-bg p-16 font-body"
           data-testid="trip-dates-preview"
         >
-          {end !== null ? (
-            <p>
-              <strong className="font-display text-accent">
-                {formatDay(start)} – {formatDay(end)}
-              </strong>
+          <p role="status" aria-live="polite">
+            {start === null ? (
+              "Pick the first day of the trip."
+            ) : end === null || days === null ? (
+              <>
+                Starts{" "}
+                <strong className="font-display text-accent">
+                  {formatDay(start)}
+                </strong>
+                . Now pick the last day.
+              </>
+            ) : (
+              <>
+                <strong className="font-display text-accent">
+                  {formatDay(start)} – {formatDay(end)}
+                </strong>
+                , {days} days
+              </>
+            )}
+          </p>
+          {problem !== null ? (
+            <p role="alert" className="text-danger">
+              {problem}
             </p>
           ) : null}
           {preview !== null ? (
@@ -288,7 +241,7 @@ export function TripDatesDialog({
           <PixelButton
             variant="primary"
             label={saving ? "SAVING…" : "SAVE AND SEARCH FLIGHTS"}
-            disabled={saving || unchanged || (touched && problem !== null)}
+            disabled={saving || unchanged || days === null || problem !== null}
             onClick={() => {
               void handleSave();
             }}

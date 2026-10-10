@@ -80,3 +80,41 @@ export function stayPreview(dates: TripDates, days: number): StayPreview | null 
     tight: stay > dates.budgetLimit * STAY_BUDGET_SHARE,
   };
 }
+
+/** Whole days from `from` to `to` (0 when equal, negative when `to` is earlier). */
+export function daysBetween(from: string, to: string): number {
+  const utc = (iso: string): number => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  return Math.round((utc(to) - utc(from)) / 86_400_000);
+}
+
+/** The shared window a day falls in, if any. */
+export function windowOf(
+  windows: readonly DateWindow[],
+  iso: string,
+): DateWindow | null {
+  return windows.find((w) => w.start <= iso && iso <= w.end) ?? null;
+}
+
+/**
+ * Can a trip start on `iso`? It must be today or later, inside a shared window,
+ * with room left in that window for the shortest allowed trip.
+ */
+export function canStartOn(dates: TripDates, iso: string, today: string): boolean {
+  const window = windowOf(dates.windows, iso);
+  if (!window || iso < today) return false;
+  return addDays(iso, dates.minDays - 1) <= window.end;
+}
+
+/**
+ * Can a trip that starts on `start` end on `iso`? Same shared window, and a
+ * length inside the allowed range.
+ */
+export function canEndOn(dates: TripDates, start: string, iso: string): boolean {
+  const window = windowOf(dates.windows, start);
+  if (!window || iso > window.end) return false;
+  const length = daysBetween(start, iso) + 1;
+  return length >= dates.minDays && length <= dates.maxDays;
+}

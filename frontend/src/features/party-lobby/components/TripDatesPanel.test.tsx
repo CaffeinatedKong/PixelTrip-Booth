@@ -105,51 +105,81 @@ describe("TripDatesDialog (opened from the panel)", () => {
     render(<TripDatesPanel dates={DATES} {...leader} />);
     fireEvent.click(screen.getByRole("button", { name: "Change trip dates" }));
   };
+  const day = (name: RegExp): HTMLElement => screen.getByRole("button", { name });
+  const save = (): HTMLElement =>
+    screen.getByRole("button", { name: "SAVE AND SEARCH FLIGHTS" });
 
-  it("opens focused on the start date and closes on Escape without saving", () => {
+  it("opens on the trip's month with its dates marked, focused on the first day", () => {
     open();
-    const dialog = screen.getByRole("dialog", { name: "CHANGE TRIP DATES" });
-    expect(screen.getByLabelText("Start date")).toHaveFocus();
+    expect(screen.getByRole("grid", { name: "March 2099" })).toBeInTheDocument();
+    expect(day(/^Wed 18 Mar, first day$/)).toHaveFocus();
+    expect(day(/^Mon 23 Mar, last day$/)).toHaveAttribute("aria-pressed", "true");
+    expect(day(/^Fri 20 Mar, in the trip$/)).toBeInTheDocument();
+    expect(save()).toBeDisabled(); // nothing changed yet
+  });
 
-    fireEvent.keyDown(dialog, { key: "Escape" });
+  it("closes on Escape without saving", () => {
+    open();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(changeDates).not.toHaveBeenCalled();
   });
 
-  it("updates the end date and the stay cost as the length changes", () => {
+  it("only lets the leader pick days the whole party is free", () => {
     open();
-    expect(screen.getByRole("button", { name: "SAVE AND SEARCH FLIGHTS" })).toBeDisabled();
+    expect(day(/^Mon 9 Mar, not free$/)).toBeDisabled();
+    expect(day(/^Tue 10 Mar, free$/)).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "One day longer" }));
-
-    expect(screen.getByTestId("trip-days")).toHaveTextContent("7 DAYS");
-    const preview = screen.getByTestId("trip-dates-preview");
-    expect(preview).toHaveTextContent("Wed 18 Mar – Tue 24 Mar");
-    expect(preview).toHaveTextContent("about SGD 980 per person");
-    expect(preview).toHaveTextContent("leaving about SGD 1,420");
+    fireEvent.click(screen.getByRole("button", { name: "Next month" }));
+    expect(screen.getByRole("grid", { name: "April 2099" })).toBeInTheDocument();
+    expect(day(/^Thu 9 Apr, not free$/)).toBeDisabled();
+    // The last free day cannot start a trip: no room left for two days.
+    expect(day(/^Wed 8 Apr, free$/)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next month" })).toBeDisabled();
   });
 
-  it("explains dates outside the party's free window under the field", () => {
+  it("picks the first day, then the last, and shows the length and stay cost", () => {
     open();
-    fireEvent.change(screen.getByLabelText("Start date"), {
-      target: { value: "2099-04-06" },
-    });
-    fireEvent.blur(screen.getByLabelText("Start date"));
+    fireEvent.click(day(/^Fri 20 Mar/));
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      /outside when the whole party is free/,
+    expect(screen.getByTestId("trip-dates-preview")).toHaveTextContent(
+      "Starts Fri 20 Mar. Now pick the last day.",
     );
-    expect(screen.getByLabelText("Start date")).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("button", { name: "SAVE AND SEARCH FLIGHTS" })).toBeDisabled();
+    expect(save()).toBeDisabled();
+    // One day is too short and 15 days is too long, so neither can end the trip.
+    expect(day(/^Sat 21 Mar, can be the last day$/)).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /^Fri 20 Mar, can be/ })).toBeNull();
+
+    fireEvent.click(day(/^Thu 26 Mar, can be the last day$/));
+
+    const preview = screen.getByTestId("trip-dates-preview");
+    expect(preview).toHaveTextContent("Fri 20 Mar – Thu 26 Mar, 7 days");
+    expect(preview).toHaveTextContent("about SGD 980 per person");
+    expect(preview).toHaveTextContent("leaving about SGD 1,420");
+    expect(save()).toBeEnabled();
+  });
+
+  it("starts over when a day that cannot end the trip is picked", () => {
+    open();
+    fireEvent.click(day(/^Fri 20 Mar/));
+    fireEvent.click(day(/^Mon 16 Mar/)); // before the first day
+
+    expect(screen.getByTestId("trip-dates-preview")).toHaveTextContent(
+      "Starts Mon 16 Mar. Now pick the last day.",
+    );
+  });
+
+  it("moves between days with the arrow keys", () => {
+    open();
+    fireEvent.keyDown(day(/^Wed 18 Mar/), { key: "ArrowDown" });
+    expect(day(/^Wed 25 Mar/)).toHaveFocus();
   });
 
   it("saves the new dates, starts a fresh flight search and closes", async () => {
     open();
-    fireEvent.click(screen.getByRole("button", { name: "One day shorter" }));
-    fireEvent.change(screen.getByLabelText("Start date"), {
-      target: { value: "2099-03-20" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "SAVE AND SEARCH FLIGHTS" }));
+    fireEvent.click(day(/^Fri 20 Mar/));
+    fireEvent.click(day(/^Tue 24 Mar/));
+    fireEvent.click(save());
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(changeDates).toHaveBeenCalledWith("room-1", {
@@ -165,8 +195,9 @@ describe("TripDatesDialog (opened from the panel)", () => {
       new ApiError("TRIP_DATES_LOCKED", "The guide is searching flights right now.", 409),
     );
     open();
-    fireEvent.click(screen.getByRole("button", { name: "One day longer" }));
-    fireEvent.click(screen.getByRole("button", { name: "SAVE AND SEARCH FLIGHTS" }));
+    fireEvent.click(day(/^Fri 20 Mar/));
+    fireEvent.click(day(/^Tue 24 Mar/));
+    fireEvent.click(save());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The guide is searching flights right now.",
