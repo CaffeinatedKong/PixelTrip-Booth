@@ -37,7 +37,6 @@ place no one in the party may be starting from.
 from __future__ import annotations
 
 import logging
-from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
@@ -52,6 +51,7 @@ from app.agents.tools.base import FlightOption
 from app.agents.tools.flights import FlightSearchTool
 from app.core.budget import party_budget
 from app.core.config import get_settings
+from app.core.trip_dates import trip_for
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.agents.state import AgentState, RepositoryBundle
@@ -101,17 +101,18 @@ def _resolve_departure_origin(preferences: list[dict[str, Any]]) -> str | None:
 
 
 def _flight_ceiling(
-    context: dict[str, Any], profile: dict[str, Any], destination: dict[str, Any] | None
+    context: dict[str, Any], trip_days: int | None, destination: dict[str, Any] | None
 ) -> float | None:
     """The most a flight may cost per person (``None`` = no hard limit).
 
     The party's hard limit (the lowest typed budget, whole trip including flights)
-    minus the locked destination's estimated stay (daily estimate x shared days).
+    minus the locked destination's estimated stay (daily estimate x the trip's days).
     Without a stay estimate, or if the stay alone would use up the limit, the full
     limit applies: an estimate must never shut out every flight on its own.
     """
-    days = _longest_window_days(profile.get("availability_overlap") or [])
-    budget = party_budget(context["members"], context["preferences"], context["characters"], days)
+    budget = party_budget(
+        context["members"], context["preferences"], context["characters"], trip_days
+    )
     if budget.limit is None:
         return None
     daily = (destination or {}).get("estimatedDailyCostSgd")
@@ -119,18 +120,6 @@ def _flight_ceiling(
         budget.stay_estimate(daily if isinstance(daily, int | float) else None)
     )
     return left if left is not None and left > 0 else budget.limit
-
-
-def _longest_window_days(overlap: list[dict[str, str]]) -> int | None:
-    best: int | None = None
-    for entry in overlap:
-        try:
-            days = (date.fromisoformat(entry["end"]) - date.fromisoformat(entry["start"])).days + 1
-        except (KeyError, TypeError, ValueError):
-            continue
-        if days > 0 and (best is None or days > best):
-            best = days
-    return best
 
 
 def _option_cost(option: FlightOption) -> float:
@@ -264,7 +253,15 @@ def _flight_card(option: FlightOption, shown: list[FlightOption], currency: str)
     }
 
 
-def _build_proposal(options: list[FlightOption], currency: str | None = None) -> dict[str, Any]:
+def overlap_of(profile: dict[str, Any]) -> list[dict[str, str]]:
+    return profile.get("availability_overlap") or []
+
+
+def _build_proposal(
+    options: list[FlightOption],
+    currency: str | None = None,
+    budget_left: float | None = None,
+) -> dict[str, Any]:
     """Build a raw flight recommendation payload from ranked options.
 
     ``meta`` keeps the tool's factual fields (the factual guardrail, the
@@ -275,6 +272,13 @@ def _build_proposal(options: list[FlightOption], currency: str | None = None) ->
     items = []
     for option in shown:
         card = _flight_card(option, shown, currency)
+        if budget_left is not None and option.price > budget_left:
+            # Shown because nothing fits the budget; say by how much it is over.
+            over = option.price - budget_left
+            card["meta"]["tradeOff"] = (
+                f"{currency} {over:,.0f} over what the party's budget leaves for flights."
+            )
+            card["meta"]["tags"] = ["Over budget", *card["meta"]["tags"]][:5]
         items.append(
             {
                 "id": option.id,
@@ -328,9 +332,15 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
     )
     # For a flight run the ceiling is what the budget leaves once the stay is paid
     # for; the filter below and the business guardrail both read it from the profile.
+    # The trip's own length and dates come from the chosen destination card (the AI
+    # suggests a length per place; see app.core.trip_dates), not the whole stretch the
+    # party is free.
+    trip = trip_for(destination_selection.get("data"), profile["availability_overlap"])
     profile = {
         **profile,
-        "budget_ceiling": _flight_ceiling(context, profile, destination_selection.get("data")),
+        "budget_ceiling": _flight_ceiling(
+            context, trip.days if trip else None, destination_selection.get("data")
+        ),
     }
     state = state.with_group_profile(profile)
 
@@ -361,8 +371,8 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
     search_params = {
         "origin": origin,
         "destination": destination_name,
-        "depart_after": (profile["availability_overlap"][0]["start"]),
-        "depart_before": (profile["availability_overlap"][-1]["end"]),
+        "depart_after": trip.start if trip else profile["availability_overlap"][0]["start"],
+        "depart_before": trip.end if trip else profile["availability_overlap"][-1]["end"],
     }
 
     tool = FlightSearchTool()
@@ -371,12 +381,33 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
 
     await report_phase(repos, state, "checking_budget")
     survivors, eliminating_reason = _filter_and_rank(response.options, profile)
+    no_flights_found = not response.options
+    budget_left: float | None = None
+    if not survivors and (eliminating_reason or "").startswith("the party's budget"):
+        # Never a dead end: show the cheapest flights anyway, marked over budget, and
+        # let the party decide. The budget check is lifted for this proposal only.
+        budget_left = profile["budget_ceiling"]
+        in_dates = [o for o in response.options if _within_overlap(o, overlap_of(profile))]
+        survivors = sorted(in_dates, key=lambda o: (o.price, o.duration_minutes, o.stops))
+        if survivors:
+            profile = {**profile, "budget_ceiling": None}
+            state = state.with_group_profile(profile)
     if not survivors:
         await perform_human_escalation(
             state,
             repos,
-            constraint=f"every flight option was eliminated by {eliminating_reason}",
-            question="Would the party like to relax that constraint?",
+            # Nothing came back at all: say so, rather than blaming a "constraint".
+            constraint=(
+                f"no flights were found from {origin} to {destination_name} for "
+                f"{search_params['depart_after']} to {search_params['depart_before']}"
+                if no_flights_found
+                else f"every flight option was eliminated by {eliminating_reason}"
+            ),
+            question=(
+                "Would the party like to try different dates?"
+                if no_flights_found
+                else "Would the party like to relax that constraint?"
+            ),
             options=[
                 ("relax_budget", "Raise our budget"),
                 ("widen_dates", "Widen our available dates"),
@@ -397,13 +428,13 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
         for flights already in hand, would not change their price or dates.
         """
         await _load_context(repair_state, repos)
-        return _build_proposal(survivors)
+        return _build_proposal(survivors, budget_left=budget_left)
 
     await report_phase(repos, state, "checking_answer")
     loop_outcome = await run_guardrail_loop(
         state,
         repos,
-        _build_proposal(survivors),
+        _build_proposal(survivors, budget_left=budget_left),
         "flight_recommendation",
         _producer,
         cap,

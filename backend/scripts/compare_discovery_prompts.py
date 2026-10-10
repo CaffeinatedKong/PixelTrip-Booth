@@ -86,6 +86,17 @@ PARTIES: dict[str, dict[str, Any]] = {
         ],
         ("2027-03-01", "2027-03-10"),
     ),
+    "free-for-a-month": _party(
+        [
+            ("Gerald", {"destinations": ["adventure-trip"], "interests": ["adventure", "food"],
+                        "activities": ["hiking"], "travel_style": "planner", "budget": 1200},
+             "low"),
+            ("Priya", {"destinations": ["beach-escape", "adventure-trip"],
+                       "interests": ["relaxation", "nightlife"], "activities": ["beaches"],
+                       "travel_style": "chill", "budget": 1600}, "high"),
+        ],
+        ("2026-10-12", "2026-11-12"),
+    ),
 }  # fmt: skip
 
 
@@ -103,6 +114,8 @@ def _render(name: str, items: list[dict[str, Any]], prompts: tuple[str, str] | N
             f"- sub-scores: {breakdown or 'n/a (fallback card)'}",
             f"- best for: {', '.join(meta['bestFor']) or '-'} · "
             f"cost/day: {f'SGD {cost}' if cost else '-'} · tags: {', '.join(meta['tags'])}",
+            f"- trip: {meta.get('tripDays')} days, {meta.get('tripStart')} to "
+            f"{meta.get('tripEnd')} | {meta.get('whyThisLong')}",
             f"- description: {item['description']}",
             f"- why it fits: {meta['whyThisFits']}",
             f"- trade-off: {meta['tradeOff']}",
@@ -127,9 +140,7 @@ async def main() -> None:
             party["members"], party["preferences"], party["characters"], party["overlap"]
         )
         answer = await discovery._ask_llm(brief, llm)
-        profile = compute_group_profile(
-            party["members"], party["preferences"], party["characters"]
-        )
+        profile = compute_group_profile(party["members"], party["preferences"], party["characters"])
         names, cards = discovery._choose_destinations(brief, answer, profile)
         items = discovery._build_proposal(names, cards, brief)["items"]
         note = "" if answer else "\n> LLM failed: these are fallback cards.\n"

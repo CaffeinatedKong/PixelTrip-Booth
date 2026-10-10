@@ -58,6 +58,7 @@ from app.agents.prompts import render
 from app.agents.proposals import DestinationRecommendationProposal
 from app.core.budget import CURRENCY, TIER_LABELS, band_text
 from app.core.config import get_settings
+from app.core.trip_dates import plan_trip
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.agents.state import AgentState, RepositoryBundle
@@ -228,6 +229,17 @@ class _DestinationCard(BaseModel):
         description="Rough cost per person per day in SGD for stay, food and local "
         "transport, excluding flights and paid activities."
     )
+    #: Optional so a model that omits them costs only the default trip length, not
+    #: the whole answer.
+    suggested_days: int = Field(
+        default=0,
+        description="How many days this party should spend there: what people typically "
+        "need for this place and these activities, within the days they are free.",
+    )
+    why_this_long: str = Field(
+        default="",
+        description="One sentence on why that many days suits this place and party.",
+    )
     preference_match: int = Field(description="0-10")
     budget_fit: int = Field(description="0-10")
     season_fit: int = Field(description="0-10")
@@ -366,6 +378,14 @@ def _card_from_llm(
     }
     meta = copy["meta"]
     budget = brief.budget
+    meta.update(
+        _trip_meta(
+            brief,
+            card.suggested_days,
+            meta["estimatedDailyCostSgd"],
+            clip_text(card.why_this_long, MAX_DESCRIPTION_TEXT),
+        )
+    )
     if not budget.is_hard and budget.above_level(meta["estimatedDailyCostSgd"]):
         # Soft guide: label, never drop.
         note = (
@@ -388,7 +408,7 @@ def _fallback_card(name: str, brief: PartyBrief) -> dict[str, Any]:
         why = "Someone in the party named this place."
     else:
         why = "A backup pick that matches the party's trip types and interests."
-    details = f"Trip: {trip_text(brief)}. " if brief.days else ""
+    details = ""
     return {
         "description": why,
         "meta": {
@@ -401,7 +421,34 @@ def _fallback_card(name: str, brief: PartyBrief) -> dict[str, Any]:
             "bestFor": [],
             "estimatedDailyCostSgd": None,
             "scoreBreakdown": None,
+            **_trip_meta(brief, None, None, None),
         },
+    }
+
+
+def _trip_meta(
+    brief: PartyBrief, suggested_days: int | None, daily_cost: float | None, why: str | None
+) -> dict[str, Any]:
+    """The card's trip plan: length and dates the code has checked.
+
+    The AI only suggests a length; :func:`~app.core.trip_dates.plan_trip` fits it to
+    the party's shared dates (weekends first) and, with a hard budget, to what the
+    stay may cost.
+    """
+    plan = plan_trip(
+        brief.overlap,
+        suggested_days,
+        daily_cost=daily_cost,
+        budget_limit=brief.budget.limit,
+    )
+    if plan is None:
+        return {"tripDays": None, "tripStart": None, "tripEnd": None, "whyThisLong": None}
+    reason = " ".join(part for part in (why, plan.note) if part) or None
+    return {
+        "tripDays": plan.days,
+        "tripStart": plan.start,
+        "tripEnd": plan.end,
+        "whyThisLong": reason,
     }
 
 
@@ -455,9 +502,10 @@ def _choose_destinations(
 
 
 def _over_budget(card: dict[str, Any], brief: PartyBrief) -> bool:
-    """The stay alone (daily estimate x days) is over the party's hard limit."""
-    budget = brief.budget
-    return budget.over_limit(budget.stay_estimate(card["meta"].get("estimatedDailyCostSgd")))
+    """The stay alone (daily estimate x the card's trip days) is over the hard limit."""
+    meta = card["meta"]
+    stay = brief.budget.stay_estimate(meta.get("estimatedDailyCostSgd"), meta.get("tripDays"))
+    return brief.budget.over_limit(stay)
 
 
 def _mark_best_fit(items: list[dict[str, Any]]) -> None:
@@ -480,7 +528,8 @@ def _build_proposal(
 
     Each item carries ``description`` and ``meta`` with ``score``, ``whyThisFits``,
     ``tags``, ``tradeOff``, ``details``, ``pick``, ``bestFor``,
-    ``estimatedDailyCostSgd`` and ``scoreBreakdown``.
+    ``estimatedDailyCostSgd``, ``scoreBreakdown`` and the trip plan (``tripDays``,
+    ``tripStart``, ``tripEnd``, ``whyThisLong``).
     """
     brief = brief or build_party_brief([], [], [], [])
     items = []

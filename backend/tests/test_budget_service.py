@@ -17,6 +17,9 @@ M1 = "33333333-3333-4333-8333-333333333331"
 M2 = "33333333-3333-4333-8333-333333333332"
 
 
+FIVE_DAYS = {"tripDays": 5, "tripStart": "2026-10-12", "tripEnd": "2026-10-16"}
+
+
 def repos(*, budgets=(1200, None), tiers=("low", "medium"), selections=(), itinerary=None):
     r = SimpleNamespace(
         trip_repo=AsyncMock(),
@@ -49,11 +52,12 @@ def repos(*, budgets=(1200, None), tiers=("low", "medium"), selections=(), itine
 async def test_before_any_vote_shows_the_limit_level_and_full_remaining():
     budget = await BudgetService(repos()).get(TRIP)
 
-    assert budget.days == 5
+    # The shared dates only say when the party is free; the trip length is unknown
+    # until a destination (with its own length) is chosen.
+    assert budget.days is None and budget.level_estimate is None
     assert budget.is_hard_limit and budget.limit == 1200 and budget.limit_set_by == "Gerald"
     assert budget.level == "low" and budget.level_count == 1
     assert budget.daily_range.low == 50 and budget.daily_range.typical == 80
-    assert budget.level_estimate == 400
     assert budget.estimates.total is None
     assert budget.remaining == 1200 and not budget.is_over_budget
 
@@ -92,10 +96,11 @@ async def test_spend_adds_up_stay_flight_and_costed_activities():
 
 @anyio
 async def test_levels_only_is_a_guide_with_no_limit_or_remaining():
-    selections = [{"kind": "destination", "data": {"estimatedDailyCostSgd": 300}}]
+    selections = [{"kind": "destination", "data": {"estimatedDailyCostSgd": 300, **FIVE_DAYS}}]
 
     budget = await BudgetService(repos(budgets=(None, None), selections=selections)).get(TRIP)
 
+    assert budget.days == 5 and budget.level_estimate == 400  # the chosen trip's length
     assert not budget.is_hard_limit and budget.limit is None
     assert budget.estimates.total == 1500
     assert budget.remaining is None and not budget.is_over_budget
@@ -103,7 +108,7 @@ async def test_levels_only_is_a_guide_with_no_limit_or_remaining():
 
 @anyio
 async def test_over_the_limit_is_flagged():
-    selections = [{"kind": "destination", "data": {"estimatedDailyCostSgd": 400}}]
+    selections = [{"kind": "destination", "data": {"estimatedDailyCostSgd": 400, **FIVE_DAYS}}]
 
     budget = await BudgetService(repos(selections=selections)).get(TRIP)
 
@@ -135,5 +140,6 @@ def test_the_route_returns_camel_case_json():
     body = response.json()
     assert body["isHardLimit"] is True and body["limitSetBy"] == "Gerald"
     assert body["dailyRange"] == {"low": 50, "high": 120, "typical": 80}
+    assert body["days"] is None
     assert body["estimates"] == {"stay": None, "flight": None, "activities": None, "total": None}
     assert body["remaining"] == 1200

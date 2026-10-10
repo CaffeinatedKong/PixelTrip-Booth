@@ -17,7 +17,16 @@ from app.agents.proposals import RecommendationItem
 from app.agents.tools.base import FlightOption
 
 CARD_KEYS = {"score", "whyThisFits", "tags", "tradeOff", "details"}
-DESTINATION_KEYS = CARD_KEYS | {"pick", "bestFor", "estimatedDailyCostSgd", "scoreBreakdown"}
+DESTINATION_KEYS = CARD_KEYS | {
+    "pick",
+    "bestFor",
+    "estimatedDailyCostSgd",
+    "scoreBreakdown",
+    "tripDays",
+    "tripStart",
+    "tripEnd",
+    "whyThisLong",
+}
 
 MEMBERS = [{"id": "m1", "display_name": "Gerald"}, {"id": "m2", "display_name": "Priya"}]
 
@@ -115,10 +124,10 @@ def test_at_most_two_cards_per_country():
 
 
 def test_over_budget_suggestions_are_dropped_while_enough_remain():
-    party = brief(budget=1000)  # 5 days -> SGD 200 a day
+    party = brief(budget=1000)  # even a 2-day stay at SGD 600 a day is over the limit
     items = choose(
         party,
-        card("Tokyo, Japan", estimated_daily_cost_sgd=400, preference_match=10),
+        card("Tokyo, Japan", estimated_daily_cost_sgd=600, preference_match=10),
         card("Hanoi, Vietnam", estimated_daily_cost_sgd=90),
         card("Bali, Indonesia", estimated_daily_cost_sgd=120),
         card("Penang, Malaysia", estimated_daily_cost_sgd=80),
@@ -126,7 +135,7 @@ def test_over_budget_suggestions_are_dropped_while_enough_remain():
     assert "Tokyo, Japan" not in [i["title"] for i in items]
 
     # Too few would remain, so an over-budget card is kept rather than lost.
-    kept = choose(party, card("Tokyo, Japan", estimated_daily_cost_sgd=400))
+    kept = choose(party, card("Tokyo, Japan", estimated_daily_cost_sgd=600))
     assert kept[0]["title"] == "Tokyo, Japan"
 
 

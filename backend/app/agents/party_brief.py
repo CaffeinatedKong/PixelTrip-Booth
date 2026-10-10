@@ -64,9 +64,12 @@ class MemberBrief:
 @dataclass
 class PartyBrief:
     party_size: int
+    #: The longest stretch every member is free: availability, not the trip length.
     start: str | None
     end: str | None
     days: int | None
+    #: Every shared date range, for picking the trip's actual dates.
+    overlap: list[dict[str, str]]
     budget: PartyBudget
     budget_typos: list[str]
     trip_types: list[tuple[str, int]]
@@ -164,6 +167,7 @@ def build_party_brief(
         start=start,
         end=end,
         days=days,
+        overlap=list(availability_overlap or []),
         budget=party_budget(members, preferences, characters, days),
         budget_typos=typos,
         trip_types=_ranked(trip_type_counts),
@@ -179,10 +183,12 @@ def build_party_brief(
 
 
 def trip_text(brief: PartyBrief) -> str:
+    """When the party can travel. This is availability, never the trip length."""
     if brief.start and brief.end and brief.days:
         return (
-            f"{brief.days} days, {_pretty(brief.start)} to {_pretty(brief.end)} "
-            f"(dates every member can make), departing from {DEPARTURE_CITY}"
+            f"the whole party is free from {_pretty(brief.start)} to {_pretty(brief.end)} "
+            f"({brief.days} days available; this is when they can travel, not how long "
+            f"the trip is), departing from {DEPARTURE_CITY}"
         )
     return f"Dates not set yet, departing from {DEPARTURE_CITY}"
 

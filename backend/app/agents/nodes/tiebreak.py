@@ -74,7 +74,17 @@ DETAIL_KEYS = {
         "depart_at",
         "return_at",
     ),
-    "destination": ("score", "whyThisFits", "tags", "tradeOff", "estimatedDailyCostSgd", "bestFor"),
+    "destination": (
+        "score",
+        "whyThisFits",
+        "tags",
+        "tradeOff",
+        "estimatedDailyCostSgd",
+        "bestFor",
+        "tripDays",
+        "tripStart",
+        "tripEnd",
+    ),
 }
 
 
@@ -382,7 +392,7 @@ async def _llm_advice(
         for option_id in tied_ids
     )
     user_prompt = (
-        f"Trip: {trip_text(brief)}\n"
+        f"Dates: {trip_text(brief)}\n"
         f"{budget_text(brief)}\n\n"
         f"What the party wants (members who chose it):\n{wants_text(brief)}\n\n"
         f"Members (use each member_id exactly as given):\n"

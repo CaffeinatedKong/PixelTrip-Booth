@@ -71,6 +71,24 @@ export function readTags(
   return [];
 }
 
+/** "Thu 15 – Sun 18 Oct" from two ISO dates (same year assumed for display). */
+export function formatTripDates(start: unknown, end: unknown): string | null {
+  if (typeof start !== "string" || typeof end !== "string") return null;
+  const from = new Date(`${start.slice(0, 10)}T00:00:00`);
+  const to = new Date(`${end.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+  const day = (d: Date, withMonth: boolean): string =>
+    d
+      .toLocaleDateString("en-SG", {
+        weekday: "short",
+        day: "numeric",
+        ...(withMonth ? { month: "short" } : {}),
+      })
+      .replace(/,/g, "");
+  const sameMonth = from.getMonth() === to.getMonth();
+  return `${day(from, !sameMonth)} – ${day(to, true)}`;
+}
+
 export function DestinationMatchCard({
   option,
   selected,
@@ -85,6 +103,10 @@ export function DestinationMatchCard({
   const tags = readTags(meta, ["tags", "highlights", "pros"]);
   const tradeOff = readText(meta, ["tradeOff", "tradeoff", "con", "warning"]);
   const details = readText(meta, ["details", "fullDetails", "longDescription"]);
+  const tripDays =
+    typeof meta?.tripDays === "number" && meta.tripDays > 0 ? meta.tripDays : null;
+  const tripDates = formatTripDates(meta?.tripStart, meta?.tripEnd);
+  const whyThisLong = readText(meta, ["whyThisLong"]);
 
   return (
     <article
@@ -101,6 +123,20 @@ export function DestinationMatchCard({
           </span>
         ) : null}
       </header>
+
+      {/* Suggested trip: its own length and dates, inside when the party is free. */}
+      {tripDays !== null ? (
+        <div className="flex flex-col gap-8 px-8 pt-8">
+          <span className="font-display text-primary-dark">SUGGESTED TRIP</span>
+          <p className="font-display tabular-nums">
+            {tripDays} {tripDays === 1 ? "DAY" : "DAYS"}
+            {tripDates ? <span className="font-body"> · {tripDates}</span> : null}
+          </p>
+          {whyThisLong ? (
+            <p className="font-body leading-relaxed">{whyThisLong}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Why this fits */}
       {why ? (

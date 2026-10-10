@@ -30,26 +30,21 @@ PROFILE = {"availability_overlap": DATES}
 
 
 def test_flight_ceiling_is_the_limit_minus_the_stay():
-    ceiling = logistics._flight_ceiling(
-        context(1500, None), PROFILE, {"estimatedDailyCostSgd": 100}
-    )
-    assert ceiling == 1000  # 1500 - 100 x 5 days
+    ceiling = logistics._flight_ceiling(context(1500, None), 4, {"estimatedDailyCostSgd": 100})
+    assert ceiling == 1100  # 1500 - 100 x the trip's 4 days
 
 
 def test_flight_ceiling_without_a_stay_estimate_is_the_full_limit():
-    assert logistics._flight_ceiling(context(1500, 2000), PROFILE, {}) == 1500
+    assert logistics._flight_ceiling(context(1500, 2000), 5, {}) == 1500
 
 
 def test_a_stay_that_uses_up_the_limit_never_shuts_out_every_flight():
-    ceiling = logistics._flight_ceiling(context(400, None), PROFILE, {"estimatedDailyCostSgd": 100})
+    ceiling = logistics._flight_ceiling(context(400, None), 5, {"estimatedDailyCostSgd": 100})
     assert ceiling == 400
 
 
 def test_levels_only_means_no_flight_ceiling():
-    assert (
-        logistics._flight_ceiling(context(None, None), PROFILE, {"estimatedDailyCostSgd": 9})
-        is None
-    )
+    assert logistics._flight_ceiling(context(None, None), 5, {"estimatedDailyCostSgd": 9}) is None
 
 
 # --- BUILD: paid activities get what is left after the flight and the stay ------------

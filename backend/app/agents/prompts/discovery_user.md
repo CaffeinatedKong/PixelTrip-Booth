@@ -3,7 +3,7 @@ DISCOVER stage, user prompt (built from the party's saved preferences).
 Slots: {trip} {party_size} {budget} {wants} {members} {named_places} {count}
 The slot contents are built by app/agents/party_brief.py.
 -->
-Trip: {trip}
+Dates: {trip}
 Party size: {party_size}
 
 {budget}

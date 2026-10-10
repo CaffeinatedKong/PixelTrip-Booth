@@ -70,12 +70,14 @@ def test_budget_uses_the_lowest_level_and_names_typo_amounts():
     assert "budget: Low, SGD 1,200 total" in members_text(brief)
 
 
-def test_trip_uses_the_longest_shared_window():
+def test_dates_are_described_as_availability_not_trip_length():
     brief = build_party_brief(MEMBERS, PREFS, CHARACTERS, OVERLAP)
 
-    assert brief.days == 5
+    assert brief.days == 5  # the longest stretch everyone is free
+    assert brief.overlap == OVERLAP
     assert trip_text(brief) == (
-        "5 days, 20 Oct 2026 to 24 Oct 2026 (dates every member can make), departing from Singapore"
+        "the whole party is free from 20 Oct 2026 to 24 Oct 2026 (5 days available; this "
+        "is when they can travel, not how long the trip is), departing from Singapore"
     )
 
 

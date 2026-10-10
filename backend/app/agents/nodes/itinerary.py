@@ -66,6 +66,7 @@ from app.agents.proposals import (
     ItineraryProposal,
 )
 from app.core.budget import party_budget
+from app.core.trip_dates import selected_trip
 from app.exceptions import RepositoryError
 from app.repositories.itinerary_version_repository import UniqueVersionViolation
 from app.services.trip_status_service import advance_trip_status
@@ -230,16 +231,23 @@ def _parse_date(value: Any) -> date | None:
 def _derive_day_count(
     flight_selection: dict[str, Any],
     group_profile: dict[str, Any],
+    destination_selection: dict[str, Any] | None = None,
 ) -> int:
     """Derive the itinerary's day count (Requirement 9.3-9.5).
 
-    Prefers the locked flight's outbound/return dates; falls back to the
-    availability overlap's first range when either flight date is absent.
-    Raises before any write when the result falls outside 1-30 days.
+    Prefers the locked flight's outbound/return dates; then the chosen
+    destination's trip plan (its own length and dates); and only then the
+    availability overlap's first range. Raises before any write when the result
+    falls outside 1-30 days.
     """
     flight_data = flight_selection.get("data") or {}
     outbound = _parse_date(flight_data.get("depart_at") or flight_data.get("departAt"))
     returning = _parse_date(flight_data.get("return_at") or flight_data.get("returnAt"))
+
+    if outbound is None or returning is None:
+        trip = selected_trip((destination_selection or {}).get("data"))
+        if trip is not None:
+            outbound, returning = _parse_date(trip.start), _parse_date(trip.end)
 
     if outbound is None or returning is None:
         overlap = group_profile.get("availability_overlap") or []
@@ -420,9 +428,7 @@ async def _draft_days_with_llm(
         or "unknown"
     )
     return_arrive_at = (
-        flight_data.get("return_arrive_at")
-        or flight_data.get("returnArriveAt")
-        or "unknown"
+        flight_data.get("return_arrive_at") or flight_data.get("returnArriveAt") or "unknown"
     )
     system_prompt = (
         f"{UNTRUSTED_INPUT_GUARD}\n\n"
@@ -582,7 +588,7 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
     )
     state = state.with_group_profile(profile)
 
-    day_count = _derive_day_count(flight_selection, profile)
+    day_count = _derive_day_count(flight_selection, profile, destination_selection)
     # For an itinerary run the ceiling is what the budget leaves for paid activities
     # once the flight and the stay are paid for; the business guardrail checks the
     # itinerary's costed activities against it.

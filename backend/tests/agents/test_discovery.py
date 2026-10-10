@@ -502,7 +502,8 @@ async def test_the_prompt_carries_the_guard_labels_and_flattens_party_text() -> 
     assert UNTRUSTED_INPUT_GUARD in kwargs["system_prompt"]
     assert kwargs["response_model"] is _DiscoveryAnswer
     user_prompt = kwargs["user_prompt"]
-    assert "5 days, 12 Oct 2026 to 16 Oct 2026" in user_prompt
+    assert "free from 12 Oct 2026 to 16 Oct 2026 (5 days available" in user_prompt
+    assert "not how long the trip is" in user_prompt
     assert "Trip types / regions: Asia (1/1), Beach Escape (1/1)" in user_prompt
     assert "Priorities: Food (1/1), Hidden Gems (1/1)" in user_prompt
     assert "Group roles" in user_prompt and "Planner" in user_prompt

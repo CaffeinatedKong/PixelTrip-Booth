@@ -93,11 +93,16 @@ class PartyBudget:
     def daily_band(self) -> tuple[int, int | None, int] | None:
         return DAILY_BANDS[self.tier] if self.tier else None
 
-    def stay_estimate(self, daily_cost: float | None) -> float | None:
-        """Stay, food and activities for the trip from a daily estimate."""
-        if not daily_cost or not self.days:
+    def stay_estimate(self, daily_cost: float | None, days: int | None = None) -> float | None:
+        """Stay, food and local transport for the trip from a daily estimate.
+
+        ``days`` is the trip's own length (see ``app.core.trip_dates``); it defaults
+        to this budget's ``days``.
+        """
+        length = days or self.days
+        if not daily_cost or not length:
             return None
-        return float(daily_cost) * self.days
+        return float(daily_cost) * length
 
     def over_limit(self, cost: float | None) -> bool:
         """Clearly over the hard limit. Never true without a limit or an estimate."""

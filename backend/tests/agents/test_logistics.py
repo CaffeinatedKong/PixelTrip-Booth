@@ -240,29 +240,37 @@ async def test_origin_is_never_inferred_from_the_destination() -> None:
 # ===========================================================================
 
 
-async def test_every_option_over_budget_escalates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A ceiling below every returned fare empties the result set."""
+async def test_every_option_over_budget_is_shown_marked_over_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never a dead end: when no fare fits the budget, the cheapest are still offered,
+    labelled with how far over they are, and the party votes."""
     client = FakeSupabaseClient()
     wire_base_context(
         client,
         preferences=[preference_row(MEMBER_1, budget=100)],
     )
-    client.queue("rpc:insert_message_turn", [{"id": "m1", "kind": "text"}])
-    # Two progress writes (asking/searching, then checking_budget) come first.
-    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
-    client.queue("agent_runs", [{"id": RUN, "phase": "step"}])
-    client.queue("agent_runs", [{"id": RUN, "status": "running", "started_at": "T0"}])
-    client.queue("agent_runs", [{"id": RUN, "status": "completed"}])
+    client.queue("vote_sessions", [])  # list_open_by_room
+    client.queue("rpc:insert_message_turn", [{"id": "msg-1", "kind": "recommendation"}])
+    client.queue("vote_sessions", [{"id": "vs-1", "status": "open"}])  # create()
 
     await run_node(
         client,
-        flight_options=[flight_option(price=500.0)],
+        flight_options=[
+            flight_option(id="f1", price=500.0),
+            flight_option(id="f2", price=650.0),
+            flight_option(id="f3", price=700.0),
+        ],
         monkeypatch=monkeypatch,
     )
 
     sent = client.calls_for("rpc:insert_message_turn")[0].payload["p_messages"][0]
-    assert "budget" in sent["content"]["text"].lower()
-    assert client.calls_for("vote_sessions") == []
+    assert sent["kind"] == "recommendation"
+    items = sent["content"]["items"]
+    assert [i["id"] for i in items] == ["f1", "f2", "f3"]  # cheapest first
+    assert all(i["meta"]["tags"][0] == "Over budget" for i in items)
+    assert "400 over what the party's budget leaves for flights" in items[0]["meta"]["tradeOff"]
+    assert any(c.op == "insert" for c in client.calls_for("vote_sessions"))
 
 
 async def test_every_option_outside_dates_escalates(monkeypatch: pytest.MonkeyPatch) -> None:

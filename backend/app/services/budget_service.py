@@ -11,8 +11,8 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from app.agents.errors import TripNotFoundError
-from app.agents.group_profile import compute_availability_overlap
 from app.core.budget import party_budget
+from app.core.trip_dates import selected_trip
 from app.schemas.planning import (
     BudgetEstimates,
     BudgetMember,
@@ -44,7 +44,11 @@ class BudgetService:
         flight = selections.get("flight") or {}
         destination = selections.get("destination") or {}
 
-        days = _flight_days(flight) or _longest_window(compute_availability_overlap(preferences))
+        # The trip's own length: the locked flight's dates, else the chosen
+        # destination's plan. Unknown until a destination is chosen (the shared dates
+        # only say when the party is free, not how long the trip is).
+        trip = selected_trip(destination)
+        days = _flight_days(flight) or (trip.days if trip else None)
         budget = party_budget(members, preferences, characters, days)
 
         stay = budget.stay_estimate(_number(destination.get("estimatedDailyCostSgd")))
@@ -110,15 +114,3 @@ def _flight_days(flight: dict[str, Any]) -> int | None:
         return None
     days = (end - start).days + 1
     return days if days > 0 else None
-
-
-def _longest_window(overlap: list[dict[str, str]]) -> int | None:
-    best: int | None = None
-    for entry in overlap:
-        try:
-            days = (date.fromisoformat(entry["end"]) - date.fromisoformat(entry["start"])).days + 1
-        except (KeyError, TypeError, ValueError):
-            continue
-        if days > 0 and (best is None or days > best):
-            best = days
-    return best
