@@ -463,3 +463,36 @@ def test_cast_during_a_tie_maps_to_422(client):
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VOTE_TIE_PENDING"
+
+
+@anyio
+async def test_the_prompt_describes_the_party_the_same_way_discovery_does():
+    r = flight_bundle()
+    r.llm = AsyncMock()
+    r.llm.generate_structured.return_value = scored_advice()
+    state = node_state()
+    state.trip_context["members"][0]["role"] = "owner"
+    state.trip_context["preferences"] = [
+        {
+            "member_id": OWNER,
+            "budget": 1500,
+            "interests": ["food"],
+            "destinations": ["asia"],
+            "travel_style": "planner",
+            "hard_constraints": [{"type": "departure_origin", "value": "SIN"}],
+            "available_dates": [{"start": "2026-11-12", "end": "2026-11-16"}],
+        }
+    ]
+    state.trip_context["characters"] = [{"member_id": OWNER, "appearance": {"budgetTier": "low"}}]
+
+    await tiebreak_node(state, {"configurable": {"repos": r}})
+
+    prompt = r.llm.generate_structured.await_args.kwargs["user_prompt"]
+    assert f"member_id={OWNER} | Gerald (party leader)" in prompt
+    assert "budget: Low, SGD 1,500 total" in prompt
+    assert "Budget level: low (1 of 1 chose Low Budget), about SGD 50-120" in prompt
+    assert "a hard limit, set by Gerald" in prompt
+    assert "Trip types / regions: Asia (1/1)" in prompt
+    assert "role: Planner" in prompt
+    # No raw origin codes or constraint bookkeeping reach the model.
+    assert "departure_origin" not in prompt and "hard constraints" not in prompt

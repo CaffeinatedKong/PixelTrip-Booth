@@ -51,6 +51,7 @@ MAX_PLACE_CHARS = 80
 
 @dataclass
 class MemberBrief:
+    member_id: str
     name: str
     is_leader: bool
     role: str | None
@@ -146,6 +147,7 @@ def build_party_brief(
 
         member_briefs.append(
             MemberBrief(
+                member_id=member_id,
                 name=name,
                 is_leader=member.get("role") == "owner" or bool(member.get("is_owner")),
                 role=role,
@@ -236,7 +238,9 @@ def wants_text(brief: PartyBrief) -> str:
     )
 
 
-def members_text(brief: PartyBrief) -> str:
+def members_text(brief: PartyBrief, *, with_ids: bool = False) -> str:
+    """One line per member. ``with_ids`` prefixes each with its ``member_id`` for
+    prompts whose answer must refer back to members by id."""
     lines = []
     for member in brief.members:
         parts = [
@@ -248,7 +252,8 @@ def members_text(brief: PartyBrief) -> str:
         if member.role:
             parts.append(f"role: {member.role}")
         name = f"{member.name} (party leader)" if member.is_leader else member.name
-        lines.append(f"- {name}: " + " | ".join(parts))
+        prefix = f"member_id={member.member_id} | " if with_ids else ""
+        lines.append(f"- {prefix}{name}: " + " | ".join(parts))
     return "\n".join(lines) or "- (no member details)"
 
 

@@ -40,6 +40,14 @@ from app.agents.messages import (
     SummaryMessageContent,
     emit_npc_message,
 )
+from app.agents.party_brief import (
+    budget_text,
+    build_party_brief,
+    members_text,
+    trip_text,
+    wants_text,
+)
+from app.agents.progress import report_phase
 from app.core.budget import is_valid_amount
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -176,12 +184,23 @@ async def tiebreak_node(state: AgentState, config: RunnableConfig) -> AgentState
     backers = _backers_by_option(votes_by_member, names)
     profile = compute_group_profile(members, preferences, context.get("characters"))
 
+    await report_phase(repos, state, "weighing_options")
     advice = await _llm_advice(
-        repos.llm, category, tied_ids, labels, details, backers, profile, members, preferences
+        repos.llm,
+        category,
+        tied_ids,
+        labels,
+        details,
+        backers,
+        profile,
+        members,
+        preferences,
+        context.get("characters"),
     ) or _fallback_advice(
         category, tied_ids, labels, cards, details, backers, members, preferences, votes_by_member
     )
 
+    await report_phase(repos, state, "posting")
     await emit_npc_message(
         repos,
         state.trip_id,
@@ -319,18 +338,6 @@ def _backers_by_option(
     return backers
 
 
-def _member_line(member: dict[str, Any], prefs: dict[str, Any]) -> str:
-    return (
-        f"- member_id={member.get('id')} | {member.get('display_name') or 'member'} | "
-        f"budget: {prefs.get('budget') or 'none'} | "
-        f"style: {prefs.get('travel_style') or 'any'} | "
-        f"interests: {clip_for_prompt(prefs.get('interests'), max_items=8)} | "
-        f"activities: {clip_for_prompt(prefs.get('activities'), max_items=8)} | "
-        f"wish-list destinations: {clip_for_prompt(prefs.get('destinations'), max_items=8)} | "
-        f"hard constraints: {clip_for_prompt(prefs.get('hard_constraints'), max_items=8)}"
-    )
-
-
 # --- LLM path -------------------------------------------------------------------------
 
 
@@ -344,6 +351,7 @@ async def _llm_advice(
     profile: dict[str, Any],
     members: list[dict[str, Any]],
     preferences: list[dict[str, Any]],
+    characters: list[dict[str, Any]] | None = None,
 ) -> _Advice | None:
     if llm is None:
         return None
@@ -353,7 +361,7 @@ async def _llm_advice(
         "budget and the party's shared dates."
         if category == "flight"
         else "Score each destination on how its location suits each member's interests, "
-        "activities, travel style, wish-list destinations and budget."
+        "activities, chosen trip types and budget level."
     )
     system_prompt = (
         f"{UNTRUSTED_INPUT_GUARD}\n\n"
@@ -366,12 +374,7 @@ async def _llm_advice(
         "specific: name each member's own budget, interests or wishes when explaining a "
         "score, and compare the options concretely (price, time, location, activities)."
     )
-    prefs_by_member = {str(p.get("member_id")): p for p in preferences}
-    member_lines = "\n".join(
-        _member_line(m, prefs_by_member.get(str(m.get("id")), {})) for m in members
-    )
-    overlap = profile.get("availability_overlap") or []
-    window = f"{overlap[0].get('start')} to {overlap[-1].get('end')}" if overlap else "unspecified"
+    brief = build_party_brief(members, preferences, characters, profile.get("availability_overlap"))
     option_lines = "\n".join(
         f"- id={option_id} | {labels[option_id]} | votes from: "
         f"{clip_for_prompt(backers.get(option_id, []))} | details: "
@@ -379,10 +382,11 @@ async def _llm_advice(
         for option_id in tied_ids
     )
     user_prompt = (
-        f"Shared travel window: {window}\n"
-        f"Party budget ceiling (lowest member budget): "
-        f"{profile.get('budget_ceiling') or 'none stated'}\n"
-        f"Members and their own preferences:\n{member_lines}\n"
+        f"Trip: {trip_text(brief)}\n"
+        f"{budget_text(brief)}\n\n"
+        f"What the party wants (members who chose it):\n{wants_text(brief)}\n\n"
+        f"Members (use each member_id exactly as given):\n"
+        f"{members_text(brief, with_ids=True)}\n\n"
         f"Tied options:\n{option_lines}"
     )
     try:
