@@ -236,7 +236,13 @@ def _flight_card(option: FlightOption, shown: list[FlightOption], currency: str)
         f"{option.carrier} {option.flight_number}, {route}. Departs {option.depart_at}, "
         f"arrives {option.arrive_at}. {duration_text}, {stops_text.lower()}."
     )
-    if round_trip:
+    if round_trip and len(str(option.return_depart_at)) <= 10:
+        # A date with no time: the provider prices the round trip without return times.
+        details += (
+            f" Returns on {option.return_depart_at}; the return flight time is shown at "
+            f"booking. {price_text} per person, round trip."
+        )
+    elif round_trip:
         details += f" Returns {option.return_depart_at}. {price_text} per person, round trip."
     else:
         details += f" {price_text} per person, one way."

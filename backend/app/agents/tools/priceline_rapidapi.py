@@ -98,6 +98,11 @@ class PricelineRapidApiClient:
             for listing in listings
             if (option := self._to_flight_option(listing)) is not None
         ]
+        if round_trip:
+            # The price is for the round trip, but listings carry no return flight
+            # times. Record the return date so the trip is shown as a round trip.
+            for option in options:
+                option["return_depart_at"] = str(depart_before)
         options.sort(key=lambda o: o["price"])
         return {"options": options[:MAX_OPTIONS]}
 

@@ -386,7 +386,10 @@ async def test_priceline_maps_listings_and_converts_usd_to_sgd():
     assert first["depart_at"] == "2026-11-12T13:50:00"
     assert first["price"] == round(109.36 * 1.28, 2)
     assert first["duration_minutes"] == 80 and first["stops"] == 0
-    assert "return_depart_at" not in first  # Priceline does not give the return flight here
+    # Priceline prices the round trip but gives no return flight times: the return
+    # date alone marks it as a round trip.
+    assert first["return_depart_at"] == QUERY["depart_before"]
+    assert "return_arrive_at" not in first
     assert result["options"][-1]["stops"] == 1  # a two-segment journey
     FlightSearchResponse.model_validate(result)
     search = requests[-1]

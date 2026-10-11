@@ -26,7 +26,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 logger = logging.getLogger(__name__)
 
-LOCKED_BY_FLIGHT = "The flight is already locked, so the dates can no longer change."
+LOCKED_BY_FLIGHT = "The flight is locked, so the dates can no longer change."
 NO_DESTINATION = "Choose a destination first."
 SEARCH_RUNNING = "The guide is searching flights right now. Try again when it finishes."
 SET_BY_LEADER = "Set by the party leader."

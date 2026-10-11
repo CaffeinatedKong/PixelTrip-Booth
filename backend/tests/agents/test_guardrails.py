@@ -542,7 +542,7 @@ def flight_proposal(**meta: Any) -> FlightRecommendationProposal:
         {"id": "f2", "title": "Flight 2", "meta": {"flight_id": "F-2"}},
         {"id": "f3", "title": "Flight 3", "meta": {"flight_id": "F-3"}},
     ]
-    return FlightRecommendationProposal(title="Flights", items=base, question="Pick one")
+    return FlightRecommendationProposal(title="Flights", items=base, question="Which flight?")
 
 
 def flight_tool_response() -> list[dict[str, Any]]:

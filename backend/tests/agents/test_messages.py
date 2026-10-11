@@ -177,14 +177,14 @@ def test_option_count_outside_bounds_is_rejected(count: int) -> None:
     """Requirement 15.5: quick replies come in bounded sets."""
     options = [{"id": f"o{i}", "label": f"Option {i}"} for i in range(count)]
     with pytest.raises(PydanticValidationError, match="options must carry"):
-        TextMessageContent(text="Pick one.", options=options)
+        TextMessageContent(text="Choose an option.", options=options)
 
 
 def test_duplicate_option_ids_are_rejected() -> None:
     """A repeated id makes the party's reply ambiguous."""
     with pytest.raises(PydanticValidationError, match="unique"):
         TextMessageContent(
-            text="Pick one.",
+            text="Choose an option.",
             options=[{"id": "a", "label": "A"}, {"id": "a", "label": "Also A"}],
         )
 
