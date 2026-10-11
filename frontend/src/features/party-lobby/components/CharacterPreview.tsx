@@ -33,7 +33,7 @@ export function CharacterPreview({
   label,
 }: CharacterPreviewProps): ReactElement {
   return (
-    <div className="flex items-center justify-center bg-bg-alt border-2 border-ink p-16">
+    <div className="flex items-center justify-center p-16">
       <CharacterSprite
         spriteKey="preview"
         label={label}

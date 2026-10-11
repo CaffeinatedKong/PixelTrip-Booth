@@ -13,6 +13,7 @@ import { useState, type ReactElement, type ReactNode } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
 import type { TiebreakAdvice } from "@/services/destination.contract";
+import { TAG_PILL_OUTLINE } from "../lib/tagStyles";
 
 export interface TiebreakPanelProps {
   tiebreak: TiebreakAdvice;
@@ -48,15 +49,15 @@ export function TiebreakPanel({
           <p className="font-body">{tiebreak.advice}</p>
         )}
         {!isOwner ? (
-          <p className="font-body text-muted">
+          <p className="font-body text-subtle">
             Waiting for the party leader to make the final call…
           </p>
         ) : tiebreak.pending ? (
-          <p className="font-body text-muted">
+          <p className="font-body text-subtle">
             You're the leader. Choose now, or wait for the guide's advice.
           </p>
         ) : (
-          <p className="font-body text-muted">
+          <p className="font-body text-subtle">
             You're the leader — review the guide's advice and choose for the party.
           </p>
         )}
@@ -99,7 +100,7 @@ export function TiebreakPanel({
                   {option.tags.map((tag) => (
                     <li
                       key={tag}
-                      className="font-body border-2 border-success bg-bg px-8 py-8 text-success"
+                      className={TAG_PILL_OUTLINE}
                     >
                       {tag}
                     </li>
@@ -108,14 +109,14 @@ export function TiebreakPanel({
               ) : null}
 
               {option.tradeOff ? (
-                <p className="font-body text-muted">
+                <p className="font-body text-subtle">
                   <span className="font-display text-warning">TRADE-OFF </span>
                   {option.tradeOff}
                 </p>
               ) : null}
 
               {option.votes && option.votes.length > 0 ? (
-                <p className="font-body text-muted">
+                <p className="font-body text-subtle">
                   Voted by: {option.votes.join(", ")}
                 </p>
               ) : null}
@@ -131,10 +132,10 @@ export function TiebreakPanel({
                       <span>
                         <span className="text-ink">{fit.displayName}</span>
                         {fit.reason ? (
-                          <span className="text-muted"> — {fit.reason}</span>
+                          <span className="text-subtle"> — {fit.reason}</span>
                         ) : null}
                       </span>
-                      <span className="text-muted">{fit.score}/100</span>
+                      <span className="text-subtle">{fit.score}/100</span>
                     </li>
                   ))}
                 </ul>
@@ -157,12 +158,12 @@ export function TiebreakPanel({
       </div>
 
       {error !== null ? (
-        <p role="alert" className="font-body text-danger">
+        <p role="alert" className="font-body text-alert">
           {error}
         </p>
       ) : null}
       {deciding ? (
-        <p role="status" aria-live="polite" className="font-body text-muted">
+        <p role="status" aria-live="polite" className="font-body text-subtle">
           Locking in the party's choice…
         </p>
       ) : null}

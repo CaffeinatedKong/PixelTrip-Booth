@@ -4,7 +4,8 @@
  * TripDatesPanel — the adventure sidebar's TRIP DATES card.
  *
  * Shows the trip's own length and dates (not the party's availability) once a
- * destination is chosen. Until a flight is locked the party leader gets a CHANGE
+ * destination is chosen. The guide's reason for the length stays on the
+ * destination card; the sidebar keeps to the facts. Until a flight is locked the party leader gets a CHANGE
  * button that opens the {@link TripDatesDialog}; everyone else sees who can
  * change them.
  */
@@ -37,7 +38,7 @@ export function TripDatesPanel({
   if (!dates || dates.tripDays === null) {
     return (
       <PixelCard title="TRIP DATES">
-        <p className="font-display text-muted" data-testid="trip-dates-panel">
+        <p className="font-display text-subtle" data-testid="trip-dates-panel">
           Not set yet
         </p>
       </PixelCard>
@@ -57,9 +58,6 @@ export function TripDatesPanel({
           </strong>
           {range ? <span> · {range}</span> : null}
         </p>
-        {dates.whyThisLong ? (
-          <p className="text-muted">{dates.whyThisLong}</p>
-        ) : null}
         {canEdit ? (
           <PixelButton
             variant="secondary"
@@ -68,9 +66,9 @@ export function TripDatesPanel({
             onClick={() => setOpen(true)}
           />
         ) : dates.canChange ? (
-          <p className="text-muted">The party leader can change these.</p>
+          <p className="text-subtle">The party leader can change these.</p>
         ) : dates.lockedReason ? (
-          <p className="text-muted">{dates.lockedReason}</p>
+          <p className="text-subtle">{dates.lockedReason}</p>
         ) : null}
       </div>
       {open && canEdit ? (

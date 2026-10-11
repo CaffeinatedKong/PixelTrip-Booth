@@ -22,7 +22,7 @@ export function GuideActivityBar({ run }: { run: RunProgress }): ReactElement {
 
   return (
     <div className="sticky top-0 z-10 flex items-center gap-16 border-2 border-accent bg-bg-alt px-16 py-8">
-      <span aria-hidden className="shrink-0 border-2 border-accent bg-bg">
+      <span aria-hidden className="shrink-0">
         <GuidePortrait scale={1} />
       </span>
       <div className="flex min-w-0 flex-1 flex-col">
@@ -30,7 +30,7 @@ export function GuideActivityBar({ run }: { run: RunProgress }): ReactElement {
           <span className="font-display text-accent">MILO</span> is{" "}
           {RUN_PURPOSE[run.runType]}: {step}…
         </p>
-        {hint ? <p className="font-body text-muted">{hint}</p> : null}
+        {hint ? <p className="font-body text-subtle">{hint}</p> : null}
       </div>
       <span aria-hidden className="flex items-center gap-8">
         {[0, 1, 2].map((i) => (

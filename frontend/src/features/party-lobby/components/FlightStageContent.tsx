@@ -233,7 +233,7 @@ export function FlightStageContent({
               ))}
             </div>
             {error !== null ? (
-              <p role="alert" className="font-body text-danger">
+              <p role="alert" className="font-body text-alert">
                 {error}
               </p>
             ) : null}
@@ -277,7 +277,7 @@ export function FlightStageContent({
                 {changeDatesButton}
               </div>
             ) : (
-              <p className="font-body text-muted">
+              <p className="font-body text-subtle">
                 Waiting for the party leader to confirm the dates and start the
                 flight search.
               </p>
@@ -304,7 +304,7 @@ export function FlightStageContent({
                 {changeDatesButton}
               </div>
             ) : (
-              <p className="font-body text-muted">
+              <p className="font-body text-subtle">
                 The party leader can ask the guide to search again.
               </p>
             )}

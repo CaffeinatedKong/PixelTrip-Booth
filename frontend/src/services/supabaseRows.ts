@@ -12,6 +12,8 @@ import type { Guest, PartyRoom, RoomMember } from "@/types";
 export const ROOM_COLUMNS = "id, room_code, name, status, planning_stage";
 export const MEMBER_COLUMNS =
   "id, room_id, guest_id, display_name, role, stage_ready";
+/** The roster plus each member's saved character look (one row via `member_id`). */
+export const ROSTER_COLUMNS = `${MEMBER_COLUMNS}, characters(sprite_key)`;
 export const GUEST_COLUMNS = "id, display_name, avatar_url";
 
 export interface RoomRow {
@@ -29,6 +31,8 @@ export interface MemberRow {
   display_name: string;
   role: RoomMember["role"];
   stage_ready: boolean | null;
+  /** Embedded character, when selected with {@link ROSTER_COLUMNS}. */
+  characters?: { sprite_key: string | null } | { sprite_key: string | null }[] | null;
 }
 
 export interface GuestRow {
@@ -55,6 +59,13 @@ export function toRoomMember(row: MemberRow): RoomMember {
     displayName: row.display_name,
     role: row.role,
     stageReady: row.stage_ready ?? false,
+    ...(row.characters === undefined
+      ? {}
+      : {
+          spriteKey:
+            (Array.isArray(row.characters) ? row.characters[0] : row.characters)
+              ?.sprite_key ?? null,
+        }),
   };
 }
 

@@ -74,7 +74,7 @@ function Field({
 }): ReactElement {
   return (
     <label className="flex flex-col gap-8 font-body">
-      <span className="text-muted">{label}</span>
+      <span className="text-subtle">{label}</span>
       {children}
     </label>
   );
@@ -110,13 +110,13 @@ function RunRow({ run }: { run: ConsoleRun }): ReactElement {
     run.status === "completed"
       ? "text-success"
       : run.status === "failed"
-        ? "text-danger"
+        ? "text-alert"
         : "text-accent";
   return (
     <li className="flex flex-wrap gap-8 font-body">
       <span>{run.runType}</span>
       <span className={tone}>{run.status}</span>
-      {run.error ? <span className="text-danger">{run.error}</span> : null}
+      {run.error ? <span className="text-alert">{run.error}</span> : null}
     </li>
   );
 }
@@ -133,7 +133,7 @@ function ItineraryView({
         — {version.itinerary.title}
       </p>
       {version.changeSummary ? (
-        <p className="font-body text-muted">{version.changeSummary}</p>
+        <p className="font-body text-subtle">{version.changeSummary}</p>
       ) : null}
       <ol className="flex flex-col gap-8">
         {version.itinerary.days.map((day) => (
@@ -145,7 +145,7 @@ function ItineraryView({
                   <span className="text-accent">{item.time ?? "--:--"}</span>{" "}
                   {item.title}
                   {item.description ? (
-                    <span className="text-muted"> — {item.description}</span>
+                    <span className="text-subtle"> — {item.description}</span>
                   ) : null}
                 </li>
               ))}
@@ -184,9 +184,9 @@ function LlmCallsPanel(): ReactElement {
           label={calls === null ? "Load prompts" : "Refresh"}
           onClick={() => void refresh()}
         />
-        {error ? <p className="text-danger">{error}</p> : null}
+        {error ? <p className="text-alert">{error}</p> : null}
         {calls?.length === 0 ? (
-          <p className="text-muted">No LLM calls since the backend started.</p>
+          <p className="text-subtle">No LLM calls since the backend started.</p>
         ) : null}
         {calls?.map((call) => (
           <details
@@ -241,13 +241,13 @@ export function DevRunConsole(): ReactElement {
     <main className="bg-bg text-ink font-body min-h-screen p-24">
       <div className="mx-auto flex max-w-screen-xl flex-col gap-24">
         <h1 className="font-display text-accent">AI RUN CONSOLE</h1>
-        <p className="text-muted">
+        <p className="text-subtle">
           Developer test bench. Talks to the real backend and database; every
           room you create here is a real room, so give it an obvious name.
         </p>
 
         {dev.error ? (
-          <p role="alert" className="border-danger text-danger border-2 p-8">
+          <p role="alert" className="border-danger text-alert border-2 p-8">
             {dev.error}
           </p>
         ) : null}
@@ -267,7 +267,7 @@ export function DevRunConsole(): ReactElement {
                 stage {dev.session.planningStage} · trip{" "}
                 {dev.session.tripStatus}
               </p>
-              <p className="text-muted">
+              <p className="text-subtle">
                 trip {dev.session.tripId} · member {dev.session.memberId}
               </p>
               <PixelButton
@@ -373,7 +373,7 @@ export function DevRunConsole(): ReactElement {
                     />
                   ))}
                 </div>
-                <p className="text-muted">
+                <p className="text-subtle">
                   Order: discovery → vote → (logistics, or lock a test flight
                   below) → itinerary → add feedback → refinement.
                 </p>
@@ -389,7 +389,7 @@ export function DevRunConsole(): ReactElement {
 
             <PixelCard title="Skip logistics (testing only)">
               <div className="flex flex-col gap-8">
-                <p className="text-muted">
+                <p className="text-subtle">
                   Locks a made-up flight so an itinerary run can start without a
                   flight API key. Needs the backend started with
                   ENABLE_DEV_ENDPOINTS=true.
@@ -421,7 +421,7 @@ export function DevRunConsole(): ReactElement {
 
             <PixelCard title="Votes">
               {openVotes.length === 0 ? (
-                <p className="text-muted">
+                <p className="text-subtle">
                   No open vote. Run discovery to open one.
                 </p>
               ) : (
@@ -457,7 +457,7 @@ export function DevRunConsole(): ReactElement {
 
             <PixelCard title="Guide messages">
               {dev.messages.length === 0 ? (
-                <p className="text-muted">Nothing yet.</p>
+                <p className="text-subtle">Nothing yet.</p>
               ) : (
                 <ul
                   aria-label="Guide messages"
@@ -480,7 +480,7 @@ export function DevRunConsole(): ReactElement {
 
             <PixelCard title="Itinerary">
               {!latest ? (
-                <p className="text-muted">
+                <p className="text-subtle">
                   No itinerary yet. Run itinerary after voting and locking a
                   flight.
                 </p>

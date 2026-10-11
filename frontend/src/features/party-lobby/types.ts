@@ -122,6 +122,12 @@ export interface PartyMemberView {
   /** A short role/label line under the name. */
   archetypeLabel: string;
   spriteKey: string;
+  /** The party role the member chose for their character, when they have one. */
+  groupRole?: GroupRole | null;
+  /** True for the member who started the party. */
+  isHost?: boolean;
+  /** True once the member has finished the party's current step. */
+  ready?: boolean;
 }
 
 /** The derived budget readout for the budget panel. */

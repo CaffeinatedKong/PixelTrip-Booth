@@ -243,7 +243,7 @@ export function DestinationStageContent({
                     }}
                   />
                 ) : (
-                  <p className="font-body text-muted">
+                  <p className="font-body text-subtle">
                     The party leader can ask the guide again.
                   </p>
                 )}
@@ -277,7 +277,7 @@ export function DestinationStageContent({
             )}
 
             {error !== null ? (
-              <p role="alert" className="font-body text-danger">
+              <p role="alert" className="font-body text-alert">
                 {error}
               </p>
             ) : null}

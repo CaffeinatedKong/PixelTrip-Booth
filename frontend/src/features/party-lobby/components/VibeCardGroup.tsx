@@ -5,8 +5,9 @@
  * character/preference questionnaire AND the destination picker, so every choice
  * on the screen looks identical.
  *
- * Each option renders as a card: an 8-bit blue panel with a gold border + gold
- * title (emoji + label) and a readable white description. The SELECTED card flips
+ * The question is a title-size heading with a one-line hint when it takes several answers.
+ * Each option renders as a compact tile: an 8-bit blue panel with a gold border + gold
+ * title (pixel icon + label) and a readable white description. The SELECTED card flips
  * to a gold fill with dark ink text, so the chosen option is obvious.
  *
  * Supports both selection modes via `mode`:
@@ -16,9 +17,11 @@
  *
  * Presentational only: no data fetching, no persistence. Token styling only.
  */
+import { PixelIcon } from "@/components/PixelIcon";
 import type { ReactElement } from "react";
 
 import type { CharacterOption } from "../lib/characterOptions";
+import { QUESTION_HEADING, QUESTION_HINT } from "../lib/questionStyles";
 
 export interface VibeCardGroupProps {
   /** Group heading rendered as the fieldset legend. */
@@ -42,8 +45,14 @@ export function VibeCardGroup({
 }: VibeCardGroupProps): ReactElement {
   return (
     <fieldset className="flex flex-col gap-8">
-      <legend className="font-display text-ink mb-8">{legend}</legend>
-      <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
+      <legend className={`${QUESTION_HEADING} mb-8`}>{legend}</legend>
+      {/* Only questions that take several answers need saying so. */}
+      {mode === "multi" ? (
+        <p className={`${QUESTION_HINT} mb-8`}>Pick as many as you like</p>
+      ) : null}
+      {/* Answers are compact tiles, three across when there is room, so the
+          question stays the loudest thing and the form stays short. */}
+      <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 xl:grid-cols-3">
         {options.map((option) => {
           const selected = selectedIds.includes(option.id);
           return (
@@ -53,26 +62,26 @@ export function VibeCardGroup({
               aria-pressed={selected}
               aria-label={mode === "single" ? option.label : undefined}
               onClick={() => onToggle(option.id)}
-              className={`flex flex-col gap-8 border-2 p-16 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg motion-reduce:transition-none ${
+              className={`flex flex-col border-2 px-16 py-8 text-left enabled:hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg motion-reduce:transition-none ${
                 selected
-                  ? "border-ink bg-accent text-ink"
+                  ? "border-ink bg-accent text-bg shadow-pixel-sm"
                   : "border-accent bg-bg-alt text-ink"
               }`}
             >
               <span
                 className={`flex items-center gap-8 font-display ${
-                  selected ? "text-ink" : "text-accent"
+                  selected ? "text-bg" : "text-accent"
                 }`}
               >
-                {option.icon ? (
-                  <span aria-hidden className="text-xl leading-none">
-                    {option.icon}
-                  </span>
-                ) : null}
+                {option.icon ? <PixelIcon name={option.icon} size={16} /> : null}
                 {option.label}
               </span>
               {option.description ? (
-                <span className="font-body text-ink">{option.description}</span>
+                <span
+                  className={`font-body text-sm ${selected ? "text-bg" : "text-subtle"}`}
+                >
+                  {option.description}
+                </span>
               ) : null}
             </button>
           );

@@ -58,19 +58,15 @@ export function SetupStageContent({
 
   return (
     <StageChat>
-      <GuideSay
-        text={
-          isHost
-            ? "Welcome, host! Share your room code so the party can gather."
-            : "Welcome to the party! Build your travel character while the rest gather."
-        }
-      />
-
-      {/* Room-code share lives in a guide bubble. */}
+      {/* The welcome and the party code share one message. */}
       <GuideMessage>
-        <div className="flex flex-col gap-8">
-          <p className="font-body">Share this code with your party:</p>
-          <div className="flex items-center gap-16">
+        <div className="flex flex-col gap-16">
+          <p className="font-body">
+            {isHost
+              ? "Welcome, host! Share this code so your party can gather:"
+              : "Welcome to the party! Friends can still join with this code:"}
+          </p>
+          <div className="flex flex-wrap items-center gap-16">
             <span
               ref={codeRef}
               data-testid="room-code"
@@ -86,7 +82,8 @@ export function SetupStageContent({
               onClick={onCopyCode}
             />
           </div>
-          <p role="status" aria-live="polite" className="font-body min-h-8 mt-8">
+          {/* The button itself shows "Copied!"; this announces it to screen readers. */}
+          <p role="status" aria-live="polite" className="sr-only">
             {copied ? "Party code copied to clipboard." : ""}
           </p>
         </div>

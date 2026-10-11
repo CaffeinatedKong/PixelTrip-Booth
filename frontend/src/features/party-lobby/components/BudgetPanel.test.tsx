@@ -28,6 +28,10 @@ describe("BudgetPanel", () => {
     expect(panel).toHaveTextContent("Stay & food (est.)~SGD 250");
     expect(panel).toHaveTextContent("FlightSGD 320");
     expect(panel).toHaveTextContent("RemainingSGD 630");
+    // 570 of 1,200 is just under half: five of the ten blocks are filled.
+    const bar = screen.getByTestId("budget-bar");
+    expect(bar).toHaveAccessibleName("SGD 570 of SGD 1,200 used");
+    expect(bar.querySelectorAll(".bg-success")).toHaveLength(5);
   });
 
   it("shows the level as a guide when nobody typed an amount", () => {
@@ -55,6 +59,6 @@ describe("BudgetPanel", () => {
     };
     render(<BudgetPanel budget={over} />);
     expect(screen.getByText("Over budget")).toBeInTheDocument();
-    expect(screen.getByText("SGD 520")).toHaveClass("text-danger");
+    expect(screen.getByText("SGD 520")).toHaveClass("text-alert");
   });
 });

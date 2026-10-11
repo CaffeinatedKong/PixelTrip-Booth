@@ -15,6 +15,7 @@ import { useState, type ReactElement } from "react";
 import { PixelButton } from "@/components/PixelButton";
 
 import { readScore, readTags, readText } from "./DestinationMatchCard";
+import { TAG_PILL } from "../lib/tagStyles";
 
 export interface FlightMatch {
   id: string;
@@ -39,8 +40,20 @@ function num(
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-/** "Sat 20 Dec, 01:00" from a local ISO time, without shifting time zones. */
+/**
+ * "Sat 20 Dec, 01:00" from a local ISO time, without shifting time zones. A bare
+ * date ("2026-12-27", from a provider that gives no return flight time) becomes
+ * "Sun 27 Dec".
+ */
 export function formatTime(iso: unknown): string | null {
+  if (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("en-SG", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+  }
   if (typeof iso !== "string" || iso.length < 16) return null;
   const date = new Date(iso.slice(0, 19));
   if (Number.isNaN(date.getTime())) return null;
@@ -112,7 +125,7 @@ export function FlightMatchCard({
       }`}
     >
       <header className="flex items-center justify-between gap-16 border-2 border-primary-dark bg-primary px-16 py-8 text-bg">
-        <h3 className="font-display leading-relaxed">{option.title}</h3>
+        <h3 className="font-title text-pixel-md">{option.title}</h3>
         {score !== null ? (
           <span className="shrink-0 border-2 border-bg bg-success px-8 py-8 font-display text-bg">
             VALUE {score}/100
@@ -165,7 +178,7 @@ export function FlightMatchCard({
           {tags.map((tag) => (
             <li
               key={tag}
-              className="border-2 border-success bg-success px-8 py-8 font-body text-bg"
+              className={TAG_PILL}
             >
               {tag}
             </li>

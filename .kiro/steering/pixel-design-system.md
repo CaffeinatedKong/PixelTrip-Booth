@@ -41,6 +41,36 @@ hex, in components. Recommended roles (final hex chosen once, then fixed):
 - `accent` — highlights, XP-bar style elements.
 - `success`, `warning`, `danger` — status colors.
 - `muted` — borders, disabled states.
+- `subtle` — secondary and helper **text**. Use this, not `muted`, for text: `muted` is
+  too dim to read on panels (2.1:1).
+- `alert` — error **text**. `danger` stays the fill for destructive buttons.
+
+Every text and background pair must reach 4.5:1. Buttons already do: dark `bg` text on
+`primary`, `accent` and `success` fills; light `ink` text on `danger`.
+
+### Type scale
+
+Two faces. VT323, a terminal-style pixel face, is used for titles (`font-title`) and
+for labels and buttons (`font-display`). Inter (`font-body`) is used for anything longer
+than a label. Both are loaded in `app/layout.tsx` with `next/font`.
+
+- `font-display` defaults to 20px. VT323 draws small for its size and has one weight:
+  never bold it (a faked bold smears the pixels).
+- Titles use `text-pixel-md` (32px, section headings), `text-pixel-lg` (48px, the party
+  name) and `text-pixel-xl` (64px, the product name): whole multiples of the font's 16px
+  pixel grid, so it stays crisp.
+- Tried and dropped: Press Start 2P everywhere (too hard to read) and Pixelify Sans on
+  titles.
+
+### Depth, press and icons
+
+- Depth is a hard offset shadow, never a blur: `shadow-pixel` (4px) on cards and dialogue
+  boxes, `shadow-pixel-sm` (2px) on buttons.
+- `PixelButton` renders its label in capitals, brightens on hover and sinks into its
+  shadow while pressed. A disabled button is flat and dim. `PixelCard` titles are capitals
+  in `accent`.
+- No emoji. Use `PixelIcon` (8x8 bitmaps drawn in the current text colour) for small
+  icons and `PixelSprite` for characters.
 
 Keep contrast strong; retro palettes tend to be high-contrast.
 

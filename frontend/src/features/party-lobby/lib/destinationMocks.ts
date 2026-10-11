@@ -13,25 +13,25 @@ export const MOCK_DESTINATION_OPTIONS: readonly CharacterOption[] = [
   {
     id: "tokyo",
     label: "Tokyo, Japan",
-    icon: "🗼",
+    icon: "skyline",
     description: "Neon nights, food & culture",
   },
   {
     id: "seoul",
     label: "Seoul, Korea",
-    icon: "🏯",
+    icon: "pagoda",
     description: "K-culture, markets & palaces",
   },
   {
     id: "bali",
     label: "Bali, Indonesia",
-    icon: "🏝️",
+    icon: "palm",
     description: "Beaches, temples & rice terraces",
   },
   {
     id: "bangkok",
     label: "Bangkok, Thailand",
-    icon: "🛺",
+    icon: "lantern",
     description: "Street food & buzzing markets",
   },
 ] as const;

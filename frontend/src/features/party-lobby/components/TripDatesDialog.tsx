@@ -151,11 +151,11 @@ export function TripDatesDialog({
         className="flex w-full max-w-lg flex-col gap-16 border-4 border-ink bg-bg-alt p-24 text-ink"
       >
         <div className="flex flex-col gap-8">
-          <h2 id={titleId} className="font-display text-accent">
+          <h2 id={titleId} className="font-title text-pixel-md text-accent">
             CHANGE TRIP DATES
           </h2>
           {dates.destination ? (
-            <p className="font-body text-muted">{dates.destination}</p>
+            <p className="font-body text-subtle">{dates.destination}</p>
           ) : null}
         </div>
 
@@ -175,7 +175,7 @@ export function TripDatesDialog({
               setSaveError(null);
             }}
           />
-          <p id={helpId} className="font-body text-muted">
+          <p id={helpId} className="font-body text-subtle">
             {dates.windows.length > 0
               ? `The whole party is free ${formatWindows(dates.windows)}. A trip is ${lengthRule}.`
               : "The party has no shared free dates yet."}
@@ -207,12 +207,12 @@ export function TripDatesDialog({
             )}
           </p>
           {problem !== null ? (
-            <p role="alert" className="text-danger">
+            <p role="alert" className="text-alert">
               {problem}
             </p>
           ) : null}
           {preview !== null ? (
-            <p className={preview.tight ? "text-warning" : "text-muted"}>
+            <p className={preview.tight ? "text-warning" : "text-subtle"}>
               Stay and food about {money(preview.stay)} per person
               {preview.left === null
                 ? "."
@@ -226,13 +226,13 @@ export function TripDatesDialog({
           ) : null}
         </div>
 
-        <p className="font-body text-muted">
+        <p className="font-body text-subtle">
           Saving starts a new flight search for these dates. Flights and votes
           from the old dates are cleared.
         </p>
 
         {saveError !== null ? (
-          <p role="alert" className="font-body text-danger">
+          <p role="alert" className="font-body text-alert">
             {saveError}
           </p>
         ) : null}

@@ -3,9 +3,22 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MOCK_FLIGHTS } from "@/services/flight.mock";
 
-import { FlightMatchCard, formatDuration } from "./FlightMatchCard";
+import { FlightMatchCard, formatDuration, formatTime } from "./FlightMatchCard";
 
 describe("FlightMatchCard", () => {
+  it("shows a return date without a time as a round trip", () => {
+    // A provider that prices the round trip but gives no return flight time.
+    expect(formatTime("2026-12-27")).toBe("Sun, 27 Dec");
+    const option = {
+      ...MOCK_FLIGHTS[0],
+      meta: { ...MOCK_FLIGHTS[0].meta, return_at: "2026-12-27", return_arrive_at: null },
+    };
+    render(<FlightMatchCard option={option} selected={false} onToggle={() => {}} />);
+
+    expect(screen.getByText(/\/ person, round trip/)).toBeInTheDocument();
+    expect(screen.getByText("RETURN").parentElement).toHaveTextContent("Sun, 27 Dec");
+  });
+
   it("shows the flight, route, price, times, journey and return", () => {
     render(
       <FlightMatchCard

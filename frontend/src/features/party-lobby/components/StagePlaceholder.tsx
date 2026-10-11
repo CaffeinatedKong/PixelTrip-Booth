@@ -30,7 +30,7 @@ export function StagePlaceholder({ stage }: StagePlaceholderProps): ReactElement
       />
       <PixelCard title={`${stage.title} — coming soon`}>
         <p className="font-body mb-8">{stage.blurb}</p>
-        <p className="font-body text-muted">
+        <p className="font-body text-subtle">
           This stage is not yet available. Its backend (the AI Travel Guide) is
           still being built, so there is nothing to decide here for now.
         </p>

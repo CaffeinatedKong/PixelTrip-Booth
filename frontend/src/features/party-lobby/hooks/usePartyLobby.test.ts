@@ -7,7 +7,7 @@
  * members while waiting and is torn down on leave.
  * `@/services` is mocked so no concrete mock/real implementation is exercised.
  */
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/errors";
@@ -32,9 +32,18 @@ const subscribeMembers = vi.fn(
   },
 );
 
+const subscribeRoom = vi.fn(() => vi.fn());
+
 vi.mock("@/services", () => ({
   getServices: () => ({
-    room: { createRoom, joinRoom, listMembers, getRoom, subscribeMembers },
+    room: {
+      createRoom,
+      joinRoom,
+      listMembers,
+      getRoom,
+      subscribeMembers,
+      subscribeRoom,
+    },
   }),
 }));
 
@@ -76,6 +85,7 @@ beforeEach(() => {
   unsubscribe.mockClear();
   lastOnChange = undefined;
   listMembers.mockResolvedValue([makeMember()]);
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -83,6 +93,45 @@ afterEach(() => {
 });
 
 describe("usePartyLobby", () => {
+  it("walks back into the party after a refresh, and forgets it on leaving", async () => {
+    const session = makeSession();
+    createRoom.mockResolvedValue(session);
+    joinRoom.mockResolvedValue(session);
+
+    const first = renderHook(() => usePartyLobby());
+    await act(async () => {
+      await first.result.current.createParty("The Wandering Party", "Aria");
+    });
+    first.unmount();
+
+    // A refresh: a new hook instance, same browser storage.
+    const second = renderHook(() => usePartyLobby());
+    await waitFor(() => expect(second.result.current.view).toBe("waiting"));
+    expect(joinRoom).toHaveBeenCalledWith({ roomCode: "ABC123", displayName: "Aria" });
+
+    act(() => second.result.current.leaveParty());
+    second.unmount();
+    joinRoom.mockClear();
+
+    const third = renderHook(() => usePartyLobby());
+    expect(third.result.current.view).toBe("entry");
+    expect(joinRoom).not.toHaveBeenCalled();
+  });
+
+  it("shows the entry screen, without an error, when the remembered party is gone", async () => {
+    window.localStorage.setItem(
+      "pixeltrip.party",
+      JSON.stringify({ roomCode: "GONE99", displayName: "Aria" }),
+    );
+    joinRoom.mockRejectedValue(new ApiError("ROOM_NOT_FOUND", "gone", 404));
+
+    const { result } = renderHook(() => usePartyLobby());
+
+    await waitFor(() => expect(result.current.view).toBe("entry"));
+    expect(result.current.errorMessage).toBeUndefined();
+    expect(window.localStorage.getItem("pixeltrip.party")).toBeNull();
+  });
+
   it("creates a party and moves to the waiting view with the session", async () => {
     const session = makeSession();
     createRoom.mockResolvedValue(session);

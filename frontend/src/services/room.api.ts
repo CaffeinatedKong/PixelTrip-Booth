@@ -26,14 +26,17 @@ import type {
   RoomService,
 } from "./room.contract";
 import {
-  MEMBER_COLUMNS,
   type MemberRow,
+  ROSTER_COLUMNS,
   ROOM_COLUMNS,
   type RoomRow,
   supabaseReadError,
   toPartyRoom,
   toRoomMember,
 } from "./supabaseRows";
+
+/** How long after a roster change the character row is safely written. */
+const CHARACTER_SETTLE_MS = 1500;
 
 class RoomApiService implements RoomService {
   createRoom(input: CreateRoomInput): Promise<RoomSession> {
@@ -69,11 +72,12 @@ class RoomApiService implements RoomService {
 
   // Direct Supabase access (approved: read-only).
   // Table: room_members — the party roster for the current room; no side effects.
-  // Shape: { id, room_id, guest_id, display_name, role } → RoomMember[] (join order).
+  // Shape: { id, room_id, guest_id, display_name, role } → RoomMember[] (join order),
+  // plus each member's saved character look (`characters.sprite_key`, anon-readable).
   async listMembers(roomId: string): Promise<RoomMember[]> {
     const { data, error } = await getSupabaseClient()
       .from("room_members")
-      .select(MEMBER_COLUMNS)
+      .select(ROSTER_COLUMNS)
       .eq("room_id", roomId)
       .order("created_at", { ascending: true })
       .returns<MemberRow[]>();
@@ -106,6 +110,16 @@ class RoomApiService implements RoomService {
     // Prime immediately so the roster is populated before the first change.
     void pushRoster();
 
+    // A member's row flips to "ready" just before their character is stored, and
+    // the characters table does not stream. Reading once more shortly after each
+    // change picks up the new look.
+    let followUp: ReturnType<typeof setTimeout> | undefined;
+    const pushNowAndAgain = (): void => {
+      void pushRoster();
+      clearTimeout(followUp);
+      followUp = setTimeout(() => void pushRoster(), CHARACTER_SETTLE_MS);
+    };
+
     const channel = supabase
       .channel(`room_members:${roomId}`)
       .on(
@@ -116,13 +130,12 @@ class RoomApiService implements RoomService {
           table: "room_members",
           filter: `room_id=eq.${roomId}`,
         },
-        () => {
-          void pushRoster();
-        },
+        pushNowAndAgain,
       )
       .subscribe();
 
     return () => {
+      clearTimeout(followUp);
       void supabase.removeChannel(channel);
     };
   }

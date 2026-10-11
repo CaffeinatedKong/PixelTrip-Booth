@@ -10,6 +10,7 @@
  * - what the trip is estimated to cost so far (stay, flight, activities) and what
  *   is left, filling in as votes lock a destination and a flight.
  *
+ * With a hard limit, a ten-block bar shows how much of it is used so far.
  * "Not set yet" until there is a budget. Purely presentational; token styling only.
  */
 import type { ReactElement } from "react";
@@ -40,14 +41,52 @@ function Row({
 }): ReactElement {
   const toneClass =
     tone === "danger"
-      ? "text-danger"
+      ? "text-alert"
       : tone === "success"
         ? "text-success"
         : "";
   return (
     <div className="flex justify-between gap-16">
-      <dt className="text-muted">{label}</dt>
+      <dt className="text-subtle">{label}</dt>
       <dd className={toneClass}>{value}</dd>
+    </div>
+  );
+}
+
+const BAR_BLOCKS = 10;
+
+/**
+ * The budget as a ten-block bar, like a health bar: how much of the hard limit
+ * the trip uses so far. Green while comfortable, orange past 80%, red when over.
+ * The exact amounts are in the rows below, so colour is never the only signal.
+ */
+function BudgetBar({
+  currency,
+  used,
+  limit,
+}: {
+  currency: string;
+  used: number;
+  limit: number;
+}): ReactElement {
+  const share = limit > 0 ? used / limit : 0;
+  const filled = Math.min(BAR_BLOCKS, Math.max(0, Math.round(share * BAR_BLOCKS)));
+  const tone = share > 1 ? "bg-danger" : share > 0.8 ? "bg-warning" : "bg-success";
+  return (
+    <div
+      role="img"
+      aria-label={`${money(currency, used)} of ${money(currency, limit)} used`}
+      data-testid="budget-bar"
+      className="flex gap-0 border-2 border-ink bg-bg p-0"
+    >
+      {Array.from({ length: BAR_BLOCKS }, (_, index) => (
+        <span
+          key={index}
+          className={`h-16 flex-1 border-r-2 border-bg last:border-r-0 ${
+            index < filled ? tone : "bg-bg"
+          }`}
+        />
+      ))}
     </div>
   );
 }
@@ -62,7 +101,7 @@ export function BudgetPanel({ budget = null }: BudgetPanelProps): ReactElement {
   if (!budget || (!budget.isHardLimit && !hasLevel)) {
     return (
       <PixelCard title="Budget">
-        <p className="font-body text-muted" data-testid="budget-panel">
+        <p className="font-body text-subtle" data-testid="budget-panel">
           Not set yet
         </p>
       </PixelCard>
@@ -85,21 +124,25 @@ export function BudgetPanel({ budget = null }: BudgetPanelProps): ReactElement {
             </strong>{" "}
             per person
             {budget.limitSetBy ? (
-              <span className="text-muted"> (lowest: {budget.limitSetBy})</span>
+              <span className="text-subtle"> (lowest: {budget.limitSetBy})</span>
             ) : null}
           </p>
         ) : (
           <p>
             <strong className="font-display text-accent">Guide only</strong>{" "}
-            <span className="text-muted">(no amount set)</span>
+            <span className="text-subtle">(no amount set)</span>
           </p>
         )}
-        {level ? <p className="text-muted">Style: {level}</p> : null}
+        {level ? <p className="text-subtle">Style: {level}</p> : null}
         {!budget.isHardLimit && budget.levelEstimate !== null && budget.days ? (
-          <p className="text-muted">
+          <p className="text-subtle">
             ~{money(currency, budget.levelEstimate)} for {budget.days} days,
             excluding flights
           </p>
+        ) : null}
+
+        {budget.isHardLimit && budget.limit !== null && estimates.total !== null ? (
+          <BudgetBar currency={currency} used={estimates.total} limit={budget.limit} />
         ) : null}
 
         {estimates.total !== null ? (

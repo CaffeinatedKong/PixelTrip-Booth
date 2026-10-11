@@ -13,6 +13,7 @@
 import { useState, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
+import { TAG_PILL } from "../lib/tagStyles";
 
 /** One recommendation option; `meta` is the AI's free-form detail bag. */
 export interface DestinationMatch {
@@ -116,7 +117,7 @@ export function DestinationMatchCard({
     >
       {/* Header: title + fit score */}
       <header className="flex items-center justify-between gap-16 border-2 border-primary-dark bg-primary px-16 py-8 text-bg">
-        <h3 className="font-display leading-relaxed">{option.title}</h3>
+        <h3 className="font-title text-pixel-md">{option.title}</h3>
         {score !== null ? (
           <span className="shrink-0 border-2 border-bg bg-success px-8 py-8 font-display text-bg">
             FIT {score}/100
@@ -128,9 +129,10 @@ export function DestinationMatchCard({
       {tripDays !== null ? (
         <div className="flex flex-col gap-8 px-8 pt-8">
           <span className="font-display text-primary-dark">SUGGESTED TRIP</span>
-          <p className="font-display tabular-nums">
+          {/* One face for the whole line, so the length and the dates sit level. */}
+          <p className="font-display text-pixel-sm tabular-nums">
             {tripDays} {tripDays === 1 ? "DAY" : "DAYS"}
-            {tripDates ? <span className="font-body"> · {tripDates}</span> : null}
+            {tripDates ? <span> · {tripDates}</span> : null}
           </p>
           {whyThisLong ? (
             <p className="font-body leading-relaxed">{whyThisLong}</p>
@@ -152,7 +154,7 @@ export function DestinationMatchCard({
           {tags.map((tag) => (
             <li
               key={tag}
-              className="border-2 border-success bg-success px-8 py-8 font-body text-bg"
+              className={TAG_PILL}
             >
               {tag}
             </li>

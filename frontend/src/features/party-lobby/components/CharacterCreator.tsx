@@ -14,18 +14,19 @@
  * in-memory draft, and on save submits the preferences + character to the backend
  * via the preferences service (PUT .../preferences) through `getServices()`.
  */
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 
 import { PixelButton } from "@/components/PixelButton";
-import { PixelCard } from "@/components/PixelCard";
 import { getServices } from "@/services";
 import { ApiError } from "@/lib/errors";
 import type { RoomSession } from "@/types";
 
-import { CharacterPreview } from "./CharacterPreview";
+import { TravellerCard } from "./TravellerCard";
+import { AvailabilityPicker } from "./AvailabilityPicker";
+import { BudgetAmountField } from "./BudgetAmountField";
 import { VibeCardGroup } from "./VibeCardGroup";
 import { useCharacterDraft } from "../hooks/useCharacterDraft";
-import { LAYER_MAP, resolveLayers } from "../lib/characterLayers";
+import { useSetTravellerPreview } from "../hooks/useTravellerPreview";
 import {
   ACTIVITIES,
   BUDGET_TIERS,
@@ -36,10 +37,10 @@ import {
 import {
   FIXED_ORIGIN,
   type BudgetTier,
-  type DateRange,
   type GroupRole,
 } from "../types";
 import { toSessionCharacter } from "../lib/draft";
+import { QUESTION_HEADING } from "../lib/questionStyles";
 
 export interface CharacterCreatorProps {
   /** The active room session (supplies the room code + member id for saving). */
@@ -48,21 +49,6 @@ export interface CharacterCreatorProps {
   onSaved?: () => void;
 }
 
-const INPUT_CLASSES =
-  "font-body text-ink bg-bg border-2 border-muted px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
-
-/** Emoji shown under the character for each selected trip priority. */
-const PRIORITY_EMOJI: Readonly<Record<string, string>> = {
-  food: "🍜",
-  scenery: "🏞️",
-  adventure: "🧗",
-  shopping: "🛍️",
-  nightlife: "🌃",
-  culture: "🏛️",
-  relaxation: "🧖",
-  "hidden-gems": "💎",
-  flexibility: "🔀",
-};
 
 export function CharacterCreator({
   session,
@@ -146,52 +132,31 @@ export function CharacterCreator({
     }
   };
 
-  const layers = resolveLayers(draft, LAYER_MAP);
-  const canRemoveRange = draft.availableDates.length > 1;
+  // Publish the draft so the sidebar can show the traveller live; withdraw it when
+  // the form goes away (saved, or the stage moved on).
+  const setPreview = useSetTravellerPreview();
+  useEffect(() => {
+    setPreview({ draft, name: viewerDisplayName });
+  }, [draft, viewerDisplayName, setPreview]);
+  useEffect(() => () => setPreview(null), [setPreview]);
 
   return (
     <section className="flex flex-col gap-24">
       <header className="flex flex-col gap-8">
-        <h2 className="font-display text-ink">CREATE YOUR TRAVELLER</h2>
-        <p className="font-body text-muted">
+        <h2 className="font-title text-pixel-md text-ink">
+          CREATE YOUR TRAVELLER
+        </h2>
+        <p className="font-body text-subtle">
           Answer a few quests to shape your travel personality.
         </p>
       </header>
 
-      {/* 1. Character preview — reflects the chosen group role, with a row of
-          trip-priority emoji beneath it. */}
-      <PixelCard title="Your traveller">
-        <div className="flex flex-col items-center gap-16">
-          <CharacterPreview
-            layers={layers}
-            label={`${viewerDisplayName}'s traveller`}
-          />
-
-          {/* Trip-priority emoji badges under the character. */}
-          <div
-            className="flex min-h-8 flex-wrap items-center justify-center gap-8"
-            aria-label="Selected trip priorities"
-          >
-            {draft.tripPriorities.length > 0 ? (
-              draft.tripPriorities.map((id) => (
-                <span key={id} title={id} className="text-xl leading-none">
-                  {PRIORITY_EMOJI[id] ?? "⭐"}
-                </span>
-              ))
-            ) : (
-              <span className="font-body text-muted">
-                Pick trip priorities to show what you are after.
-              </span>
-            )}
-          </div>
-
-          <p className="font-body text-muted">
-            {draft.groupRole === null
-              ? "Choose your group role to bring your traveller to life."
-              : "This is you in the party."}
-          </p>
-        </div>
-      </PixelCard>
+      {/* The traveller itself lives in the sticky sidebar, so it stays in view
+          while this form scrolls. Where the sidebar folds away (small screens),
+          a slim strip pinned above the questions takes its place. */}
+      <div className="sticky top-0 z-10 lg:hidden">
+        <TravellerCard draft={draft} name={viewerDisplayName} variant="strip" />
+      </div>
 
       {/* 2. Budget tier (single-select). */}
       <VibeCardGroup
@@ -200,6 +165,16 @@ export function CharacterCreator({
         options={BUDGET_TIERS}
         selectedIds={draft.budgetTier ? [draft.budgetTier] : []}
         onToggle={(id) => setBudgetTier(id as BudgetTier)}
+      />
+
+      {/* The optional exact amount belongs with the budget level, as its follow-up. */}
+      <BudgetAmountField
+        value={draft.budgetText}
+        error={budgetError}
+        onChange={(value) => {
+          setBudgetError(null);
+          setBudgetText(value);
+        }}
       />
 
       {/* 3. Group role (single-select) — drives the character. */}
@@ -229,106 +204,28 @@ export function CharacterCreator({
 
       {/* 7. Activities (multi-select). */}
       <VibeCardGroup
-        legend="Activities"
+        legend="What do you like to do?"
         options={ACTIVITIES}
         selectedIds={draft.activities}
         onToggle={(id) => toggle("activities", id)}
       />
 
-      {/* 8. Adventure funds (numeric). */}
-      <div className="flex flex-col gap-8">
-        <label htmlFor="pref-budget" className="font-display text-ink">
-          ADVENTURE FUNDS
-        </label>
-        <p id="pref-budget-hint" className="font-body text-muted">
-          SGD per person for the whole trip, including flights (100–50,000).
-          Leave empty if you are not sure.
-        </p>
-        <input
-          id="pref-budget"
-          type="number"
-          min={100}
-          max={50000}
-          value={draft.budgetText}
-          onChange={(event) => {
-            setBudgetError(null);
-            setBudgetText(event.target.value);
-          }}
-          placeholder="1500"
-          aria-describedby="pref-budget-hint"
-          aria-invalid={budgetError !== null}
-          className={INPUT_CLASSES}
-        />
-        {budgetError !== null ? (
-          <p role="alert" className="font-body text-danger">
-            {budgetError}
-          </p>
-        ) : null}
-      </div>
-
       {/* 9. Availability dates. */}
       <fieldset className="flex flex-col gap-16">
-        <legend className="font-display text-ink mb-8">AVAILABLE DATES</legend>
-        {draft.availableDates.map((range: DateRange, index: number) => {
-          const fromId = `avail-from-${index}`;
-          const untilId = `avail-until-${index}`;
-          return (
-            <div
-              key={index}
-              className="flex flex-col gap-8 border-2 border-muted px-16 py-8"
-            >
-              <div className="flex flex-col gap-8">
-                <label htmlFor={fromId} className="font-display text-ink">
-                  Available From
-                </label>
-                <input
-                  id={fromId}
-                  type="date"
-                  value={range.start}
-                  onChange={(event) =>
-                    setDateRange(index, { ...range, start: event.target.value })
-                  }
-                  className={INPUT_CLASSES}
-                />
-              </div>
-              <div className="flex flex-col gap-8">
-                <label htmlFor={untilId} className="font-display text-ink">
-                  Available Until
-                </label>
-                <input
-                  id={untilId}
-                  type="date"
-                  value={range.end}
-                  onChange={(event) =>
-                    setDateRange(index, { ...range, end: event.target.value })
-                  }
-                  className={INPUT_CLASSES}
-                />
-              </div>
-              {canRemoveRange ? (
-                <PixelButton
-                  variant="danger"
-                  label="Remove range"
-                  ariaLabel={`Remove availability range ${index + 1}`}
-                  onClick={() => removeDateRange(index)}
-                />
-              ) : null}
-            </div>
-          );
-        })}
-        <PixelButton
-          variant="secondary"
-          label="Add range"
-          ariaLabel="Add availability range"
-          onClick={addDateRange}
+        <legend className={`${QUESTION_HEADING} mb-8`}>When are you free?</legend>
+        <AvailabilityPicker
+          ranges={draft.availableDates}
+          onChange={setDateRange}
+          onAdd={addDateRange}
+          onRemove={removeDateRange}
         />
       </fieldset>
 
       {/* 10. Save. */}
       <div className="flex flex-col gap-8">
         {!canSave ? (
-          <p className="font-body text-muted">
-            Choose a budget and a group role to save your traveller.
+          <p className="font-body text-subtle">
+            Fill in all the questions above to save your traveller.
           </p>
         ) : null}
         <PixelButton
@@ -341,11 +238,11 @@ export function CharacterCreator({
           }}
         />
         {submitError !== null ? (
-          <p role="alert" className="font-body text-danger">
+          <p role="alert" className="font-body text-alert">
             {submitError}
           </p>
         ) : null}
-        <p role="status" aria-live="polite" className="font-body text-muted">
+        <p role="status" aria-live="polite" className="font-body text-subtle">
           {savedOnce && sessionCharacter !== null
             ? "Traveller saved and shared with your party."
             : ""}

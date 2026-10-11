@@ -14,6 +14,7 @@
  */
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 
+import { GuidePortrait } from "@/components/GuidePortrait";
 import { PixelButton } from "@/components/PixelButton";
 
 import type { LobbyView } from "../hooks/usePartyLobby";
@@ -73,40 +74,41 @@ export function PartyLobby({
   const status = errorMessage ?? validationMessage;
 
   const tabClass = (active: boolean): string =>
-    `font-display flex-1 border-2 px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
-      active ? "border-primary bg-primary text-bg" : "border-ink bg-bg-alt text-ink"
+    `font-display flex-1 border-2 px-16 py-8 uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
+      active
+        ? "border-primary bg-primary text-bg"
+        : "border-muted bg-bg text-subtle enabled:hover:border-ink enabled:hover:text-ink"
     }`;
 
   const buttonLabel =
     tab === "create"
       ? creating
-        ? "Creating room…"
-        : "Create room"
+        ? "Creating party…"
+        : "Create party"
       : joining
-        ? "Joining room…"
-        : "Join room";
+        ? "Joining party…"
+        : "Join party";
 
   return (
-    <main className="bg-bg text-ink font-body flex min-h-screen items-center justify-center p-24">
+    <main className="bg-bg text-ink font-body flex min-h-screen items-center justify-center p-16 sm:p-24">
       <div className="flex w-full max-w-md flex-col items-center gap-24">
-        {/* Branding */}
-        <div className="flex flex-col items-center gap-8 text-center">
-          <span aria-hidden className="text-4xl leading-none">
-            🎮
-          </span>
-          <h1 className="font-display text-primary">PixelTrip</h1>
-          <p className="font-body text-muted">
-            Collaborative AI travel planning with 8-bit personas.
+        {/* Branding: MILO, the guide, greets the player. */}
+        <div className="flex flex-col items-center gap-16 text-center">
+          <GuidePortrait scale={3} />
+          <h1 className="font-title text-pixel-xl text-accent">PixelTrip</h1>
+          <p className="font-body text-subtle">
+            Every great adventure starts with a party!
+            <br />
+            Gather your crew, and let MILO guide the way!
           </p>
         </div>
 
         {/* Single card with the tab toggle + form */}
-        <section className="bg-bg-alt border-2 border-ink w-full p-24">
-          {/* Tab toggle */}
+        <section className="bg-bg-alt border-2 border-ink w-full p-24 shadow-pixel">
           <div
             className="mb-24 flex gap-8"
             role="tablist"
-            aria-label="Create or join a room"
+            aria-label="Start or join a party"
           >
             <button
               type="button"
@@ -116,7 +118,7 @@ export function PartyLobby({
               disabled={busy}
               className={tabClass(tab === "create")}
             >
-              Create Room
+              New party
             </button>
             <button
               type="button"
@@ -126,21 +128,20 @@ export function PartyLobby({
               disabled={busy}
               className={tabClass(tab === "join")}
             >
-              Join Room
+              Have a code
             </button>
           </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-24">
-            {/* Shared display name */}
             <div className="flex flex-col gap-8">
               <label htmlFor="display-name" className="font-display text-ink">
-                Display name
+                Your name
               </label>
               <input
                 id="display-name"
                 name="display-name"
                 type="text"
-                autoComplete="off"
+                autoComplete="nickname"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
                 disabled={busy}
@@ -148,11 +149,10 @@ export function PartyLobby({
               />
             </div>
 
-            {/* Contextual second field */}
             {tab === "create" ? (
               <div className="flex flex-col gap-8">
                 <label htmlFor="room-name" className="font-display text-ink">
-                  Room name
+                  Party name
                 </label>
                 <input
                   id="room-name"
@@ -162,28 +162,36 @@ export function PartyLobby({
                   value={roomName}
                   onChange={(event) => setRoomName(event.target.value)}
                   disabled={busy}
-                  placeholder="THE WANDERING PARTY"
+                  placeholder="The Wandering Party"
                   className={INPUT_CLASSES}
                 />
               </div>
             ) : (
               <div className="flex flex-col gap-8">
                 <label htmlFor="room-code" className="font-display text-ink">
-                  Room code
+                  Party code
                 </label>
                 <input
                   id="room-code"
                   name="room-code"
                   type="text"
                   autoComplete="off"
+                  autoCapitalize="characters"
                   value={roomCode}
-                  onChange={(event) => setRoomCode(event.target.value)}
+                  onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
                   disabled={busy}
-                  placeholder="E.G. AB12CD"
-                  className={INPUT_CLASSES}
+                  placeholder="AB12CD"
+                  className={`${INPUT_CLASSES} uppercase`}
                 />
               </div>
             )}
+
+            {/* Problems are reported here, next to the fields and the button. */}
+            {status ? (
+              <p role="alert" className="font-body text-alert">
+                {status}
+              </p>
+            ) : null}
 
             <PixelButton
               type="submit"
@@ -194,15 +202,6 @@ export function PartyLobby({
             />
           </form>
         </section>
-
-        {/* Status region: errors / validation announced politely. */}
-        <p
-          role="status"
-          aria-live="polite"
-          className={`font-body min-h-8 text-center ${status ? "text-warning" : "text-muted"}`}
-        >
-          {status ?? "No account needed · Share a room code to travel together."}
-        </p>
       </div>
     </main>
   );

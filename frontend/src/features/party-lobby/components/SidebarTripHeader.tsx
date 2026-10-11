@@ -27,7 +27,7 @@ export function SidebarTripHeader({
     <PixelCard>
       <div className="flex flex-col gap-8" data-testid="sidebar-trip-header">
         <h2 className="font-display text-accent">{tripName}</h2>
-        <p className="font-body text-muted">{dateRangeLabel}</p>
+        <p className="font-body text-subtle">{dateRangeLabel}</p>
       </div>
     </PixelCard>
   );

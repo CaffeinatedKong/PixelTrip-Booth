@@ -49,6 +49,11 @@ export interface RoomMember {
    * Realtime. Defaults to false.
    */
   stageReady: boolean;
+  /**
+   * The saved character's sprite key (e.g. `role-planner`), when the roster read
+   * includes it. Absent or null until the member has created a character.
+   */
+  spriteKey?: string | null;
 }
 
 /**

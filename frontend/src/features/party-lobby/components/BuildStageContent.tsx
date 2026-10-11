@@ -17,6 +17,7 @@ import { useGuideRun } from "../hooks/useGuideRun";
 import { GuideThinking } from "./GuideThinking";
 import { GuideMessage, GuideSay, StageChat } from "./StageChat";
 import { WaitingForParty } from "./WaitingForParty";
+import { TAG_PILL } from "../lib/tagStyles";
 
 export interface BuildStageContentProps {
   session: RoomSession;
@@ -98,14 +99,19 @@ function ItinerarySkeleton(): ReactElement {
   return (
     <div aria-hidden className="flex flex-col gap-16">
       {[1, 2, 3].map((day) => (
+        // The bars stay put; a pale band sweeps across the card, clipped to it.
         <div
           key={day}
-          className="flex flex-col gap-16 border-4 border-primary-dark bg-bg-alt p-16"
+          className="relative flex flex-col gap-16 overflow-hidden border-4 border-primary-dark bg-bg-alt p-16"
         >
-          <span className="h-16 w-1/3 bg-muted animate-pixel-scan motion-reduce:animate-none" />
+          <span className="h-16 w-1/3 bg-muted" />
           <span className="h-16 w-5/6 bg-muted" />
           <span className="h-16 w-full bg-muted" />
           <span className="h-16 w-2/3 bg-muted" />
+          <span
+            className="pointer-events-none absolute inset-y-0 left-0 w-1/4 bg-ink opacity-10 animate-pixel-scan motion-reduce:animate-none"
+            style={{ animationDelay: `${day * 0.2}s` }}
+          />
         </div>
       ))}
     </div>
@@ -163,7 +169,7 @@ function DayCard({
             {item.tags?.length ? (
               <ul className="mt-8 flex flex-wrap gap-8">
                 {item.tags.map((tag) => (
-                  <li key={tag} className="border-2 border-success bg-success px-8 py-8 font-body text-bg">
+                  <li key={tag} className={TAG_PILL}>
                     {tag}
                   </li>
                 ))}
@@ -371,7 +377,7 @@ export function BuildStageContent({
               onRetry={() => void retry()}
             />
             {run?.status !== "failed" ? <ItinerarySkeleton /> : null}
-            {error ? <p role="alert" className="font-body text-danger">{error}</p> : null}
+            {error ? <p role="alert" className="font-body text-alert">{error}</p> : null}
           </div>
         </GuideMessage>
       ) : version ? (
@@ -419,7 +425,7 @@ export function BuildStageContent({
                 {locked ? <WaitingForParty members={members} what="their itinerary review" /> : null}
               </section>
             ) : null}
-            {error ? <p role="alert" className="font-body text-danger">{error}</p> : null}
+            {error ? <p role="alert" className="font-body text-alert">{error}</p> : null}
           </div>
         </GuideMessage>
       ) : (
@@ -433,13 +439,13 @@ export function BuildStageContent({
               onRetry={() => void retry()}
             />
             {run?.status !== "failed" ? <ItinerarySkeleton /> : null}
-            {error ? <p role="alert" className="font-body text-danger">{error}</p> : null}
+            {error ? <p role="alert" className="font-body text-alert">{error}</p> : null}
             {!canStartRun ? (
-              <p className="font-body text-muted">
+              <p className="font-body text-subtle">
                 The plan was saved. The party can now review each day before adding feedback.
               </p>
             ) : !run && session.member.role !== "owner" ? (
-              <p className="font-body text-muted">The party leader will ask MILO to draft the quest log.</p>
+              <p className="font-body text-subtle">The party leader will ask MILO to draft the quest log.</p>
             ) : null}
           </div>
         </GuideMessage>

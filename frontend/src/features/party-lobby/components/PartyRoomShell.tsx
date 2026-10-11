@@ -31,6 +31,7 @@ import { GuideActivityBar } from "./GuideActivityBar";
 import { useActiveGuideRun } from "../hooks/useActiveGuideRun";
 import { useRoomSelections } from "../hooks/useRoomSelections";
 import { StagePlaceholder } from "./StagePlaceholder";
+import { TravellerPreviewProvider } from "../hooks/useTravellerPreview";
 
 export interface PartyRoomShellProps {
   /** The active room session (room + the viewer's member record). */
@@ -45,7 +46,19 @@ export interface PartyRoomShellProps {
   onLeave: () => void;
 }
 
-export function PartyRoomShell({
+/**
+ * The room screen. Wrapped in the traveller-preview provider so the character
+ * form (left column) and the sidebar (right column) share the traveller in progress.
+ */
+export function PartyRoomShell(props: PartyRoomShellProps): ReactElement {
+  return (
+    <TravellerPreviewProvider>
+      <RoomShell {...props} />
+    </TravellerPreviewProvider>
+  );
+}
+
+function RoomShell({
   session,
   members,
   copied,
@@ -79,11 +92,12 @@ export function PartyRoomShell({
     activeStage !== "setup" && !session.travelPreferences?.submittedAt && !savedHere;
 
   return (
-    <main className="bg-bg text-ink font-body min-h-screen p-24">
+    <main className="bg-bg text-ink font-body min-h-screen p-16 sm:p-24">
       <div className="mx-auto flex max-w-screen-2xl flex-col gap-24">
-        <div className="flex items-center justify-between gap-16">
-          <h1 className="font-display text-accent">{session.room.name}</h1>
-          <PixelButton variant="danger" label="Leave party" onClick={onLeave} />
+        <div className="flex flex-wrap items-center justify-between gap-16">
+          <h1 className="font-title text-pixel-lg capitalize text-accent" style={{ fontSize: "3.5rem" }}>
+            {session.room.name}
+          </h1>
         </div>
 
         {/* Two columns: chatbot-style stage flow (left) + persistent sidebar (right). */}
@@ -130,6 +144,7 @@ export function PartyRoomShell({
           <AdventureSidebar
             adventure={adventure}
             roomSession={session}
+            onLeave={onLeave}
             selectedDestination={
               selections.destination ?? discover?.selectedDestination ?? null
             }

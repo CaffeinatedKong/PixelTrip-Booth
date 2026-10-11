@@ -29,7 +29,7 @@ export function SidebarPlaceholderPanel({
 }: SidebarPlaceholderPanelProps): ReactElement {
   return (
     <PixelCard title={title}>
-      <p className={`font-display ${value ? "text-accent" : "text-muted"}`}>
+      <p className={`font-display ${value ? "text-accent" : "text-subtle"}`}>
         {value ?? emptyLabel}
       </p>
     </PixelCard>

@@ -3,9 +3,10 @@
 /**
  * AdventureSidebar — the persistent "YOUR ADVENTURE" right-panel host.
  *
- * Composes the sidebar panels in order: party panel, destination, trip dates (the
- * leader can change them until a flight is locked), flight, budget (shown as not-yet-set until confirmed), and the six-stage
- * quest progress. (Trip header + dates are omitted until the trip is confirmed.)
+ * Composes the sidebar panels in order: party panel, then destination, trip dates
+ * (the leader can change them until a flight is locked), flight and budget, each
+ * of which appears only once it has something to show, and the six-stage quest
+ * progress.
  * Presentational only: the view model arrives via `adventure` and the optional
  * `roomSession` prop supplies the live room code and planning stage. It performs
  * NO data fetching and imports NO concrete service — the room code is read solely
@@ -13,11 +14,13 @@
  *
  * Responsive behaviour (Req 17.2, 17.4, 17.5):
  * - Desktop (>= `lg` breakpoint): a fixed right column whose content is always
- *   visible regardless of the mobile drawer state.
+ *   visible regardless of the mobile drawer state. It scrolls inside itself when
+ *   its cards are taller than the window, so the lower cards stay reachable.
  * - Mobile (< `lg`): a collapsible drawer driven by `useAdventureDrawer`, toggled
  *   by a button that exposes `aria-expanded` and controls the content visibility.
  *
- * Heading "YOUR ADVENTURE" (Req 1.4). Styling uses design-token utility classes
+ * The column has no visible heading: the page title ("Adventure with …") names it,
+ * and the region keeps its accessible name "Your adventure" (Req 1.4). Styling uses design-token utility classes
  * only — never raw hex or arbitrary values (Req 19.4).
  */
 import type { ReactElement } from "react";
@@ -34,7 +37,12 @@ import { BudgetPanel } from "./BudgetPanel";
 import { useTripBudget } from "../hooks/useTripBudget";
 import { useTripDates } from "../hooks/useTripDates";
 import { TripDatesPanel } from "./TripDatesPanel";
+import { TravellerCard } from "./TravellerCard";
+import { useTravellerPreview } from "../hooks/useTravellerPreview";
 import { AdventureProgress } from "./AdventureProgress";
+
+/** A card stepping into the column when it first has something to show. */
+const ARRIVE = "animate-pixel-pop motion-reduce:animate-none";
 
 export interface AdventureSidebarProps {
   /** The derived adventure sidebar view model. */
@@ -45,6 +53,8 @@ export interface AdventureSidebarProps {
   selectedDestination?: SelectedDestination | null;
   /** The flight locked by the resolved vote, when available. */
   selectedFlight?: { id: string; title: string } | null;
+  /** Leave the party; offered quietly at the foot of the party card. */
+  onLeave?: () => void;
 }
 
 export function AdventureSidebar({
@@ -52,25 +62,34 @@ export function AdventureSidebar({
   roomSession,
   selectedDestination = null,
   selectedFlight = null,
+  onLeave,
 }: AdventureSidebarProps): ReactElement {
   const drawer = useAdventureDrawer();
   const budget = useTripBudget(roomSession?.room.id);
   const tripDates = useTripDates(roomSession?.room.id);
+  const traveller = useTravellerPreview();
 
   const roomCode = roomSession?.room.roomCode ?? null;
   const stage = roomSession?.room.planningStage ?? "setup";
   const steps = buildStageSteps(stage);
+
+  // The budget card has something to show once a member typed an amount or
+  // picked a budget level.
+  const hasBudget =
+    budget !== null &&
+    (budget.isHardLimit || (budget.level != null && budget.dailyRange != null));
 
   const contentId = "adventure-sidebar-content";
 
   return (
     <aside
       aria-label="Your adventure"
-      className="flex flex-col gap-16 lg:sticky lg:top-16 lg:self-start"
+      className="flex flex-col gap-16 lg:sticky lg:top-16 lg:max-h-screen lg:self-start lg:overflow-y-auto lg:pb-32 lg:pr-8"
     >
-      <div className="flex items-center justify-between gap-16">
-        <h2 className="font-display text-accent">YOUR ADVENTURE</h2>
-        {/* Mobile-only drawer toggle; hidden from the desktop fixed column. */}
+      {/* The page title already names the adventure, so the column has no heading
+          of its own: on mobile this row holds only the drawer toggle, and on
+          desktop it is gone. */}
+      <div className="flex justify-end lg:hidden">
         <button
           type="button"
           onClick={drawer.toggle}
@@ -78,7 +97,7 @@ export function AdventureSidebar({
           aria-controls={contentId}
           className="font-display border-2 border-ink px-16 py-8 lg:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
         >
-          {drawer.isOpen ? "Hide" : "Show"}
+          {drawer.isOpen ? "Hide party and trip" : "Show party and trip"}
         </button>
       </div>
 
@@ -91,28 +110,53 @@ export function AdventureSidebar({
         id={contentId}
         className={`flex-col gap-16 lg:flex ${drawer.isOpen ? "flex" : "hidden"}`}
       >
+        {/* While the player is creating their traveller it stands here, in view
+            the whole time the form scrolls. Once saved, their row in the party
+            list below shows it instead. */}
+        {traveller ? (
+          <TravellerCard draft={traveller.draft} name={traveller.name} />
+        ) : null}
         <SidebarPartyPanel
           members={adventure.members}
-          capacity={adventure.capacity}
           roomCode={roomCode}
+          onLeave={onLeave}
         />
-        <SidebarPlaceholderPanel
-          title="DESTINATION"
-          emptyLabel="Not selected"
-          value={selectedDestination?.title}
-        />
-        <TripDatesPanel
-          dates={tripDates}
-          roomId={roomSession?.room.id}
-          memberId={roomSession?.member.id}
-          isOwner={roomSession?.member.role === "owner"}
-        />
-        <SidebarPlaceholderPanel
-          title="FLIGHT"
-          emptyLabel="Not selected"
-          value={selectedFlight?.title}
-        />
-        <BudgetPanel budget={budget} />
+        {/* A card joins the column only once it has something to say, stepping
+            into place as it does, so the column starts short and grows with the
+            plan. */}
+        {selectedDestination ? (
+          <div className={ARRIVE}>
+            <SidebarPlaceholderPanel
+              title="DESTINATION"
+              emptyLabel="Not selected"
+              value={selectedDestination.title}
+            />
+          </div>
+        ) : null}
+        {tripDates?.tripDays != null ? (
+          <div className={ARRIVE}>
+            <TripDatesPanel
+              dates={tripDates}
+              roomId={roomSession?.room.id}
+              memberId={roomSession?.member.id}
+              isOwner={roomSession?.member.role === "owner"}
+            />
+          </div>
+        ) : null}
+        {selectedFlight ? (
+          <div className={ARRIVE}>
+            <SidebarPlaceholderPanel
+              title="FLIGHT"
+              emptyLabel="Not selected"
+              value={selectedFlight.title}
+            />
+          </div>
+        ) : null}
+        {hasBudget ? (
+          <div className={ARRIVE}>
+            <BudgetPanel budget={budget} />
+          </div>
+        ) : null}
         <AdventureProgress steps={steps} />
       </div>
     </aside>

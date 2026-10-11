@@ -2,7 +2,8 @@
  * PixelButton — placeholder primitive shell (Foundation, Task 5).
  *
  * A blocky 8-bit action button with token-based variants and accessible pressed,
- * disabled, and focus states. Styling uses design-token utility classes only —
+ * disabled, and focus states. Labels render in capitals. It brightens on hover and
+ * sinks into its hard shadow while pressed; a disabled button is flat and dim. Styling uses design-token utility classes only —
  * never raw hex or arbitrary values.
  */
 import { forwardRef, type ReactElement } from "react";
@@ -31,8 +32,8 @@ export interface PixelButtonProps {
 const VARIANT_CLASSES: Record<PixelButtonVariant, string> = {
   primary: "bg-primary text-bg",
   secondary: "bg-bg-alt text-ink",
-  option: "bg-accent text-ink",
-  danger: "bg-danger text-bg",
+  option: "bg-accent text-bg",
+  danger: "bg-danger text-ink",
 };
 
 export const PixelButton = forwardRef<HTMLButtonElement, PixelButtonProps>(
@@ -57,11 +58,11 @@ export const PixelButton = forwardRef<HTMLButtonElement, PixelButtonProps>(
         disabled={disabled}
         aria-label={ariaLabel}
         aria-pressed={ariaPressed}
-        className={`font-display border-2 px-16 py-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg motion-reduce:transition-none ${
+        className={`font-display uppercase border-2 px-16 py-8 shadow-pixel-sm enabled:hover:brightness-110 enabled:active:translate-x-0.5 enabled:active:translate-y-0.5 enabled:active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
           ariaPressed
             ? "border-accent bg-primary text-bg ring-2 ring-accent ring-offset-2 ring-offset-bg"
             : `border-ink ${VARIANT_CLASSES[variant]}`
-        } disabled:bg-muted disabled:text-bg-alt disabled:border-ink ${className}`}
+        } disabled:cursor-not-allowed disabled:border-muted disabled:bg-bg disabled:text-subtle disabled:shadow-none ${className}`}
       >
         {label}
       </button>

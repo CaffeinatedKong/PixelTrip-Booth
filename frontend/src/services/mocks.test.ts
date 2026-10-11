@@ -64,6 +64,7 @@ describe("MockRoomService", () => {
         guestId: expect.any(String),
         displayName: expect.any(String),
         role: expect.stringMatching(/^(owner|member)$/),
+        stageReady: expect.any(Boolean),
       });
     }
   });

@@ -27,7 +27,12 @@ import plugin from "tailwindcss/plugin";
  *   success        #38b764  status: success / confirmed
  *   warning        #ef7d57  status: warning / caution
  *   danger        #b13e53  status: danger / destructive
- *   muted         #566c86  borders, disabled states
+ *   muted         #566c86  borders, disabled states (never text: too dim on panels)
+ *
+ * Text-only roles, added so small text passes 4.5:1 on both `bg` and `bg-alt`:
+ *   subtle        #a9b8d4  secondary / helper text
+ *   alert         #ff8fa3  error text (`danger` stays the fill for destructive buttons)
+ * `success` and `warning` were lightened slightly for the same reason.
  */
 const config: Config = {
   content: [
@@ -43,10 +48,12 @@ const config: Config = {
         primary: "#41a6f6",
         "primary-dark": "#3b5dc9",
         accent: "#ffcd75",
-        success: "#38b764",
-        warning: "#ef7d57",
+        success: "#4fd07e",
+        warning: "#f59a7a",
         danger: "#b13e53",
         muted: "#566c86",
+        subtle: "#a9b8d4",
+        alert: "#ff8fa3",
       },
       // 8px base grid: spacing in multiples of 8 (8/16/24/32 required; extra
       // 8-multiples provided for convenient layout on the pixel grid).
@@ -71,6 +78,11 @@ const config: Config = {
           "100%": { transform: "translateX(400%)" },
         },
         // Eyes closed for ~4% of the cycle: a quick idle blink.
+        // A card arriving in the sidebar: three hard steps up into place.
+        "pixel-pop": {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
         "pixel-blink": {
           "0%, 93%, 100%": { opacity: "0" },
           "95%, 98%": { opacity: "1" },
@@ -80,12 +92,34 @@ const config: Config = {
         "pixel-dot": "pixel-dot 1.2s steps(2, jump-none) infinite",
         "pixel-scan": "pixel-scan 1.6s steps(10) infinite",
         "pixel-blink": "pixel-blink 4.5s steps(1, end) infinite",
+        "pixel-pop": "pixel-pop 240ms steps(3, end) both",
+      },
+      // Type scale for the display (monospace) face, used on headings, labels and
+      // buttons; body copy stays in the readable face.
+      fontSize: {
+        "pixel-xs": ["16px", { lineHeight: "20px" }],
+        "pixel-sm": ["20px", { lineHeight: "24px" }],
+        // A question in a form: a step above its answers (20px), below a title.
+        "pixel-q": ["24px", { lineHeight: "28px" }],
+        // Title sizes are whole multiples of VT323's 16px pixel grid, so its strokes
+        // land on whole pixels and stay crisp.
+        "pixel-md": ["32px", { lineHeight: "32px" }],
+        "pixel-lg": ["48px", { lineHeight: "48px" }],
+        "pixel-xl": ["64px", { lineHeight: "64px" }],
+      },
+      // Hard-edged drop shadows: depth without blur, like a sprite's outline.
+      boxShadow: {
+        "pixel-sm": "2px 2px 0 0 #0d0e17",
+        pixel: "4px 4px 0 0 #0d0e17",
       },
       fontFamily: {
         // Pixel/bitmap display font for headings and NPC dialogue.
-        display: ["'Press Start 2P'", "monospace"],
+        // VT323: a terminal-style pixel face. `title` is for page, party and section
+        // names; `display` for labels and buttons. Same face, different sizes.
+        title: ["var(--font-pixel)", "ui-monospace", "Menlo", "monospace"],
+        display: ["var(--font-pixel)", "ui-monospace", "Menlo", "monospace"],
         // Legible body font for longer copy (readability over theme).
-        body: ["'Inter'", "system-ui", "sans-serif"],
+        body: ["var(--font-body)", "system-ui", "sans-serif"],
       },
     },
   },

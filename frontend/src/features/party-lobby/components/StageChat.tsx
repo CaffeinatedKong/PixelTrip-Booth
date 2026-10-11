@@ -17,12 +17,12 @@ const GUIDE_NAME = "MILO";
 
 /** Shared vertical rhythm wrapper for a stage's message feed. */
 export function StageChat({ children }: { children: ReactNode }): ReactElement {
-  return <div className="flex flex-col gap-16">{children}</div>;
+  return <div className="flex flex-col gap-24 pt-8">{children}</div>;
 }
 
 function GuideAvatar(): ReactElement {
   return (
-    <span aria-hidden className="shrink-0 border-2 border-accent bg-bg-alt">
+    <span aria-hidden className="shrink-0">
       <GuidePortrait scale={2} />
     </span>
   );
@@ -37,14 +37,16 @@ export function GuideMessage({
   children: ReactNode;
 }): ReactElement {
   return (
-    <div className="flex items-start gap-8">
+    // An RPG dialogue box: the portrait beside a framed panel, with the speaker's
+    // name on a plate that sits on the panel's top edge.
+    <div className="flex items-start gap-8 sm:gap-16">
       <GuideAvatar />
-      <div className="flex flex-1 flex-col gap-8">
-        <span className="flex items-center gap-8">
+      <div className="relative min-w-0 flex-1 border-2 border-ink bg-bg-alt p-16 pt-24 shadow-pixel">
+        <span className="absolute left-16 top-0 flex -translate-y-1/2 items-center gap-8 border-2 border-ink bg-bg px-8">
           <span className="font-display text-accent">{GUIDE_NAME}</span>
-          {time ? <span className="font-body text-muted">{time}</span> : null}
+          {time ? <span className="font-body text-subtle">{time}</span> : null}
         </span>
-        <div className="border-l-2 border-primary bg-bg-alt p-16">{children}</div>
+        {children}
       </div>
     </div>
   );
@@ -75,10 +77,10 @@ export function PartySay({
 }): ReactElement {
   return (
     <div className="flex flex-col items-end gap-8">
-      <div className="max-w-prose border-2 border-primary bg-primary-dark p-16 text-ink">
+      <div className="max-w-prose border-2 border-ink bg-primary-dark p-16 text-ink shadow-pixel">
         <p className="font-body">{text}</p>
       </div>
-      {time ? <span className="font-body text-muted">{time}</span> : null}
+      {time ? <span className="font-body text-subtle">{time}</span> : null}
     </div>
   );
 }
@@ -86,7 +88,7 @@ export function PartySay({
 /** A centred system note (e.g. "Everyone's ready!"). */
 export function SystemNote({ text }: { text: string }): ReactElement {
   return (
-    <p className="font-body text-muted mx-auto rounded-none bg-bg-alt px-16 py-8 text-center">
+    <p className="font-body text-subtle mx-auto border-2 border-dashed border-muted px-16 py-8 text-center">
       {text}
     </p>
   );

@@ -24,6 +24,29 @@
 
   body {
     min-height: 100vh;
+    min-height: 100dvh;
     margin: 0;
+    line-height: 1.6;
+  }
+
+  /* The display face defaults to this size wherever it is used; headings opt up
+     with a text-pixel-* utility (utilities win over this base rule). */
+  /* VT323 draws small for its size and has one weight, so it runs larger than the
+     body text and is never bolded (a faked bold smears the pixels). */
+  .font-display {
+    font-size: 20px;
+    line-height: 24px;
+    font-weight: 400;
+    letter-spacing: 0.03em;
+  }
+
+  .font-title {
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+
+  button:not(:disabled),
+  [role="tab"]:not(:disabled) {
+    cursor: pointer;
   }
 }

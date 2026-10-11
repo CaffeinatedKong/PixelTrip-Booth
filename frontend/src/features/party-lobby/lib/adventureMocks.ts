@@ -12,7 +12,8 @@
 
 import { deriveBudgetView } from "./budget";
 import type { RoomMember } from "@/types";
-import type { AdventureView, PartyMemberView } from "../types";
+import type { AdventureView, GroupRole, PartyMemberView } from "../types";
+import { GROUP_ROLES } from "./characterOptions";
 
 /** The mock party already seated in the room. */
 const MOCK_PARTY_MEMBERS: readonly PartyMemberView[] = [
@@ -57,12 +58,18 @@ function toPartyMemberView(member: RoomMember): PartyMemberView {
   return {
     id: member.id,
     displayName: member.displayName,
-    // No archetype is persisted yet (character creation is session-only), so we
-    // label by role until a real character record exists.
     archetypeLabel: member.role === "owner" ? "Host" : "Member",
-    // The guest id doubles as a stable sprite key placeholder.
-    spriteKey: member.guestId,
+    spriteKey: member.spriteKey ?? member.guestId,
+    groupRole: groupRoleOf(member.spriteKey),
+    isHost: member.role === "owner",
+    ready: member.stageReady,
   };
+}
+
+/** The party role encoded in a saved character's sprite key (`role-planner`). */
+export function groupRoleOf(spriteKey: string | null | undefined): GroupRole | null {
+  const id = spriteKey?.startsWith("role-") ? spriteKey.slice("role-".length) : null;
+  return GROUP_ROLES.some((role) => role.id === id) ? (id as GroupRole) : null;
 }
 
 /**

@@ -42,7 +42,7 @@ export function WaitingForParty({
             <span className="font-body">{member.displayName}</span>
             <span
               className={`font-display ${
-                member.stageReady ? "text-success" : "text-muted"
+                member.stageReady ? "text-success" : "text-subtle"
               }`}
             >
               {member.stageReady ? "READY" : "WAITING…"}

@@ -2,7 +2,7 @@
  * Render tests for PartyRoomShell (the room screen).
  *
  * The shell is a chatbot-style stage column on the left plus the persistent
- * "YOUR ADVENTURE" sidebar on the right. There is no separate top stepper and no
+ * adventure sidebar on the right. There is no separate top stepper and no
  * bottom party chat. These tests verify: SETUP renders the room code + character
  * creator and the sidebar's six-stage quest progress; DISCOVER swaps the left
  * column to the destination flow while the sidebar stays; the Leave action is

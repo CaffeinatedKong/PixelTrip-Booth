@@ -37,12 +37,12 @@ function statusLabel(status: StageStep["status"]): string {
 /** Token-based classes for the step marker, keyed by status. */
 function markerClasses(status: StageStep["status"]): string {
   if (status === "current") {
-    return "border-accent text-accent";
+    return "border-accent bg-accent text-bg";
   }
   if (status === "complete") {
-    return "border-primary text-primary";
+    return "border-primary bg-primary text-bg";
   }
-  return "border-muted text-muted";
+  return "border-muted text-subtle";
 }
 
 export function AdventureProgress({
@@ -50,35 +50,54 @@ export function AdventureProgress({
 }: AdventureProgressProps): ReactElement {
   return (
     <PixelCard title="Your quest">
-      <ol className="flex flex-col gap-8" aria-label="Quest progress">
-        {steps.map((step) => {
+      {/* A compact log: one line per step, joined by a track down the left. Only
+          the current step opens up to show what to do. */}
+      <ol className="flex flex-col" aria-label="Quest progress">
+        {steps.map((step, index) => {
           const isCurrent = step.status === "current";
+          const isLast = index === steps.length - 1;
           return (
             <li
               key={step.stage}
               aria-current={isCurrent ? "step" : undefined}
-              className={`flex items-center gap-16 border-2 p-8 ${
-                isCurrent ? "border-accent" : "border-muted"
-              }`}
+              className="flex gap-16"
             >
-              <span
-                aria-hidden="true"
-                className={`font-display border-2 px-8 py-8 ${markerClasses(
-                  step.status,
-                )}`}
-              >
-                {step.status === "complete" ? "✓" : step.step}
-              </span>
-              <span className="flex flex-col">
+              <span className="flex flex-col items-center">
                 <span
-                  className={`font-display ${isCurrent ? "text-accent" : ""}`}
+                  aria-hidden="true"
+                  className={`font-display flex h-24 w-24 shrink-0 items-center justify-center border-2 ${markerClasses(
+                    step.status,
+                  )}`}
+                >
+                  {step.status === "complete" ? "✓" : step.step}
+                </span>
+                {isLast ? null : (
+                  <span
+                    aria-hidden="true"
+                    className={`w-0 flex-1 border-l-2 ${
+                      step.status === "complete"
+                        ? "border-primary"
+                        : "border-dashed border-muted"
+                    }`}
+                  />
+                )}
+              </span>
+              <span className={`flex min-w-0 flex-col ${isLast ? "" : "pb-16"}`}>
+                <span
+                  className={`font-display ${
+                    isCurrent
+                      ? "text-accent"
+                      : step.status === "complete"
+                        ? "text-ink"
+                        : "text-subtle"
+                  }`}
                 >
                   {step.title}
                 </span>
-                <span className="font-body text-muted">{step.blurb}</span>
-              </span>
-              <span className="font-body ml-auto">
-                {statusLabel(step.status)}
+                <span className="sr-only">{statusLabel(step.status)}</span>
+                {isCurrent ? (
+                  <span className="font-body text-subtle">{step.blurb}</span>
+                ) : null}
               </span>
             </li>
           );

@@ -50,6 +50,37 @@ export interface PartyLobbyState {
   leaveParty: () => void;
 }
 
+/** Where the browser remembers which party this player is in. */
+const SESSION_KEY = "pixeltrip.party";
+
+interface RememberedParty {
+  roomCode: string;
+  displayName: string;
+}
+
+/** Storage can be blocked (private mode); remembering is a convenience only. */
+function remember(party: RememberedParty | null): void {
+  try {
+    if (party) window.localStorage.setItem(SESSION_KEY, JSON.stringify(party));
+    else window.localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Nothing to do: the player simply joins again after a refresh.
+  }
+}
+
+function remembered(): RememberedParty | null {
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<RememberedParty>;
+    return typeof value.roomCode === "string" && typeof value.displayName === "string"
+      ? { roomCode: value.roomCode, displayName: value.displayName }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function usePartyLobby(): PartyLobbyState {
   const [view, setView] = useState<LobbyView>("entry");
   const [session, setSession] = useState<RoomSession | undefined>(undefined);
@@ -88,6 +119,10 @@ export function usePartyLobby(): PartyLobbyState {
           ownerDisplayName: ownerDisplayName.trim(),
         });
         if (!mountedRef.current) return;
+        remember({
+          roomCode: next.room.roomCode,
+          displayName: next.member.displayName,
+        });
         setSession(next);
         setMembers([next.member]);
         setView("waiting");
@@ -119,6 +154,10 @@ export function usePartyLobby(): PartyLobbyState {
           displayName: displayName.trim(),
         });
         if (!mountedRef.current) return;
+        remember({
+          roomCode: next.room.roomCode,
+          displayName: next.member.displayName,
+        });
         setSession(next);
         setMembers([next.member]);
         setView("waiting");
@@ -130,6 +169,27 @@ export function usePartyLobby(): PartyLobbyState {
     },
     [],
   );
+
+  // After a refresh, walk straight back into the party this browser was in. Joining
+  // with the same name resumes the same member; if the party is gone, forget it
+  // and show the entry screen without an error.
+  useEffect(() => {
+    const party = remembered();
+    if (!party) return;
+    setView("joining");
+    getServices()
+      .room.joinRoom(party)
+      .then((next) => {
+        if (!mountedRef.current) return;
+        setSession(next);
+        setMembers([next.member]);
+        setView("waiting");
+      })
+      .catch(() => {
+        remember(null);
+        if (mountedRef.current) setView("entry");
+      });
+  }, []);
 
   // Subscribe to live roster updates while waiting. The service pushes the full
   // roster (primed once immediately, then on every change); we only forward it
@@ -181,7 +241,9 @@ export function usePartyLobby(): PartyLobbyState {
   }, [session]);
 
   const leaveParty = useCallback((): void => {
-    // Local-only reset; no backend call. Returns the player to the entry view.
+    // Local-only reset; no backend call. Returns the player to the entry view and
+    // forgets the party, so a refresh does not walk back in.
+    remember(null);
     setSession(undefined);
     setMembers([]);
     setErrorMessage(undefined);

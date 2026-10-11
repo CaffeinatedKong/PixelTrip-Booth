@@ -199,6 +199,32 @@ describe("Direct Supabase reads", () => {
     ]);
   });
 
+  it("listMembers carries each member's saved character look", async () => {
+    const row = {
+      id: "m1",
+      room_id: "r1",
+      guest_id: "g1",
+      display_name: "Gerald",
+      role: "owner",
+      stage_ready: true,
+    };
+    supabaseQuery.result = {
+      data: [
+        { ...row, characters: { sprite_key: "role-planner" } },
+        { ...row, id: "m2", characters: [] },
+      ],
+      error: null,
+    };
+
+    const members = await roomApiService.listMembers("r1");
+
+    expect(members.map((m) => m.spriteKey)).toEqual(["role-planner", null]);
+    expect(supabaseQuery.calls).toContainEqual([
+      "select",
+      "id, room_id, guest_id, display_name, role, stage_ready, characters(sprite_key)",
+    ]);
+  });
+
   it("getGuest maps the row to a Guest", async () => {
     supabaseQuery.result = {
       data: { id: "g1", display_name: "Gerald", avatar_url: null },

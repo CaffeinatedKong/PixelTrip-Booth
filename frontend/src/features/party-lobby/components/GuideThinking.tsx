@@ -67,7 +67,7 @@ export function GuideThinking({
         role="alert"
         className="flex flex-col gap-16 border-l-4 border-danger bg-bg p-16"
       >
-        <p className="font-display text-danger">THE GUIDE HIT A SNAG</p>
+        <p className="font-display text-alert">THE GUIDE HIT A SNAG</p>
         <p className="font-body text-ink">{failureLine(run)}</p>
         {isOwner && onRetry ? (
           <PixelButton
@@ -77,7 +77,7 @@ export function GuideThinking({
             onClick={onRetry}
           />
         ) : (
-          <p className="font-body text-muted">
+          <p className="font-body text-subtle">
             The party leader can ask the guide to try again.
           </p>
         )}
@@ -122,7 +122,7 @@ export function GuideThinking({
                 ? "text-success"
                 : state === "now"
                   ? "text-ink"
-                  : "text-muted";
+                  : "text-subtle";
             return (
               <li key={step} className={`flex gap-8 ${tone}`}>
                 <span aria-hidden className="font-display">
@@ -144,7 +144,7 @@ export function GuideThinking({
         </ol>
       ) : null}
 
-      {hint ? <p className="font-body text-muted">{hint}</p> : null}
+      {hint ? <p className="font-body text-subtle">{hint}</p> : null}
     </div>
   );
 }

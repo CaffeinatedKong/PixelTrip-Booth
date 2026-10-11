@@ -45,6 +45,8 @@ export interface CharacterSpriteProps {
    * `order` upstream) so later entries paint on top.
    */
   layers?: readonly SpriteLayer[];
+  /** Integer pixel scale that overrides the size bucket (1 = 32px). Layered mode only. */
+  scale?: number;
 }
 
 const SIZE_CLASSES: Record<CharacterSpriteSize, string> = {
@@ -59,6 +61,7 @@ export function CharacterSprite({
   decorative = false,
   size = "md",
   layers,
+  scale: scaleOverride,
 }: CharacterSpriteProps): ReactElement {
   const role = decorative ? undefined : "img";
   const ariaHidden = decorative || undefined;
@@ -73,7 +76,7 @@ export function CharacterSprite({
       if (grid) grids.push(grid);
     }
     // Integer pixel scale per size bucket (32px grid * scale).
-    const scale = size === "lg" ? 7 : size === "md" ? 4 : 1;
+    const scale = scaleOverride ?? (size === "lg" ? 7 : size === "md" ? 4 : 1);
 
     return (
       <div
@@ -81,7 +84,8 @@ export function CharacterSprite({
         aria-hidden={ariaHidden}
         aria-label={ariaLabel}
         data-sprite-key={spriteKey}
-        className="relative bg-bg-alt border-2 border-ink inline-flex items-center justify-center p-8"
+        // No frame: the character stands on whatever surface the caller gives it.
+        className="inline-flex items-center justify-center"
       >
         <PixelSprite grids={grids} scale={scale} />
       </div>
@@ -94,7 +98,7 @@ export function CharacterSprite({
       aria-hidden={ariaHidden}
       aria-label={ariaLabel}
       data-sprite-key={spriteKey}
-      className={`image-rendering-pixelated bg-bg-alt border-2 border-ink ${SIZE_CLASSES[size]}`}
+      className={`image-rendering-pixelated bg-bg-alt ${SIZE_CLASSES[size]}`}
     />
   );
 }

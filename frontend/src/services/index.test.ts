@@ -16,7 +16,20 @@ import { ConfigError, getServices } from "./index";
 const ENV_KEY = "NEXT_PUBLIC_SERVICE_MODE";
 
 /** The registry keys both modes must expose, in a stable order for comparison. */
-const EXPECTED_KEYS = ["guest", "room", "chat", "vote", "itinerary"].sort();
+const EXPECTED_KEYS = [
+  "guest",
+  "room",
+  "chat",
+  "vote",
+  "itinerary",
+  "preferences",
+  "destination",
+  "budget",
+  "flight",
+  "run",
+  "selection",
+  "tripDates",
+].sort();
 
 describe("getServices", () => {
   let originalValue: string | undefined;
