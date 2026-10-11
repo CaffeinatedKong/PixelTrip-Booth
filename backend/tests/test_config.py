@@ -103,3 +103,12 @@ def test_config_error_is_raised_for_invalid_environment(
     finally:
         monkeypatch.undo()
         get_settings.cache_clear()
+
+
+def test_cors_origins_splits_a_comma_separated_frontend_url() -> None:
+    """Several frontends (production plus localhost) may call the API."""
+    one = Settings(**_VALID, frontend_url="https://pixeltrip.vercel.app/")
+    assert one.cors_origins == ["https://pixeltrip.vercel.app"]
+
+    two = Settings(**_VALID, frontend_url="https://pixeltrip.vercel.app, http://localhost:3000,")
+    assert two.cors_origins == ["https://pixeltrip.vercel.app", "http://localhost:3000"]

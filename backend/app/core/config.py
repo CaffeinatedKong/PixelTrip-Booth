@@ -62,7 +62,15 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = Field(repr=False)
 
     # --- CORS ---
+    #: The frontend origin(s) allowed to call this API. Comma-separated for more than
+    #: one, e.g. the production site plus localhost.
     frontend_url: str = Field(default="http://localhost:3000")
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """``FRONTEND_URL`` as a list of origins, without trailing slashes."""
+        origins = [part.strip().rstrip("/") for part in self.frontend_url.split(",")]
+        return [origin for origin in origins if origin]
 
     # --- Agent layer caps (spec 03, Requirement 12.10) ---
     # Read through Settings rather than embedded as literals in node code.
