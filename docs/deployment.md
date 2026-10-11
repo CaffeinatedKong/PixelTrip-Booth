@@ -4,7 +4,7 @@ How PixelTrip runs in production and how to deploy it.
 
 | Part | Where | Address |
 |---|---|---|
-| Frontend (Next.js) | Vercel | `https://aws-pixeltrip.vercel.app` |
+| Frontend (Next.js) | Vercel | `https://pixel-trip-booth.vercel.app` |
 | Backend (FastAPI) | One AWS EC2 server in Singapore, running a Docker image | `https://18-138-209-118.sslip.io` |
 | Database, Realtime | Supabase | unchanged |
 
@@ -49,7 +49,8 @@ aws sts get-caller-identity      # confirm you are logged in to the right accoun
    exists. Your AWS user needs permission to manage EC2, ECR, IAM roles and Systems
    Manager (an administrator user works).
 2. `push-env.sh` uploads every filled-in key from `backend/.env`. It replaces the
-   local-only ones: `FRONTEND_URL` becomes `https://aws-pixeltrip.vercel.app`, `ENVIRONMENT`
+   local-only ones: `FRONTEND_URL` allows `https://pixel-trip-booth.vercel.app` and
+   `https://aws-pixeltrip.vercel.app`, `ENVIRONMENT`
    becomes `production`, and the `/dev` test routes are switched off. Check
    `backend/.env` has the production keys you want before running it.
 3. `deploy.sh` takes a few minutes the first time. Wait about two minutes after step 1
@@ -77,12 +78,14 @@ Vercel: every `NEXT_PUBLIC_` value is visible to anyone who opens the site.
 
 These values are baked in when Vercel builds, so **redeploy after changing any of them**.
 
-The backend only accepts browser calls from `https://aws-pixeltrip.vercel.app`. Vercel preview
+The default backend configuration accepts browser calls from `https://pixel-trip-booth.vercel.app`
+and `https://aws-pixeltrip.vercel.app`. Apply the settings with `push-env.sh` and restart
+the backend after changing them. Vercel preview
 deployments have different addresses and will be refused. To allow another address, set
 `FRONTEND_ORIGIN` to a comma-separated list and run `push-env.sh` again:
 
 ```bash
-FRONTEND_ORIGIN="https://aws-pixeltrip.vercel.app,https://some-preview.vercel.app" ./deploy/push-env.sh
+FRONTEND_ORIGIN="https://pixel-trip-booth.vercel.app,https://aws-pixeltrip.vercel.app,https://some-preview.vercel.app" ./deploy/push-env.sh
 ./deploy/deploy.sh --restart
 ```
 

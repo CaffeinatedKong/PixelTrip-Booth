@@ -9,7 +9,7 @@ export AWS_DEFAULT_REGION="$AWS_REGION"
 APP_NAME="${APP_NAME:-pixeltrip-backend}"            # ECR repo, instance Name tag, role
 PARAM_PATH="${PARAM_PATH:-/pixeltrip/prod}"          # Parameter Store folder for the env vars
 INSTANCE_TYPE="${INSTANCE_TYPE:-t4g.small}"          # 2 vCPU, 2 GB, ARM
-FRONTEND_ORIGIN="${FRONTEND_ORIGIN:-https://aws-pixeltrip.vercel.app}"
+FRONTEND_ORIGIN="${FRONTEND_ORIGIN:-https://pixel-trip-booth.vercel.app,https://aws-pixeltrip.vercel.app}"
 
 account_id() { aws sts get-caller-identity --query Account --output text; }
 ecr_registry() { echo "$(account_id).dkr.ecr.${AWS_REGION}.amazonaws.com"; }
