@@ -49,12 +49,8 @@ aws sts get-caller-identity      # confirm you are logged in to the right accoun
    exists. Your AWS user needs permission to manage EC2, ECR, IAM roles and Systems
    Manager (an administrator user works).
 2. `push-env.sh` uploads every filled-in key from `backend/.env`. It replaces the
-<<<<<<< Updated upstream
    local-only ones: `FRONTEND_URL` allows `https://pixel-trip-booth.vercel.app` and
    `https://aws-pixeltrip.vercel.app`, `ENVIRONMENT`
-=======
-   local-only ones: `FRONTEND_URL` becomes the deployed frontend's address, `ENVIRONMENT`
->>>>>>> Stashed changes
    becomes `production`, and the `/dev` test routes are switched off. Check
    `backend/.env` has the production keys you want before running it.
 3. `deploy.sh` takes a few minutes the first time. Wait about two minutes after step 1
@@ -82,24 +78,14 @@ Vercel: every `NEXT_PUBLIC_` value is visible to anyone who opens the site.
 
 These values are baked in when Vercel builds, so **redeploy after changing any of them**.
 
-<<<<<<< Updated upstream
 The default backend configuration accepts browser calls from `https://pixel-trip-booth.vercel.app`
 and `https://aws-pixeltrip.vercel.app`. Apply the settings with `push-env.sh` and restart
 the backend after changing them. Vercel preview
-=======
-The backend only accepts browser calls from the addresses in `FRONTEND_ORIGIN`
-(`deploy/config.sh`): `https://pixel-trip-booth.vercel.app`, plus
-`https://aws-pixeltrip.vercel.app` if that domain is added later. Vercel preview
->>>>>>> Stashed changes
 deployments have different addresses and will be refused. To allow another address, set
 `FRONTEND_ORIGIN` to a comma-separated list and run `push-env.sh` again:
 
 ```bash
-<<<<<<< Updated upstream
 FRONTEND_ORIGIN="https://pixel-trip-booth.vercel.app,https://aws-pixeltrip.vercel.app,https://some-preview.vercel.app" ./deploy/push-env.sh
-=======
-FRONTEND_ORIGIN="https://pixel-trip-booth.vercel.app,https://some-preview.vercel.app" ./deploy/push-env.sh
->>>>>>> Stashed changes
 ./deploy/deploy.sh --restart
 ```
 

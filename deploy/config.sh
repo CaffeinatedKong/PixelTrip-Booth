@@ -9,10 +9,6 @@ export AWS_DEFAULT_REGION="$AWS_REGION"
 APP_NAME="${APP_NAME:-pixeltrip-backend}"            # ECR repo, instance Name tag, role
 PARAM_PATH="${PARAM_PATH:-/pixeltrip/prod}"          # Parameter Store folder for the env vars
 INSTANCE_TYPE="${INSTANCE_TYPE:-t4g.small}"          # 2 vCPU, 2 GB, ARM
-<<<<<<< Updated upstream
-=======
-# Comma-separated list of the frontend addresses allowed to call the backend.
->>>>>>> Stashed changes
 FRONTEND_ORIGIN="${FRONTEND_ORIGIN:-https://pixel-trip-booth.vercel.app,https://aws-pixeltrip.vercel.app}"
 
 account_id() { aws sts get-caller-identity --query Account --output text; }
