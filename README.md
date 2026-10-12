@@ -57,6 +57,8 @@ uvicorn app.main:app --reload
 The server starts on http://localhost:8000. Verify it with `GET /health`, which
 returns `{"status": "ok"}`.
 
+Add to redeploy
+
 ## Documentation
 
 See [`docs/`](./docs) for the documentation index, architecture reference,
