@@ -49,6 +49,8 @@ class PartyRoomSchema(_Base):
     planning_stage: Literal["setup", "discover", "logistics", "build", "refine", "wrap"] = Field(
         examples=["setup"]
     )
+    demo_scenario: Literal["vietnam-five-days"] | None = None
+    demo_start: str | None = None
 
 
 class RoomMemberSchema(_Base):

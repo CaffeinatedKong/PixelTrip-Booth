@@ -12,7 +12,14 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from app.agents.errors import TripNotFoundError, UnresolvedMemberError
-from app.exceptions import BackendError, ItineraryVersionNotFoundError, VersionNotProposedError
+from app.demo import is_demo, require_demo_pair
+from app.demo.scenario import REFINEMENTS
+from app.exceptions import (
+    BackendError,
+    ItineraryVersionNotFoundError,
+    ValidationError,
+    VersionNotProposedError,
+)
 from app.schemas.planning import (
     FeedbackSchema,
     ItineraryVersionSchema,
@@ -48,6 +55,18 @@ class RefineService:
         await self._require_member_of(trip, member_id)
         version = await self._require_proposed_version(trip_id, str(request.itinerary_version_id))
 
+        room = await self._repos.room_repo.get_by_id(trip["room_id"])
+        demo = bool(room and is_demo(room))
+        if demo:
+            require_demo_pair(await self._repos.member_repo.list_by_room(trip["room_id"]))
+            script = REFINEMENTS.get(request.comment)
+            if (
+                script is None
+                or request.target.day != script[0]
+                or request.target.item_id is not None
+            ):
+                raise ValidationError("Choose the prepared demo change for this day.")
+
         row = await self._repos.feedback_repo.create(
             trip_id=trip_id,
             itinerary_version_id=version["id"],
@@ -58,7 +77,8 @@ class RefineService:
             comment=request.comment,
         )
         # Giving feedback is this member's part of the current REFINE round.
-        await self._repos.member_repo.set_stage_ready(member_id, True)
+        if not demo:
+            await self._repos.member_repo.set_stage_ready(member_id, True)
         trip = await advance_trip(self._repos.trip_repo, trip, "feedback_collected")
 
         return SubmitFeedbackResponse(
@@ -73,6 +93,10 @@ class RefineService:
         member_id = str(request.member_id)
         await self._require_member_of(trip, member_id)
         version = await self._require_proposed_version(trip_id, version_id)
+
+        room = await self._repos.room_repo.get_by_id(trip["room_id"])
+        if room and is_demo(room):
+            require_demo_pair(await self._repos.member_repo.list_by_room(trip["room_id"]))
 
         if request.decision == "refine":
             await self._repos.member_repo.set_stage_ready(member_id, True)

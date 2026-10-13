@@ -44,6 +44,7 @@ def destination(**extra):
 def repos(*, selections=None, open_flight_vote=None):
     r = SimpleNamespace(
         trip_repo=AsyncMock(),
+        room_repo=AsyncMock(),
         member_repo=AsyncMock(),
         profile_repo=AsyncMock(),
         selection_repo=AsyncMock(),
@@ -52,6 +53,7 @@ def repos(*, selections=None, open_flight_vote=None):
         agent_run_repo=AsyncMock(),
     )
     r.agent_run_repo.get_active.return_value = None
+    r.room_repo.get_by_id.return_value = {"id": ROOM}
     r.trip_repo.get_by_id.return_value = {"id": TRIP, "room_id": ROOM}
     r.trip_repo.get_room_id_for_trip.return_value = ROOM
     members = [

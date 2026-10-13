@@ -127,8 +127,8 @@ export interface UseCharacterDraft {
 /**
  * Manage the in-memory character draft and the session-only saved character.
  */
-export function useCharacterDraft(): UseCharacterDraft {
-  const [draft, dispatch] = useReducer(draftReducer, INITIAL_DRAFT);
+export function useCharacterDraft(initialDraft?: CharacterDraft): UseCharacterDraft {
+  const [draft, dispatch] = useReducer(draftReducer, initialDraft ?? INITIAL_DRAFT);
   const [sessionCharacter, setSessionCharacter] =
     useState<SessionCharacter | null>(null);
 

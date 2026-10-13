@@ -18,6 +18,7 @@ import { GuideThinking } from "./GuideThinking";
 import { GuideMessage, GuideSay, StageChat } from "./StageChat";
 import { WaitingForParty } from "./WaitingForParty";
 import { TAG_PILL } from "../lib/tagStyles";
+import { DEMO_CHANGES } from "../lib/demoScenario";
 
 export interface BuildStageContentProps {
   session: RoomSession;
@@ -129,6 +130,7 @@ function DayCard({
   decision,
   locked,
   allowReview,
+  isDemo,
 }: {
   day: ItineraryVersion["itinerary"]["days"][number];
   flight?: LockedChoice | null;
@@ -140,6 +142,7 @@ function DayCard({
   decision: "keep" | "change" | null;
   locked: boolean;
   allowReview: boolean;
+  isDemo?: boolean;
 }): ReactElement {
   const times = flightTimes(flight);
   return (
@@ -187,14 +190,23 @@ function DayCard({
       </ol>
       {allowReview ? <section className="flex flex-col gap-8 border-t-2 border-muted bg-bg-alt p-16 text-ink">
         <h4 className="font-display text-accent">DAY {day.day} REVIEW</h4>
-        <textarea
+        {isDemo ? <select
+          aria-label={`Prepared change for day ${day.day}`}
+          value={comment}
+          onChange={(event) => onCommentChange(event.target.value)}
+          disabled={locked}
+          className="border-2 border-muted bg-bg px-8 py-8 font-body text-ink"
+        >
+          <option value="">Choose a prepared change</option>
+          <option value={DEMO_CHANGES[day.day]}>{DEMO_CHANGES[day.day]}</option>
+        </select> : <textarea
           value={comment}
           onChange={(event) => onCommentChange(event.target.value)}
           rows={3}
           disabled={locked}
           placeholder="Tell MILO what to change on this day…"
           className="border-2 border-muted bg-bg px-8 py-8 font-body text-ink focus-visible:border-accent focus-visible:outline-none"
-        />
+        />}
         <div className="grid gap-8 sm:grid-cols-2">
           <PixelButton
             variant="primary"
@@ -205,7 +217,7 @@ function DayCard({
           <PixelButton
             variant="option"
             label={decision === "change" ? "✓ CHANGES REQUESTED" : "REQUEST CHANGES TO THIS DAY"}
-            disabled={locked}
+            disabled={locked || (isDemo && !comment)}
             onClick={onRefine}
           />
         </div>
@@ -231,7 +243,8 @@ export function BuildStageContent({
   const [error, setError] = useState<string | null>(null);
   const [comments, setComments] = useState<Record<number, string>>({});
   const [decisions, setDecisions] = useState<Record<number, "keep" | "change">>({});
-  const [locked, setLocked] = useState(false);
+  const [locallyLocked, setLocked] = useState(false);
+  const locked = locallyLocked || members.some((m) => m.id === memberId && m.stageReady);
   const [reviewing, setReviewing] = useState(false);
   const [refining, setRefining] = useState(false);
   const runType = refining ? "refinement" : "itinerary";
@@ -246,7 +259,7 @@ export function BuildStageContent({
     try {
       const current = await getServices().itinerary.getCurrent(tripId);
       if (current) {
-        if (showingRefinement && version && current.version > version.version) {
+        if (version && current.version > version.version) {
           setRefining(false);
           setDecisions({});
           setComments({});
@@ -401,6 +414,7 @@ export function BuildStageContent({
                   decision={decisions[day.day] ?? null}
                   locked={locked}
                   allowReview={session.room.planningStage !== "wrap"}
+                  isDemo={session.room.demoScenario === "vietnam-five-days"}
                 />
               ))}
             </div>

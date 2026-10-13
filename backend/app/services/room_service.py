@@ -8,7 +8,14 @@ from __future__ import annotations
 import secrets
 import string
 
-from app.exceptions import InvalidDisplayNameError, RoomCodeExhaustedError, RoomNotFoundError
+from app.demo import is_demo, normalized_name
+from app.exceptions import (
+    InvalidDisplayNameError,
+    RepositoryError,
+    RoomCodeExhaustedError,
+    RoomNotFoundError,
+    ValidationError,
+)
 from app.repositories.member_repository import MemberRepository
 from app.repositories.profile_repository import ProfileRepository
 from app.repositories.room_repository import RoomRepository
@@ -57,6 +64,8 @@ class RoomService:
 
     async def create_room(self, request: CreateRoomRequest) -> CreateRoomResponse:
         """Create a room with the caller as owner, in one atomic database call."""
+        if normalized_name(request.owner_display_name) == "demobob":
+            raise ValidationError("DemoAlice creates the demo room; DemoBob joins with its code.")
         room_code = await self._find_unused_room_code()
         result = await self._room_repo.create_room_with_owner(
             name=request.name,
@@ -64,6 +73,12 @@ class RoomService:
             owner_display_name=request.owner_display_name,
             appearance={},
         )
+        if normalized_name(request.owner_display_name) == "demoalice" and not is_demo(
+            result["room"]
+        ):
+            raise RepositoryError(
+                "Apply the prepared-demo database migration before creating demo rooms."
+            )
         return CreateRoomResponse(
             room=PartyRoomSchema.model_validate(result["room"]),
             member=RoomMemberSchema.model_validate(result["member"]),
@@ -86,6 +101,9 @@ class RoomService:
         trip = await require_room_trip(self._trip_repo, room["id"])
         if member is not None:
             return await self._resume_member(room, member, trip)
+
+        if is_demo(room) and normalized_name(request.display_name) != "demobob":
+            raise ValidationError("Only DemoBob can join this prepared demo room.")
 
         if not request.display_name.strip():
             raise InvalidDisplayNameError("Display name must not be empty or whitespace-only.")

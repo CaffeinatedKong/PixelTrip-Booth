@@ -18,6 +18,7 @@ from app.agents.group_profile import compute_availability_overlap
 from app.agents.messages import TextMessageContent, emit_npc_message
 from app.core.budget import party_budget
 from app.core.trip_dates import MAX_TRIP_DAYS, MIN_TRIP_DAYS, selected_trip, windows
+from app.demo import is_demo
 from app.exceptions import InvalidTripDatesError, TripDatesLockedError
 from app.schemas.planning import ChangeTripDatesRequest, DateRange, TripDatesResponse
 
@@ -64,6 +65,9 @@ class TripDatesService:
             locked_reason = LOCKED_BY_FLIGHT
         else:
             locked_reason = None
+        room = await repos.room_repo.get_by_id(room_id)
+        if room and is_demo(room):
+            locked_reason = "The prepared demo uses a fixed five-day itinerary."
 
         return TripDatesResponse(
             destination=(destination or {}).get("title") or (destination or {}).get("label"),
@@ -87,6 +91,9 @@ class TripDatesService:
         if trip is None:
             raise TripNotFoundError(trip_id)
         room_id = trip["room_id"]
+        room = await repos.room_repo.get_by_id(room_id)
+        if room and is_demo(room):
+            raise TripDatesLockedError("The prepared demo uses a fixed five-day itinerary.")
         member_id = str(request.member_id)
         owner = await repos.member_repo.get_owner(room_id)
         if owner is None or owner.get("id") != member_id:

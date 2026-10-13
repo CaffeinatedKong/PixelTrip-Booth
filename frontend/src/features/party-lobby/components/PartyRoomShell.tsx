@@ -100,6 +100,12 @@ function RoomShell({
           </h1>
         </div>
 
+        {session.room.demoScenario === "vietnam-five-days" ? (
+          <p className="border-2 border-primary bg-bg-alt p-8 font-body text-primary">
+            Prepared demo · DemoAlice + DemoBob · Five days in Vietnam. Flights and prices are sample data.
+          </p>
+        ) : null}
+
         {/* Two columns: chatbot-style stage flow (left) + persistent sidebar (right). */}
         <div className="flex flex-col gap-24 lg:grid lg:grid-cols-[2fr_1fr] lg:items-start lg:gap-24">
           <div className="flex flex-col gap-24">

@@ -12,6 +12,7 @@ from typing import Any
 
 from app.agents.errors import UnresolvedMemberError
 from app.core.budget import CURRENCY, MAX_BUDGET, MIN_BUDGET, is_valid_amount
+from app.demo import is_demo, require_demo_pair
 from app.exceptions import InvalidBudgetError, RoomNotFoundError
 from app.repositories.member_repository import MemberRepository
 from app.repositories.profile_repository import ProfileRepository
@@ -102,7 +103,11 @@ class PreferenceService:
             character = await self._profile_repo.get_character_by_member_id(member_id)
 
         trip = await require_room_trip(self._trip_repo, room["id"])
-        if await self._everyone_submitted(room["id"]):
+        members = await self._member_repo.list_by_room(room["id"]) if is_demo(room) else None
+        demo_ready = not is_demo(room) or (members is not None and len(members) == 2)
+        if is_demo(room) and demo_ready:
+            require_demo_pair(members)
+        if demo_ready and await self._everyone_submitted(room["id"]):
             # Moving to DISCOVER clears everyone's stage_ready (a database trigger on
             # planning_stage; see 20261008000000_stage_ready_reset.sql).
             trip = await advance_trip(self._trip_repo, trip, "preferences_collected")

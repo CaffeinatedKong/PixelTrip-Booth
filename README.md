@@ -63,3 +63,7 @@ Add to redeploy
 
 See [`docs/`](./docs) for the documentation index, architecture reference,
 getting-started guide, and contracts reference.
+
+For the prepared **DemoAlice / DemoBob** two-device walkthrough, see
+[`docs/PREPARED_DEMO.md`](./docs/PREPARED_DEMO.md). Apply its database migration before
+deploying the demo code; ordinary rooms continue to use the live planner.

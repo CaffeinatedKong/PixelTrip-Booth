@@ -37,7 +37,15 @@ room member` (see `supabase-architecture.md`).
 Shapes:
 - Guest: `{ id, displayName, avatarUrl? }`.
 - Party room: `{ id, roomCode, name, status: "active" | "finalised" | "cancelled",
-  planningStage }`.
+  planningStage, demoScenario?, demoStart? }`.
+  `demoScenario` is `"vietnam-five-days"` for prepared rooms, otherwise null/absent.
+  `demoStart` is the shared YYYY-MM-DD departure date, set at room creation using
+  Singapore time plus seven days. New rooms created by the reserved lobby name
+  `DemoAlice` enter this scenario; only `DemoBob` may join its second seat. These
+  names use the existing normalized display-name identity and are not credentials.
+  The demo uses normal FastAPI writes and Supabase Realtime, but both agent execution
+  entry points bypass Gemini and external tools. See [the demo guide](../../docs/PREPARED_DEMO.md)
+  for fixed profiles, sample recommendations, scripted refinement and deployment order.
 - Room member: `{ id, roomId, guestId, displayName, role: "owner" | "member", stageReady }`.
   `displayName` is the name as first entered, even when resumed with different casing.
   `stageReady` is `true` once the member has done their part in the current stage (see

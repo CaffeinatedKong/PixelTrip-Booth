@@ -2,6 +2,42 @@
 
 Reviewed: 2026-10-10 (Asia/Singapore).
 
+Prepared-demo implementation update: 2026-10-13. New DemoAlice-owned rooms carry a
+shared `vietnam-five-days` scenario and future departure date; DemoBob fills the
+second seat. Prepared execution bypasses the live graph in both synchronous and
+HTTP/background paths, including tiebreak advice. The normal Supabase lifecycle
+still handles votes, leader decisions, review readiness, selections and versions.
+Both demo profiles are prefilled, five-day sample plans exist for Da Nang, Hoi An
+and Hue, and each day offers a validated prepared refinement. Fast completed runs
+now unlock reviews whenever a newer version arrives, independent of whether the
+frontend observed a running phase. See [PREPARED_DEMO.md](./PREPARED_DEMO.md) for
+deployment order and the walkthrough. The new migration has not been applied to
+a live database, and the live two-device smoke test remains pending deployment.
+
+Demo questionnaire choices are now editable at the user's request. Changed roles
+and preferences are saved normally and update the character, while prepared
+recommendations, flights and itinerary content still come from the room scenario.
+The setup screen explains this. The updated edit/save test and TypeScript passed.
+
+Prepared tiebreak prose now explains each option's fit and trade-offs and includes
+per-member reasons based on the saved traveller role. It uses the frontend's
+`whyThisFits` field rather than the previously ignored `analysis` field. The advice
+and explanations do not explicitly label themselves demo/sample/prepared; option
+scores and leader-only decisions remain unchanged. All 14 prepared-demo backend
+tests and Ruff passed, including destination and flight copy assertions.
+
+Tiebreak copy was subsequently shortened to one sentence per traveller and one
+sentence for the main recommendation. Reasons now name Alice/Bob, connect saved
+interests to concrete destination features, and explain flight timing benefits.
+Role-based preferences are only a fallback. The prepared option scores remain
+unchanged, no LLM is called, and all 15 demo tests and Ruff passed.
+
+Destination match explanations now describe concrete food/nightlife and
+scenery/culture benefits for Alice and Bob. Single-sentence traveller-specific
+trade-offs are shared by recommendation and tiebreak cards. The demo-duration
+explanation was removed without changing the five-day dates. The 15 demo tests
+and Ruff still pass.
+
 This is a working orientation snapshot, not a replacement for the steering files or an exhaustive line-by-line audit. Repository files, spec structure and task progress were surveyed; the current BUILD/REFINE/WRAP implementation and its integration paths were read in detail. Secrets, dependency directories, generated files and local environment contents were excluded. No live API calls or database changes were made.
 
 ## Product and architecture

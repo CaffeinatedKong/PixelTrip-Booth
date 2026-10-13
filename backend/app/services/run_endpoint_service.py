@@ -106,7 +106,9 @@ class RunEndpointService(AgentRunService):
                 idempotency_key=run.get("idempotency_key"),
             )
             try:
-                final_state = await run_agent_graph(state, self._bundle())
+                from app.demo.runner import dispatch_run
+
+                final_state = await dispatch_run(state, self._bundle(), run_agent_graph)
             except Exception as exc:
                 await self._finalize_failure(run_id, trip_id, exc)
                 return

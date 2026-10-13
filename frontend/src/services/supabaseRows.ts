@@ -9,7 +9,7 @@ import { ApiError } from "@/lib/errors";
 import type { Guest, PartyRoom, RoomMember } from "@/types";
 
 /** Columns selected for each table — exactly the contract fields. */
-export const ROOM_COLUMNS = "id, room_code, name, status, planning_stage";
+export const ROOM_COLUMNS = "id, room_code, name, status, planning_stage, demo_scenario, demo_start";
 export const MEMBER_COLUMNS =
   "id, room_id, guest_id, display_name, role, stage_ready";
 /** The roster plus each member's saved character look (one row via `member_id`). */
@@ -22,6 +22,8 @@ export interface RoomRow {
   name: string;
   status: PartyRoom["status"];
   planning_stage: PartyRoom["planningStage"];
+  demo_scenario?: PartyRoom["demoScenario"];
+  demo_start?: string | null;
 }
 
 export interface MemberRow {
@@ -48,6 +50,7 @@ export function toPartyRoom(row: RoomRow): PartyRoom {
     name: row.name,
     status: row.status,
     planningStage: row.planning_stage,
+    ...(row.demo_scenario ? { demoScenario: row.demo_scenario, demoStart: row.demo_start } : {}),
   };
 }
 

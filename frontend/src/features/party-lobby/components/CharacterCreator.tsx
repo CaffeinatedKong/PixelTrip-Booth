@@ -41,6 +41,7 @@ import {
 } from "../types";
 import { toSessionCharacter } from "../lib/draft";
 import { QUESTION_HEADING } from "../lib/questionStyles";
+import { demoDraft } from "../lib/demoScenario";
 
 export interface CharacterCreatorProps {
   /** The active room session (supplies the room code + member id for saving). */
@@ -67,7 +68,8 @@ export function CharacterCreator({
     canSave,
     sessionCharacter,
     save,
-  } = useCharacterDraft();
+  } = useCharacterDraft(demoDraft(session));
+  const isDemo = session.room.demoScenario === "vietnam-five-days";
 
   // Submission state for the backend save (explicit loading + error handling).
   const [submitting, setSubmitting] = useState(false);
@@ -159,6 +161,8 @@ export function CharacterCreator({
       </div>
 
       {/* 2. Budget tier (single-select). */}
+      {isDemo ? <p className="font-body text-primary">Your demo traveller is ready. You can change your choices; the prepared destinations, flights and itinerary stay the same. Both users must save before voting.</p> : null}
+      <div className="flex flex-col gap-24">
       <VibeCardGroup
         legend="Choose your budget"
         mode="single"
@@ -220,6 +224,7 @@ export function CharacterCreator({
           onRemove={removeDateRange}
         />
       </fieldset>
+      </div>
 
       {/* 10. Save. */}
       <div className="flex flex-col gap-8">

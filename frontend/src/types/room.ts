@@ -32,6 +32,10 @@ export interface PartyRoom {
   name: string;
   status: RoomStatus;
   planningStage: PlanningStage;
+  /** Shared, server-assigned scenario; absent for ordinary rooms. */
+  demoScenario?: "vietnam-five-days" | null;
+  /** Fixed demo departure date in YYYY-MM-DD, shared by both devices. */
+  demoStart?: string | null;
 }
 
 /** A member participating in a party room. */
