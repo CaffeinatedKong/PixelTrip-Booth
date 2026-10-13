@@ -1,24 +1,28 @@
 "use client";
 
 /**
- * useGuideRun — the latest AI run of a type for the room, polled while `active`.
+ * useGuideRun — the latest AI run of a type for the room, while `active`.
  *
- * Polls every 2s while the run is pending or running, and every 6s once it has
- * finished (so a retry started by another member is picked up). Stops when the
- * screen no longer needs it. `refresh` re-reads at once (e.g. after a retry).
+ * Reads through the shared poller (see `lib/runPoller.ts`), so several hooks on one
+ * screen cost one request stream, which speeds up while a run is going and slows once it
+ * has finished. `refresh` re-reads at once (e.g. after a retry).
+ *
+ * A failed read keeps the last run (shown only if one was ever read) and sets `error`
+ * until the next read succeeds, so the screen can say the status is unavailable instead
+ * of looking like "the guide has not started".
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getServices } from "@/services";
 import type { RunProgress, RunType } from "@/services/run.contract";
 
-const ACTIVE_MS = 2000;
-const IDLE_MS = 6000;
+import { subscribeRun, type RunSubscription } from "../lib/runPoller";
 
 export interface GuideRun {
   run: RunProgress | null;
   /** True once the first read has answered, so `run: null` means "no run yet". */
   loaded: boolean;
+  /** Set while the latest status read is failing; cleared by the next good read. */
+  error: string | null;
   refresh: () => void;
 }
 
@@ -29,37 +33,26 @@ export function useGuideRun(
 ): GuideRun {
   const [run, setRun] = useState<RunProgress | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [tick, setTick] = useState(0);
-  const refresh = useCallback(() => setTick((t) => t + 1), []);
+  const [error, setError] = useState<string | null>(null);
+  const subscription = useRef<RunSubscription | null>(null);
 
   useEffect(() => {
     if (!active) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const poll = async (): Promise<void> => {
-      let next: RunProgress | null = null;
-      try {
-        next = await getServices().run.getLatestRun(roomId, runType);
-        if (!cancelled) {
-          setRun(next);
-          setLoaded(true);
-        }
-      } catch {
-        // Keep the last known run; try again on the next tick.
+    const handle = subscribeRun(roomId, runType, (update) => {
+      if (update.loaded) {
+        setRun(update.run);
+        setLoaded(true);
       }
-      if (cancelled) return;
-      const finished =
-        next?.status === "completed" || next?.status === "failed";
-      timer = setTimeout(() => void poll(), finished ? IDLE_MS : ACTIVE_MS);
-    };
-
-    void poll();
+      setError(update.error ? "Could not check on the guide. Retrying…" : null);
+    });
+    subscription.current = handle;
     return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
+      handle.unsubscribe();
+      subscription.current = null;
     };
-  }, [roomId, runType, active, tick]);
+  }, [roomId, runType, active]);
 
-  return { run, loaded, refresh };
+  const refresh = useCallback(() => subscription.current?.refresh(), []);
+
+  return { run, loaded, error, refresh };
 }

@@ -25,6 +25,7 @@ import type { RoomMember, RoomSession } from "@/types";
 
 import { useGuideRun } from "../hooks/useGuideRun";
 import { useTripDates } from "../hooks/useTripDates";
+import { StageError } from "./StageError";
 import { formatTripDates } from "./DestinationMatchCard";
 import { FlightMatchCard } from "./FlightMatchCard";
 import { GuideThinking } from "./GuideThinking";
@@ -75,7 +76,15 @@ export function FlightStageContent({
     state.selectedFlight === null &&
     !state.tiePending;
   const hasFlights = state.options.length > 0 && !datesChanged;
-  const { run, loaded, refresh } = useGuideRun(roomId, "logistics", !hasFlights);
+  const {
+    run,
+    loaded,
+    error: runReadError,
+    refresh,
+  } = useGuideRun(roomId, "logistics", !hasFlights);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,12 +94,19 @@ export function FlightStageContent({
       (next) => {
         if (!cancelled) setState(next);
       },
+      (failure) => {
+        if (!cancelled) {
+          setStreamError(
+            failure ? "Could not load the flight stage. Check your connection." : null,
+          );
+        }
+      },
     );
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [roomId]);
+  }, [roomId, reloadKey]);
 
   const advicePending = state.tiePending && state.tiebreak?.pending === true;
   const tieRun = useGuideRun(roomId, "tiebreak", advicePending);
@@ -100,7 +116,9 @@ export function FlightStageContent({
     try {
       await getServices().run.startRun(roomId, memberId, "tiebreak");
     } catch {
-      // The leader can still choose without the advice.
+      setTieError(
+        "Could not ask the guide for advice. The leader can still choose.",
+      );
     } finally {
       setRetryingAdvice(false);
       tieRun.refresh();
@@ -109,13 +127,13 @@ export function FlightStageContent({
 
   const search = async (retry: boolean): Promise<void> => {
     setRetrying(true);
+    setRunError(null);
     try {
       const tripId = await getServices().destination.getTripId(roomId);
-      if (tripId) {
-        await getServices().flight.startLogistics({ tripId, memberId, retry });
-      }
+      if (!tripId) throw new Error("trip not found");
+      await getServices().flight.startLogistics({ tripId, memberId, retry });
     } catch {
-      // The run status will still show the failure.
+      setRunError("Could not start the flight search. Please try again.");
     } finally {
       setRetrying(false);
       refresh();
@@ -185,6 +203,19 @@ export function FlightStageContent({
     <StageChat>
       <GuideSay text="Destination locked! Now let's find the party's way there." />
       <GuideSay text="I'll search flights that fit the trip's dates and your budget." />
+
+      <StageError
+        message={runError ?? streamError ?? runReadError}
+        onRetry={
+          runError !== null
+            ? () => {
+                void search(true);
+              }
+            : streamError !== null
+              ? () => setReloadKey((key) => key + 1)
+              : undefined
+        }
+      />
 
       {state.tiePending && state.tiebreak ? (
         <GuideMessage>

@@ -44,12 +44,15 @@ from app.exceptions import RepositoryError
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.repositories.agent_run_repository import AgentRunRepository
     from app.repositories.feedback_repository import FeedbackRepository
+    from app.repositories.flight_cache_repository import FlightCacheRepository
+    from app.repositories.guide_repository import GuideRepository
     from app.repositories.itinerary_version_repository import (
         ItineraryVersionRepository,
     )
     from app.repositories.member_repository import MemberRepository
     from app.repositories.message_repository import MessageRepository
     from app.repositories.profile_repository import ProfileRepository
+    from app.repositories.review_repository import ReviewRepository
     from app.repositories.room_repository import RoomRepository
     from app.repositories.selection_repository import SelectionRepository
     from app.repositories.trip_repository import TripRepository
@@ -173,6 +176,11 @@ class RepositoryBundle:
     places_tool: Any = None
     weather_tool: Any = None
     llm: Any = None
+    review_repo: ReviewRepository | None = None
+    #: Hand-written destination guides, and the last good flight searches. Both optional:
+    #: without them the stages use the guides bundled with the code and skip the cache.
+    guide_repo: GuideRepository | None = None
+    flight_cache_repo: FlightCacheRepository | None = None
 
 
 # ---------------------------------------------------------------------------

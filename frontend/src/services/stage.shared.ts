@@ -153,6 +153,29 @@ export function toTiebreakAdvice(
   };
 }
 
+/**
+ * The guide's tiebreak advice for ONE vote session, newest first in `rows`, or null.
+ *
+ * Advice belongs to a session: a tie that reopens (or a second round) must not show the
+ * previous round's advice, so this matches on the `vote_session_id` the backend stores in
+ * the summary, never on the category alone.
+ */
+export function findTiebreakAdvice(
+  rows: readonly Pick<MessageRow, "kind" | "content">[],
+  category: StageCategory,
+  voteSessionId: string,
+): TiebreakAdvice | null {
+  const wanted = `${category}_tiebreak`;
+  const advice = rows.find(
+    (m) =>
+      m.kind === "summary" &&
+      (m.content as { category?: string }).category === wanted &&
+      (m.content as { vote_session_id?: string }).vote_session_id ===
+        voteSessionId,
+  );
+  return advice ? toTiebreakAdvice(advice.content, voteSessionId) : null;
+}
+
 /** The tie as known before the guide's advice: tied options and who backed them. */
 async function provisionalTie(
   roomId: string,
@@ -270,17 +293,12 @@ export async function readStage(
   const tiePending = sessionRow?.tie_pending === true;
   let tiebreak: TiebreakAdvice | null = null;
   if (tiePending && sessionRow) {
-    const wanted = `${category}_tiebreak`;
-    const advice = rows.find(
-      (m) =>
-        m.kind === "summary" &&
-        (m.content as { category?: string }).category === wanted,
-    );
+    const advice = findTiebreakAdvice(rows, category, sessionRow.id);
     if (advice) {
-      tiebreak = toTiebreakAdvice(advice.content, sessionRow.id);
+      tiebreak = advice;
     } else {
-      // The guide is still writing its advice (it can take a minute or more). Show
-      // the tie right away from the vote itself so the leader can already choose.
+      // No advice for THIS session yet (the guide can take a minute or more). Show the
+      // tie right away from the vote itself so the leader can already choose.
       tiebreak = await provisionalTie(roomId, category, sessionRow, options, voteRows);
     }
   }
@@ -305,19 +323,27 @@ export async function readStage(
 /**
  * Push a stage's state now and on every change to the room's messages, vote
  * sessions, votes or selections. Returns the unsubscribe function.
+ *
+ * `onError` receives the failure of a read (the last good snapshot stays in place), and
+ * `null` once a later read succeeds, so a screen can show an error with a way to retry.
  */
 export function subscribeStage(
   roomId: string,
   category: StageCategory,
   onChange: (snapshot: StageSnapshot) => void,
+  onError?: (error: Error | null) => void,
 ): () => void {
   const supabase = getSupabaseClient();
 
   const push = async (): Promise<void> => {
     try {
-      onChange(await readStage(roomId, category));
-    } catch {
-      // Keep the last known state; never throw into the UI.
+      const snapshot = await readStage(roomId, category);
+      onChange(snapshot);
+      onError?.(null); // a good read clears an earlier failure
+    } catch (err) {
+      // Never throw into the UI, and keep the last good snapshot (the caller only has
+      // one after a successful read); but say so, instead of looking like "no data".
+      onError?.(err instanceof Error ? err : new Error("Could not read the stage."));
     }
   };
 

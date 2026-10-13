@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.repositories.base import BaseRepository
+from app.repositories.base import BaseRepository, is_unique_violation
 
 _TABLE = "feedback"
 
@@ -53,6 +53,58 @@ class FeedbackRepository(BaseRepository):
                 ValueError("insert returned no row"), operation="create", table=_TABLE
             )
         return row
+
+    async def upsert_open(
+        self,
+        trip_id: str,
+        itinerary_version_id: str,
+        member_id: str,
+        target: dict[str, Any],
+        comment: str,
+    ) -> dict[str, Any]:
+        """Create the feedback row, or update it when this member already has an open
+        comment on the same version and target.
+
+        Makes a retried submission harmless: the second attempt rewrites the first
+        row's comment instead of adding a duplicate. A concurrent insert that loses the
+        race against the unique index is retried once as an update.
+        """
+        existing = await self._find_open(itinerary_version_id, member_id, target)
+        if existing is None:
+            try:
+                return await self.create(trip_id, itinerary_version_id, member_id, target, comment)
+            except Exception as exc:
+                if not is_unique_violation(exc.__cause__ or exc):
+                    raise
+                existing = await self._find_open(itinerary_version_id, member_id, target)
+                if existing is None:
+                    raise
+        try:
+            response = (
+                await self._client.table(_TABLE)
+                .update({"comment": comment})
+                .eq("id", existing["id"])
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="upsert_open", table=_TABLE)
+        return self._first_row(response) or {**existing, "comment": comment}
+
+    async def _find_open(
+        self, itinerary_version_id: str, member_id: str, target: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        try:
+            response = (
+                await self._client.table(_TABLE)
+                .select("*")
+                .eq("itinerary_version_id", itinerary_version_id)
+                .eq("member_id", member_id)
+                .eq("status", "open")
+                .execute()
+            )
+        except Exception as exc:
+            self._handle_error(exc, operation="find_open", table=_TABLE)
+        return next((row for row in self._rows(response) if row.get("target") == target), None)
 
     async def list_open_by_trip(
         self,

@@ -44,6 +44,7 @@ from app.exceptions import (
     VoteTiePendingError,
 )
 from app.schemas.errors import error_body
+from app.services import run_events
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Announce each AI run step to the room as it happens (best-effort; polling is the backstop).
+run_events.install()
 
 app.include_router(health.router)
 app.include_router(rooms.router)

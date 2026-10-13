@@ -363,3 +363,97 @@ async def test_invalid_intent_responses_fall_back_to_existing_classification(int
     interpreted = await interpret_feedback(llm, base, resolved)
     assert interpreted[0][0]["_interpreted_outcome"] == "add"
     assert "_interpreted_outcome" not in row
+
+
+# --- compatible additions are additive, not a false conflict --------------------------
+
+
+def two_additions_on_day_two():
+    return [
+        {"id": "f1", "target": {"day": 2}, "comment": "add a museum after the museum activity"},
+        {"id": "f2", "target": {"day": 2}, "comment": "add a cafe before the lunch activity"},
+    ]
+
+
+def test_two_compatible_additions_on_one_day_are_not_a_conflict():
+    base = itinerary()
+    _scope, resolved, conflicts = prepare(base, two_additions_on_day_two())
+
+    assert [_classify_outcome(row["comment"]) for row, _t in resolved] == ["add", "add"]
+    assert conflicts == []
+
+
+def test_additions_do_not_collide_with_a_rewrite_of_the_same_day():
+    base = itinerary()
+    rows = [
+        {"id": "f1", "target": {"day": 2}, "comment": "add a cafe before the lunch activity"},
+        {"id": "f2", "target": {"day": 2}, "comment": "replace the museum with a gallery"},
+    ]
+
+    assert prepare(base, rows)[2] == []
+
+
+def test_additions_still_conflict_with_removal_of_the_same_target():
+    base = itinerary()
+    rows = [
+        {"id": "f1", "target": {"day": 2}, "comment": "add a cafe before the lunch activity"},
+        {"id": "f2", "target": {"day": 2}, "comment": "remove the lunch activity"},
+    ]
+
+    conflicts = prepare(base, rows)[2]
+
+    assert len(conflicts) == 1 and set(conflicts[0]["feedback_ids"]) == {"f1", "f2"}
+
+
+def test_additions_that_cannot_all_fit_the_day_conflict_and_the_oldest_wins():
+    base = itinerary()
+    resolved = prepare(base, two_additions_on_day_two())[1]
+
+    # Day 2 already holds 2 items; a cap of 3 more rows leaves room for only one.
+    crowded = detect_conflicts(resolved, {1: 1, 2: 9})
+
+    assert len(crowded) == 1 and set(crowded[0]["feedback_ids"]) == {"f1", "f2"}
+    assert detect_conflicts(resolved, {1: 1, 2: 2}) == []
+
+
+@pytest.mark.anyio
+async def test_both_compatible_additions_are_applied_and_settled():
+    base = itinerary()
+    base["days"][1]["items"][0]["time"] = "10:00"
+    base["days"][1]["items"][1]["time"] = "13:00"
+    scope, resolved, conflicts = prepare(base, two_additions_on_day_two())
+    llm = AsyncMock()
+    llm.generate_structured.return_value = _AdditionBatch(
+        additions=[
+            _ActivityAddition(
+                feedback_id="f1",
+                anchor_item_id="d2-i1",
+                placement="after",
+                title="Second museum",
+                time="11:00",
+                description="Another museum stop.",
+            ),
+            _ActivityAddition(
+                feedback_id="f2",
+                anchor_item_id="d2-i2",
+                placement="before",
+                title="Cafe",
+                time="12:00",
+                description="A coffee break before lunch.",
+            ),
+        ]
+    )
+
+    additions = await draft_activity_additions(llm, base, resolved, conflicts, [])
+    result, addressed = regenerate_affected_only(
+        base, scope, resolved, conflicts, additions=additions
+    )
+
+    ItineraryModel(**result)
+    assert [item["title"] for item in result["days"][1]["items"]] == [
+        "Museum",
+        "Second museum",
+        "Cafe",
+        "Lunch",
+    ]
+    assert sorted(addressed) == ["f1", "f2"]

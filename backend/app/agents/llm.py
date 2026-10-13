@@ -31,6 +31,10 @@ different resource and must not share that budget or its semantics.
   - the request is rejected as invalid (HTTP 400): passed over for this call only;
   - a malformed answer stops the call. Asking another model is a different
     decision from trying again.
+* **Call metadata, never call text, can be kept.** An optional ``call_sink`` receives
+  ``(operation, model, outcome, latency_ms)`` after each call, fire-and-forget: a slow or
+  failing sink never delays or fails a call. The prompt and the answer carry party data
+  (names, budgets, dates), so they are not part of what is passed on.
 * **No tool-call-cap interaction.** Do not call ``state.append_tool_response``
   or ``state.with_failed_tool_attempt`` from here. If a future requirement needs
   to bound LLM calls per run, that is a new, separate cap.
@@ -45,6 +49,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from langchain_core.exceptions import OutputParserException
@@ -208,11 +213,17 @@ def _record_call(
         )
 
 
+#: ``(operation, model, outcome, latency_ms)``; see ``LLMClient``'s ``call_sink``.
+CallSink = Callable[[str, str | None, str, int | None], Awaitable[None]]
+
+
 class LLMClient:
     """Wraps one Gemini chat model behind a structured-output interface."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, call_sink: CallSink | None = None) -> None:
         self._settings = settings if settings is not None else get_settings()
+        self._call_sink = call_sink
+        self._sink_tasks: set[asyncio.Task[None]] = set()
         self._models: dict[str, Any] = {}  # lazily constructed — see _get_model
         #: model name -> monotonic time before which it is skipped.
         self._unavailable_until: dict[str, float] = {}
@@ -255,6 +266,23 @@ class LLMClient:
             if self._unavailable_until.get(name, 0.0) <= now
         ]
 
+    def _log_call(self, operation: str, model: str | None, outcome: str, started: float) -> None:
+        """Hand the call's metadata to the sink without waiting for it."""
+        sink = self._call_sink
+        if sink is None:
+            return
+        latency_ms = int((_now() - started) * 1000)
+
+        async def deliver() -> None:
+            try:
+                await sink(operation, model, outcome, latency_ms)
+            except Exception as exc:  # logging a call must never affect the call
+                logger.debug("LLM call log not written (%s)", type(exc).__name__)
+
+        task = asyncio.ensure_future(deliver())
+        self._sink_tasks.add(task)
+        task.add_done_callback(self._sink_tasks.discard)
+
     @property
     def is_configured(self) -> bool:
         """Whether an API key is present, so callers can skip a doomed call."""
@@ -294,6 +322,7 @@ class LLMClient:
             # Fail before building a model or touching the network.
             raise LLMGenerationError(operation)
 
+        started = _now()
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -376,6 +405,7 @@ class LLMClient:
                             user_prompt,
                             validated,
                         )
+                        self._log_call(operation, model_name, "ok", started)
                         return validated  # type: ignore[return-value]
 
                 logger.warning("LLM call '%s' returned a response of the wrong shape", operation)
@@ -388,6 +418,7 @@ class LLMClient:
                     None,
                     "wrong response shape",
                 )
+                self._log_call(operation, model_name, "wrong_shape", started)
                 raise LLMGenerationError(operation)
 
             # This model is exhausted for this call; fall through to the next one.
@@ -396,4 +427,5 @@ class LLMClient:
         _record_call(
             self._settings, operation, None, system_prompt, user_prompt, None, "every model failed"
         )
+        self._log_call(operation, None, "all_models_failed", started)
         raise LLMGenerationError(operation)

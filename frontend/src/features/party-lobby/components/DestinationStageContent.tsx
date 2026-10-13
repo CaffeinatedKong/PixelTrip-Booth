@@ -21,6 +21,7 @@ import type { RoomMember, RoomSession } from "@/types";
 import { useGuideRun } from "../hooks/useGuideRun";
 import { GuideThinking } from "./GuideThinking";
 import { SkeletonCards } from "./SkeletonCards";
+import { StageError } from "./StageError";
 import { WaitingForParty } from "./WaitingForParty";
 import { DestinationMatchCard } from "./DestinationMatchCard";
 import { StageChat, GuideSay, GuideMessage } from "./StageChat";
@@ -58,6 +59,9 @@ export function DestinationStageContent({
   const [deciding, setDeciding] = useState(false);
   const [tieError, setTieError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,29 +71,46 @@ export function DestinationStageContent({
       if (!isOwner) return;
       try {
         const tripId = await service.getTripId(roomId);
-        if (tripId && !cancelled) {
-          await service.startDiscovery({ tripId, memberId });
-        }
+        if (!tripId) throw new Error("trip not found");
+        if (!cancelled) await service.startDiscovery({ tripId, memberId });
       } catch {
-        // Subscription still surfaces whatever the AI posts.
+        if (!cancelled) {
+          setRunError("Could not start the guide. Please try again.");
+        }
       }
     };
     void kickOff();
 
-    const unsubscribe = service.subscribeDiscover(roomId, (state) => {
-      if (!cancelled) {
-        setDiscover(state);
-        onDiscoverChange?.(state);
-      }
-    });
+    const unsubscribe = service.subscribeDiscover(
+      roomId,
+      (state) => {
+        if (!cancelled) {
+          setDiscover(state);
+          onDiscoverChange?.(state);
+        }
+      },
+      (failure) => {
+        if (!cancelled) {
+          setStreamError(
+            failure
+              ? "Could not load the destinations. Check your connection."
+              : null,
+          );
+        }
+      },
+    );
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, [roomId, memberId, isOwner, onDiscoverChange]);
+  }, [roomId, memberId, isOwner, onDiscoverChange, reloadKey]);
 
   const vote = discover.vote;
-  const { run, refresh } = useGuideRun(
+  const {
+    run,
+    error: runReadError,
+    refresh,
+  } = useGuideRun(
     roomId,
     "discovery",
     discover.options.length === 0,
@@ -103,7 +124,9 @@ export function DestinationStageContent({
     try {
       await getServices().run.startRun(roomId, memberId, "tiebreak");
     } catch {
-      // The leader can still choose without the advice.
+      setTieError(
+        "Could not ask the guide for advice. The leader can still choose.",
+      );
     } finally {
       setRetryingAdvice(false);
       tieRun.refresh();
@@ -112,13 +135,14 @@ export function DestinationStageContent({
 
   const handleRetry = async (): Promise<void> => {
     setRetrying(true);
+    setRunError(null);
     try {
       const service = getServices().destination;
       const tripId = await service.getTripId(roomId);
-      if (tripId)
-        await service.startDiscovery({ tripId, memberId, retry: true });
+      if (!tripId) throw new Error("trip not found");
+      await service.startDiscovery({ tripId, memberId, retry: true });
     } catch {
-      // The run status will still show the failure.
+      setRunError("Could not start the guide. Please try again.");
     } finally {
       setRetrying(false);
       refresh();
@@ -189,6 +213,19 @@ export function DestinationStageContent({
   return (
     <StageChat>
       <GuideSay text="The party is formed! Let's find where your journey begins." />
+
+      <StageError
+        message={runError ?? streamError ?? runReadError}
+        onRetry={
+          runError !== null
+            ? () => {
+                void handleRetry();
+              }
+            : streamError !== null
+              ? () => setReloadKey((key) => key + 1)
+              : undefined
+        }
+      />
 
       {discover.tiePending && discover.tiebreak ? (
         <GuideMessage>

@@ -587,3 +587,99 @@ def test_get_model_builds_one_model_per_name_and_reuses_it(monkeypatch) -> None:
     assert first is again
     assert built == [SECOND, PRIMARY]
     assert default is not first
+
+
+# ===========================================================================
+# Call metadata sink
+# ===========================================================================
+
+
+def _client_with_sink(monkeypatch, outcomes: list[Any], sink: Any, **settings: Any):
+    client, model = make_client(monkeypatch, outcomes, **settings)
+    client._call_sink = sink
+    return client, model
+
+
+async def _drain(client: LLMClient) -> None:
+    await asyncio.gather(*list(client._sink_tasks))
+
+
+async def test_a_successful_call_reports_operation_model_outcome_and_latency(monkeypatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+
+    async def sink(*args: Any) -> None:
+        calls.append(args)
+
+    client, _model = _client_with_sink(monkeypatch, [_Candidates(destinations=["x"])], sink)
+
+    await generate(client)
+    await _drain(client)
+
+    operation, model, outcome, latency_ms = calls[0]
+    assert (operation, outcome) == ("destination_candidates", "ok")
+    assert model == client._settings.llm_model_name
+    assert isinstance(latency_ms, int) and latency_ms >= 0
+
+
+async def test_failures_are_reported_with_their_outcome(monkeypatch) -> None:
+    outcomes: list[str] = []
+
+    async def sink(_op: str, _model: str | None, outcome: str, _ms: int) -> None:
+        outcomes.append(outcome)
+
+    shape, _ = _client_with_sink(monkeypatch, [{"wrong": 1}], sink)
+    with pytest.raises(LLMGenerationError):
+        await generate(shape)
+    await _drain(shape)
+
+    down, _ = _client_with_sink(monkeypatch, [RuntimeError("x"), RuntimeError("x")], sink)
+    with pytest.raises(LLMGenerationError):
+        await generate(down)
+    await _drain(down)
+
+    assert outcomes == ["wrong_shape", "all_models_failed"]
+
+
+async def test_the_sink_never_sees_prompt_or_answer_text(monkeypatch) -> None:
+    seen: list[str] = []
+
+    async def sink(*args: Any) -> None:
+        seen.append(repr(args))
+
+    client, _model = _client_with_sink(
+        monkeypatch, [_Candidates(destinations=["Secret City, Land"])], sink
+    )
+    await generate(client)
+    await _drain(client)
+
+    assert "Secret City" not in seen[0]
+    assert SYSTEM_PROMPT not in seen[0] and USER_PROMPT not in seen[0]
+
+
+async def test_a_failing_or_slow_sink_cannot_fail_or_delay_a_call(monkeypatch) -> None:
+    async def broken(*_args: Any) -> None:
+        raise RuntimeError("database down")
+
+    started = asyncio.Event()
+
+    async def hangs(*_args: Any) -> None:
+        started.set()
+        await asyncio.sleep(3600)
+
+    expected = _Candidates(destinations=["x"])
+    client, _ = _client_with_sink(monkeypatch, [expected], broken)
+    assert await generate(client) == expected
+    await _drain(client)  # the failure is swallowed
+
+    slow, _ = _client_with_sink(monkeypatch, [expected], hangs)
+    assert await asyncio.wait_for(generate(slow), timeout=1) == expected
+    for task in list(slow._sink_tasks):
+        task.cancel()
+
+
+async def test_no_sink_means_nothing_is_scheduled(monkeypatch) -> None:
+    client, _ = make_client(monkeypatch, [_Candidates(destinations=["x"])])
+
+    await generate(client)
+
+    assert client._sink_tasks == set()

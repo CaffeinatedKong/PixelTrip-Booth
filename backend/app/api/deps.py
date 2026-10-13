@@ -25,6 +25,7 @@ Two deliberate style choices, both load-bearing:
 
 from __future__ import annotations
 
+import time
 from functools import lru_cache
 from typing import Annotated
 
@@ -33,13 +34,18 @@ from supabase import AsyncClient
 
 from app.agents.llm import LLMClient
 from app.agents.state import RepositoryBundle
+from app.core.config import get_settings
 from app.db.supabase_client import create_supabase_client
 from app.repositories.agent_run_repository import AgentRunRepository
 from app.repositories.feedback_repository import FeedbackRepository
+from app.repositories.flight_cache_repository import FlightCacheRepository
+from app.repositories.guide_repository import GuideRepository
 from app.repositories.itinerary_version_repository import ItineraryVersionRepository
+from app.repositories.llm_call_repository import LlmCallRepository
 from app.repositories.member_repository import MemberRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.profile_repository import ProfileRepository
+from app.repositories.review_repository import ReviewRepository
 from app.repositories.room_repository import RoomRepository
 from app.repositories.selection_repository import SelectionRepository
 from app.repositories.trip_repository import TripRepository
@@ -123,12 +129,52 @@ def get_feedback_repo(client: SupabaseClient) -> FeedbackRepository:
     return FeedbackRepository(client)
 
 
+def get_review_repo(client: SupabaseClient) -> ReviewRepository:
+    """Provide a :class:`ReviewRepository`."""
+    return ReviewRepository(client)
+
+
+def get_guide_repo(client: SupabaseClient) -> GuideRepository:
+    """Provide a :class:`GuideRepository`."""
+    return GuideRepository(client)
+
+
+def get_flight_cache_repo(client: SupabaseClient) -> FlightCacheRepository:
+    """Provide a :class:`FlightCacheRepository`."""
+    return FlightCacheRepository(client)
+
+
 def get_agent_run_repo(client: SupabaseClient) -> AgentRunRepository:
     """Provide an :class:`AgentRunRepository`."""
     return AgentRunRepository(client)
 
 
 # --- LLM client (spec 03) ------------------------------------------------------
+
+
+#: After a failed write the call log rests this long, so a database without the
+#: ``llm_calls`` table (migration not run yet) costs one failure, not one per call.
+LLM_LOG_REST_SECONDS = 300.0
+
+_llm_log_client: AsyncClient | None = None
+_llm_log_resting_until = 0.0
+
+
+async def _log_llm_call(
+    operation: str, model: str | None, outcome: str, latency_ms: int | None
+) -> None:
+    """Write one ``llm_calls`` row. The client calls this fire-and-forget."""
+    global _llm_log_client, _llm_log_resting_until
+    if time.monotonic() < _llm_log_resting_until:
+        return
+    try:
+        if _llm_log_client is None:
+            _llm_log_client = await create_supabase_client()
+        await LlmCallRepository(_llm_log_client).record(operation, model, outcome, latency_ms)
+    except Exception:
+        _llm_log_client = None
+        _llm_log_resting_until = time.monotonic() + LLM_LOG_REST_SECONDS
+        raise
 
 
 @lru_cache
@@ -139,7 +185,7 @@ def _shared_llm_client() -> LLMClient:
     out of quota stays skipped for a few minutes instead of being retried first
     on every single request.
     """
-    return LLMClient()
+    return LLMClient(call_sink=_log_llm_call if get_settings().log_llm_calls else None)
 
 
 def get_llm_client() -> LLMClient:
@@ -164,6 +210,8 @@ def get_agent_run_service(
     feedback_repo: Annotated[FeedbackRepository, Depends(get_feedback_repo)],
     vote_session_repo: Annotated[VoteSessionRepository, Depends(get_vote_session_repo)],
     vote_repo: Annotated[VoteRepository, Depends(get_vote_repo)],
+    guide_repo: Annotated[GuideRepository, Depends(get_guide_repo)],
+    flight_cache_repo: Annotated[FlightCacheRepository, Depends(get_flight_cache_repo)],
     llm_client: Annotated[LLMClient, Depends(get_llm_client)],
 ) -> AgentRunService:
     """Provide an :class:`AgentRunService` wired to every repository it needs."""
@@ -180,6 +228,8 @@ def get_agent_run_service(
         vote_session_repo=vote_session_repo,
         vote_repo=vote_repo,
         llm_client=llm_client,
+        guide_repo=guide_repo,
+        flight_cache_repo=flight_cache_repo,
     )
 
 
@@ -213,6 +263,9 @@ def get_repository_bundle(
     feedback_repo: Annotated[FeedbackRepository, Depends(get_feedback_repo)],
     vote_session_repo: Annotated[VoteSessionRepository, Depends(get_vote_session_repo)],
     vote_repo: Annotated[VoteRepository, Depends(get_vote_repo)],
+    review_repo: Annotated[ReviewRepository, Depends(get_review_repo)],
+    guide_repo: Annotated[GuideRepository, Depends(get_guide_repo)],
+    flight_cache_repo: Annotated[FlightCacheRepository, Depends(get_flight_cache_repo)],
     llm_client: Annotated[LLMClient, Depends(get_llm_client)],
 ) -> RepositoryBundle:
     """Provide the agent layer's bundle: all repositories on one client, plus the LLM."""
@@ -229,6 +282,9 @@ def get_repository_bundle(
         member_repo=member_repo,
         profile_repo=profile_repo,
         llm=llm_client,
+        review_repo=review_repo,
+        guide_repo=guide_repo,
+        flight_cache_repo=flight_cache_repo,
     )
 
 
@@ -267,6 +323,8 @@ def get_run_endpoint_service(repos: Repos) -> RunEndpointService:
         # Without this, runs started over HTTP would never call the model and
         # silently take every node's deterministic fallback.
         llm_client=repos.llm,
+        guide_repo=repos.guide_repo,
+        flight_cache_repo=repos.flight_cache_repo,
     )
 
 

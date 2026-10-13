@@ -38,7 +38,9 @@ ONEWAY_PATH = "/flights/search-one-way"
 #: How many listings to hand to the agent; it ranks and keeps 3-5 of them.
 MAX_OPTIONS = 10
 
-_IATA = re.compile(r"[A-Za-z]{3}")
+#: A place typed as a bare airport code. Upper-case only: "Goa" is a city (India), while
+#: "GOA" is Genoa's code, so a mixed-case three-letter word must go through the lookup.
+_IATA = re.compile(r"[A-Z]{3}")
 
 #: ``query.lower() -> airport code``. Process-wide to save quota.
 _place_cache: dict[str, str] = {}
@@ -61,6 +63,8 @@ class PricelineRapidApiClient:
         self._settings = settings
         self._transport = transport  # tests inject a fake transport; production uses None
         self._base_url = (settings.priceline_flight_api_url or DEFAULT_BASE_URL).rstrip("/")
+        #: Listings left out because their currency has no configured rate.
+        self._unconvertible = 0
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -77,6 +81,7 @@ class PricelineRapidApiClient:
         **_ignored: Any,
     ) -> dict[str, Any]:
         round_trip = bool(depart_before and depart_before > depart_after)
+        self._unconvertible = 0
         async with httpx.AsyncClient(
             base_url=self._base_url,
             headers=self._headers(),
@@ -98,6 +103,10 @@ class PricelineRapidApiClient:
             for listing in listings
             if (option := self._to_flight_option(listing)) is not None
         ]
+        if listings and not options and self._unconvertible:
+            # Every listing was priced in a currency with no rate: this provider cannot
+            # answer. One such listing among others is simply left out (see below).
+            raise UnsupportedCurrencyError("no exchange rate for the provider's currency")
         if round_trip:
             # The price is for the round trip, but listings carry no return flight
             # times. Record the return date so the trip is shown as a round trip.
@@ -136,7 +145,8 @@ class PricelineRapidApiClient:
         if currency != target:
             rate = self._settings.flight_fx_rate_table.get(currency)
             if rate is None:
-                raise UnsupportedCurrencyError("no exchange rate for the provider's currency")
+                self._unconvertible += 1
+                return None
             option["price"] = round(amount * rate, 2)
         required = ("id", "carrier", "flight_number", "origin", "destination", "depart_at")
         if any(not option[key] for key in required) or option["price"] < 0:

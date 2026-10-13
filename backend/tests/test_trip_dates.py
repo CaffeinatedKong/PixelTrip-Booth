@@ -7,7 +7,13 @@ from datetime import date
 from app.agents.nodes import discovery
 from app.agents.nodes.itinerary import _derive_day_count
 from app.agents.party_brief import build_party_brief
-from app.core.trip_dates import pick_dates, plan_trip, selected_trip, trip_for
+from app.core.trip_dates import (
+    has_bookable_window,
+    pick_dates,
+    plan_trip,
+    selected_trip,
+    trip_for,
+)
 
 TODAY = date(2026, 10, 10)  # a Saturday
 MONTH = [{"start": "2026-10-10", "end": "2026-11-10"}]  # the party is free for a month
@@ -38,14 +44,36 @@ def test_a_window_without_a_weekend_uses_the_earliest_dates():
     assert pick_dates(weekdays, 3, date(2026, 10, 1)) == (date(2026, 10, 12), date(2026, 10, 14))
 
 
-def test_a_trip_can_start_tomorrow_but_not_today_unless_nothing_else_fits():
+def test_a_trip_can_start_tomorrow_but_never_today_or_earlier():
     soon = [{"start": "2026-10-10", "end": "2026-10-13"}]
     assert pick_dates(soon, 3, TODAY) == (date(2026, 10, 11), date(2026, 10, 13))  # tomorrow
-    # Only today fits a 4-day trip here, so today is used rather than no trip at all.
-    assert pick_dates(soon, 4, TODAY) == (date(2026, 10, 10), date(2026, 10, 13))
-    # A window entirely in the past still yields dates rather than nothing.
+    # Only today would fit a 4-day trip here, and today is not bookable: no plan.
+    assert pick_dates(soon, 4, TODAY) is None
+
+
+def test_a_window_entirely_in_the_past_yields_no_dates_and_no_plan():
     past = [{"start": "2026-06-01", "end": "2026-06-05"}]
-    assert pick_dates(past, 2, TODAY) is not None
+
+    assert pick_dates(past, 2, TODAY) is None
+    assert plan_trip(past, 4, today=TODAY) is None
+
+
+def test_a_window_that_is_partly_past_only_counts_its_future_days():
+    half = [{"start": "2026-10-08", "end": "2026-10-13"}]  # TODAY is 2026-10-10
+
+    trip = plan_trip(half, 6, today=TODAY)
+
+    assert trip is not None and (trip.start, trip.end) == ("2026-10-11", "2026-10-13")
+    assert trip.days == 3 and "3 days" in trip.note
+
+
+def test_one_future_day_is_not_a_trip():
+    """The product's range is 2-14 days; a one-day overlap must not become a 1-day plan."""
+    one_day = [{"start": "2026-10-11", "end": "2026-10-11"}]
+
+    assert plan_trip(one_day, 4, today=TODAY) is None
+    assert not has_bookable_window(one_day, TODAY)
+    assert has_bookable_window([{"start": "2026-10-11", "end": "2026-10-12"}], TODAY)
 
 
 def test_never_longer_than_the_party_is_free():

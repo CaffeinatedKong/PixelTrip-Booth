@@ -50,7 +50,7 @@ I am primarily responsible for:
 I will also handle Supabase integration where required, including:
 
 - Supabase client setup
-- Authentication
+- Guest identity (room code + guest name; there is no sign-up or sign-in, and no Supabase Auth)
 - User/profile data
 - Trip data
 - Character data
@@ -788,9 +788,11 @@ The UI should not need to be rewritten.
 
 Supabase is part of my responsibilities.
 
-Expected areas include:
+Expected areas include (the maintained rules are in `.kiro/steering/`, notably
+`product.md` "Guest Access (No Sign-Up)" and `supabase-architecture.md`; if this file
+disagrees with them, they win):
 
-- Authentication
+- Guest identity: room code and guest name only, no accounts and no Supabase Auth
 - Users
 - Profiles
 - Characters

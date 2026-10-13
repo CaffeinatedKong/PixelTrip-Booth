@@ -4,6 +4,8 @@
  * Mirrors `GET /trips/{tripId}/runs/latest?runType=…`. `phase` is the real step
  * the run is on (or failed on); the UI maps it to an in-world line.
  */
+import type { Unsubscribe } from "@/types";
+
 export type RunType =
   | "discovery"
   | "logistics"
@@ -33,6 +35,18 @@ export interface RunProgress {
 export interface RunService {
   /** The room's latest run of a type (any type when omitted), or null before any run. */
   getLatestRun(roomId: string, runType?: RunType): Promise<RunProgress | null>;
+
+  /**
+   * Hear about run progress the moment it changes (Supabase Realtime Broadcast on
+   * `run:<roomId>`), instead of asking again and again. `onLive(true)` once the channel is
+   * connected, `onLive(false)` when it drops, so callers can fall back to polling. The
+   * payload is `GET .../runs/latest`'s shape and carries no party data.
+   */
+  subscribeProgress(
+    roomId: string,
+    onProgress: (run: RunProgress) => void,
+    onLive: (live: boolean) => void,
+  ): Unsubscribe;
 
   /** Start a fresh run of a type (e.g. retry the tiebreak advice). */
   startRun(roomId: string, memberId: string, runType: RunType): Promise<void>;

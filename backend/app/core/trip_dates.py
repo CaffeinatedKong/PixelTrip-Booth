@@ -14,6 +14,11 @@ free for a month does not want a month-long trip. So:
     freer at weekends), earliest first on a tie. A trip can start as soon as
     tomorrow; there is no notice period.
 
+A plan is only ever made from days that are still ahead (tomorrow or later). If the
+party's shared windows are all past, or no future stretch reaches :data:`MIN_TRIP_DAYS`,
+there is no plan (``None``) and the caller asks the party to widen their availability,
+rather than offering dates nobody can book.
+
 Every stage reads the chosen destination's ``tripDays`` / ``tripStart`` / ``tripEnd``
 (:func:`selected_trip`), so the prompt, budget, flight search and itinerary agree.
 """
@@ -33,6 +38,13 @@ DEFAULT_TRIP_DAYS = 5
 EARLIEST_START_DAYS = 1
 #: With a hard budget, the most of it the stay (daily cost x days) may use.
 STAY_BUDGET_SHARE = 0.6
+# ^ The same value as `STAY_BUDGET_SHARE` in frontend/src/features/party-lobby/lib/tripDates.ts;
+#   the rule is recorded in .kiro/steering/api-contracts.md. Change them together.
+
+
+def current_date() -> date:
+    """Today's date, as a function so tests can move the clock."""
+    return date.today()
 
 
 @dataclass(frozen=True)
@@ -58,9 +70,25 @@ def windows(overlap: list[dict[str, Any]] | None) -> list[tuple[date, date]]:
     return result
 
 
-def longest_window_days(overlap: list[dict[str, Any]] | None) -> int | None:
-    lengths = [(end - start).days + 1 for start, end in windows(overlap)]
+def future_windows(
+    overlap: list[dict[str, Any]] | None, today: date | None = None
+) -> list[tuple[date, date]]:
+    """The shared windows clipped to start no earlier than tomorrow; past days are dropped."""
+    earliest = (today or current_date()) + timedelta(days=EARLIEST_START_DAYS)
+    return [(max(start, earliest), end) for start, end in windows(overlap) if end >= earliest]
+
+
+def longest_window_days(
+    overlap: list[dict[str, Any]] | None, today: date | None = None
+) -> int | None:
+    """Length of the longest stretch the party is free from tomorrow on, or ``None``."""
+    lengths = [(end - start).days + 1 for start, end in future_windows(overlap, today)]
     return max(lengths) if lengths else None
+
+
+def has_bookable_window(overlap: list[dict[str, Any]] | None, today: date | None = None) -> bool:
+    """Whether some future stretch is long enough for a trip (:data:`MIN_TRIP_DAYS`)."""
+    return (longest_window_days(overlap, today) or 0) >= MIN_TRIP_DAYS
 
 
 def _weekend_days(start: date, days: int) -> int:
@@ -72,13 +100,13 @@ def pick_dates(
 ) -> tuple[date, date] | None:
     """The best ``days``-long stretch inside the shared windows, or ``None``.
 
-    Among stretches starting tomorrow or later, prefers the one covering the most
-    weekend days, then the earliest start. Today or past dates are only used when
-    the window leaves nothing later.
+    Only stretches starting tomorrow or later count: today and past dates are never
+    used, so a party whose windows have passed gets no plan instead of an unbookable
+    one. Among the stretches, prefers the one covering the most weekend days, then the
+    earliest start.
     """
-    today = today or date.today()
     candidates: list[date] = []
-    for start, end in windows(overlap):
+    for start, end in future_windows(overlap, today):
         last_start = end - timedelta(days=days - 1)
         day = start
         while day <= last_start:
@@ -87,10 +115,7 @@ def pick_dates(
     if not candidates:
         return None
 
-    from_tomorrow = [d for d in candidates if d >= today + timedelta(days=EARLIEST_START_DAYS)]
-    not_past = [d for d in candidates if d >= today]
-    pool = from_tomorrow or not_past or candidates
-    best = min(pool, key=lambda d: (-_weekend_days(d, days), d))
+    best = min(candidates, key=lambda d: (-_weekend_days(d, days), d))
     return best, best + timedelta(days=days - 1)
 
 
@@ -102,9 +127,13 @@ def plan_trip(
     budget_limit: float | None = None,
     today: date | None = None,
 ) -> TripPlan | None:
-    """A trusted trip plan from a suggested length, or ``None`` with no shared dates."""
-    available = longest_window_days(overlap)
-    if available is None:
+    """A trusted trip plan from a suggested length.
+
+    ``None`` when the party has no shared dates ahead of it, or none long enough for
+    :data:`MIN_TRIP_DAYS`: there is nothing bookable to plan.
+    """
+    available = longest_window_days(overlap, today)
+    if available is None or available < MIN_TRIP_DAYS:
         return None
 
     wanted = suggested_days if suggested_days and suggested_days > 0 else DEFAULT_TRIP_DAYS
@@ -121,7 +150,6 @@ def plan_trip(
             days = max(min(MIN_TRIP_DAYS, available), affordable)
             note = "Shortened to keep the stay within the party's budget."
 
-    days = max(1, days)
     dates = pick_dates(overlap, days, today)
     if dates is None:
         return None

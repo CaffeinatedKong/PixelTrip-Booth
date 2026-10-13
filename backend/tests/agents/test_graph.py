@@ -176,3 +176,17 @@ async def test_a_missing_trip_blocks_dispatch() -> None:
         await run_agent_graph(state, bundle)
 
     assert client.write_calls == []
+
+
+async def test_the_orchestrator_reports_the_reading_party_step() -> None:
+    """The progress line "reading the party" is real: it is reported at the start of a run."""
+    from unittest.mock import AsyncMock
+
+    from app.agents.nodes.orchestrator import orchestrator_node
+
+    _client, bundle = resolvable_bundle()
+    bundle = type(bundle)(**{**vars(bundle), "agent_run_repo": AsyncMock()})
+
+    await orchestrator_node(make_state(), {"configurable": {"repos": bundle}})
+
+    bundle.agent_run_repo.set_phase.assert_awaited_once_with(RUN, "reading_party")

@@ -46,9 +46,13 @@ class FlightApiService implements FlightService {
   subscribeLogistics(
     roomId: string,
     onChange: (state: LogisticsState) => void,
+    onError?: (error: Error | null) => void,
   ): Unsubscribe {
-    return subscribeStage(roomId, "flight", (snapshot) =>
-      onChange(toLogisticsState(snapshot)),
+    return subscribeStage(
+      roomId,
+      "flight",
+      (snapshot) => onChange(toLogisticsState(snapshot)),
+      onError,
     );
   }
 

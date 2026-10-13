@@ -28,6 +28,7 @@ turns it into ``ExternalToolUnavailableError``. Validation is left to
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -65,10 +66,16 @@ class FlightSearchTool(ExternalTool):
     name = "flight_search"
     _response_model = FlightSearchResponse
 
+    def _chain_budget_seconds(self) -> float:
+        """How long one attempt may spend across the whole provider chain."""
+        return float(self._settings.external_tool_timeout_seconds)
+
     def _call_timeout_seconds(self) -> float:
-        # Each provider in the chain gets the full configured timeout.
-        per_provider = float(self._settings.external_tool_timeout_seconds)
-        return per_provider * max(1, len(self._settings.flight_provider_chain))
+        # ``EXTERNAL_TOOL_TIMEOUT_SECONDS`` bounds the whole chain, not each provider:
+        # four providers must not turn 10s into 40s (then doubled by the retry). The
+        # extra second lets the chain's own deadline fire first so a partial result
+        # (e.g. an empty answer from one provider) survives instead of being cancelled.
+        return self._chain_budget_seconds() + 1.0
 
     async def _call(self, **params: Any) -> dict[str, Any]:
         """Try each provider in order; return the first non-empty result."""
@@ -81,9 +88,17 @@ class FlightSearchTool(ExternalTool):
 
         last_error: BaseException | None = None
         empty: dict[str, Any] | None = None
-        for provider in chain:
+        clock = asyncio.get_running_loop().time
+        deadline = clock() + self._chain_budget_seconds()
+        for index, provider in enumerate(chain):
+            remaining = deadline - clock()
+            if remaining <= 0:
+                break
+            # Each provider gets an even share of what is left, so one that stalls
+            # cannot starve the rest, and one that answers quickly leaves more for them.
+            share = remaining / (len(chain) - index)
             try:
-                result = await self._search(provider, **params)
+                result = await asyncio.wait_for(self._search(provider, **params), timeout=share)
             except httpx.HTTPStatusError as exc:
                 _rest_after_http_error(provider, exc.response)
                 last_error = exc
@@ -99,7 +114,8 @@ class FlightSearchTool(ExternalTool):
 
         if empty is not None:
             return empty
-        assert last_error is not None
+        if last_error is None:  # the budget ran out before any provider could be asked
+            raise TimeoutError("the flight provider chain ran out of time")
         raise last_error
 
     async def _search(self, provider: str, **params: Any) -> dict[str, Any]:

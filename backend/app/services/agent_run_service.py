@@ -47,6 +47,8 @@ from app.schemas.agent_run import AgentRunSchema
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.repositories.agent_run_repository import AgentRunRepository
     from app.repositories.feedback_repository import FeedbackRepository
+    from app.repositories.flight_cache_repository import FlightCacheRepository
+    from app.repositories.guide_repository import GuideRepository
     from app.repositories.itinerary_version_repository import ItineraryVersionRepository
     from app.repositories.member_repository import MemberRepository
     from app.repositories.message_repository import MessageRepository
@@ -122,6 +124,10 @@ class AgentRunService:
     #: The shared LLM client. Optional: with none, every node uses its
     #: deterministic behaviour, so a run never depends on a model being reachable.
     llm_client: LLMClient | None = None
+    #: Optional: without them the nodes use the guides bundled with the code and skip the
+    #: flight-search cache.
+    guide_repo: GuideRepository | None = None
+    flight_cache_repo: FlightCacheRepository | None = None
 
     def _bundle(self) -> RepositoryBundle:
         """Assemble the bundle every node reads and writes through."""
@@ -138,6 +144,8 @@ class AgentRunService:
             member_repo=self.member_repo,
             profile_repo=self.profile_repo,
             llm=self.llm_client,
+            guide_repo=self.guide_repo,
+            flight_cache_repo=self.flight_cache_repo,
         )
 
     async def trigger_run(

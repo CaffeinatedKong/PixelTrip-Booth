@@ -136,6 +136,8 @@ export interface DestinationService {
   subscribeDiscover(
     roomId: string,
     onChange: (state: DiscoverState) => void,
+    /** Called with the read failure, or `null` once a later read succeeds. */
+    onError?: (error: Error | null) => void,
   ): Unsubscribe;
 
   /** Cast (or change) this member's destination vote. */

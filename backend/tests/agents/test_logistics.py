@@ -190,6 +190,35 @@ async def test_empty_overlap_escalates_without_calling_the_flight_tool(
     assert client.calls_for("vote_sessions") == []
 
 
+async def test_dates_that_have_passed_escalate_without_calling_the_flight_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A shared window wholly before "today" cannot be flown: ask, never search."""
+    past = [{"start": "2026-03-01", "end": "2026-03-09"}]
+    client = FakeSupabaseClient()
+    wire_base_context(
+        client,
+        preferences=[preference_row(MEMBER_1, available_dates=past)],
+    )
+    client.queue("rpc:insert_message_turn", [{"id": "m1", "kind": "text"}])
+    client.queue("agent_runs", [{"id": RUN, "status": "running", "started_at": "T0"}])
+    client.queue("agent_runs", [{"id": RUN, "status": "completed"}])
+    called = False
+
+    async def _fake_call(self: Any, **_params: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        return {"options": []}
+
+    monkeypatch.setattr(logistics_module.FlightSearchTool, "_call", _fake_call)
+
+    await run_node(client)
+
+    assert called is False
+    sent = client.calls_for("rpc:insert_message_turn")[0].payload["p_messages"][0]
+    assert "passed" in str(sent)
+
+
 # ===========================================================================
 # Unresolved departure origin (Requirement 8.11)
 # ===========================================================================
@@ -452,3 +481,185 @@ async def test_a_different_category_open_session_is_left_alone(
     await run_node(client, flight_options=three_flight_options(), monkeypatch=monkeypatch)
 
     assert all(c.op != "update" for c in client.calls_for("vote_sessions"))
+
+
+# ===========================================================================
+# The saved-search cache around the flight providers
+# ===========================================================================
+
+
+class FakeFlightCache:
+    """An in-memory ``FlightCacheRepository``."""
+
+    def __init__(self, saved: Any = None, *, fail_reads: bool = False, fail_writes: bool = False):
+        self.saved = saved
+        self.writes: list[tuple[str, list[dict[str, Any]], str]] = []
+        self.fail_reads, self.fail_writes = fail_reads, fail_writes
+
+    async def get(self, key: str) -> Any:
+        if self.fail_reads:
+            raise RuntimeError("cache down")
+        return self.saved
+
+    async def put(self, key: str, options: list[dict[str, Any]], currency: str) -> None:
+        if self.fail_writes:
+            raise RuntimeError("cache down")
+        self.writes.append((key, options, currency))
+
+
+def saved_search(age_seconds: float) -> Any:
+    from datetime import UTC, datetime, timedelta
+
+    from app.repositories.flight_cache_repository import CachedSearch
+
+    return CachedSearch(
+        three_flight_options(), "SGD", datetime.now(UTC) - timedelta(seconds=age_seconds)
+    )
+
+
+SEARCH = {
+    "origin": "NRT",
+    "destination": "Osaka, Japan",
+    "depart_after": "2026-06-05",
+    "depart_before": "2026-06-10",
+}
+
+
+def tool_returning(options: list[dict[str, Any]] | Exception) -> Any:
+    from unittest.mock import AsyncMock
+
+    from app.agents.tools.base import FlightSearchResponse
+
+    tool = AsyncMock()
+    if isinstance(options, Exception):
+        tool.invoke.side_effect = options
+    else:
+        response = FlightSearchResponse.model_validate({"options": options})
+        tool.invoke.return_value = (response, make_state().append_tool_response({"ok": True}))
+    return tool
+
+
+def bundle_with_cache(cache: FakeFlightCache) -> Any:
+    import dataclasses
+
+    return dataclasses.replace(wired_bundle(FakeSupabaseClient()), flight_cache_repo=cache)
+
+
+async def test_a_recent_saved_search_is_reused_without_calling_the_provider() -> None:
+    cache = FakeFlightCache(saved_search(600))
+    tool = tool_returning(RuntimeError("must not be called"))
+
+    response, state, saved_at = await logistics_module._search_flights(
+        bundle_with_cache(cache), make_state(), tool, SEARCH
+    )
+
+    tool.invoke.assert_not_awaited()
+    assert [o.id for o in response.options] == ["F-1", "F-2", "F-3"]
+    assert saved_at is None, "a fresh saved search is not presented as old"
+    assert state.external_tool_responses, "the guardrail checks flights against this record"
+
+
+async def test_a_live_search_is_saved_for_next_time() -> None:
+    cache = FakeFlightCache(saved_search(4 * 3600))  # saved, but too old to reuse
+    tool = tool_returning(three_flight_options())
+
+    _response, _state, saved_at = await logistics_module._search_flights(
+        bundle_with_cache(cache), make_state(), tool, SEARCH
+    )
+
+    tool.invoke.assert_awaited_once()
+    assert saved_at is None
+    key, options, currency = cache.writes[0]
+    assert key == "nrt|osaka, japan|2026-06-05|2026-06-10"
+    assert [o["id"] for o in options] == ["F-1", "F-2", "F-3"] and currency
+
+
+async def test_an_empty_live_answer_is_not_saved_over_a_good_one() -> None:
+    cache = FakeFlightCache()
+    tool = tool_returning([])
+
+    await logistics_module._search_flights(bundle_with_cache(cache), make_state(), tool, SEARCH)
+
+    assert cache.writes == []
+
+
+async def test_when_every_provider_fails_the_last_saved_search_is_shown_with_its_age() -> None:
+    from app.agents.errors import ExternalToolUnavailableError
+
+    cache = FakeFlightCache(saved_search(2 * 86400))
+    tool = tool_returning(ExternalToolUnavailableError("flight_search"))
+
+    response, state, saved_at = await logistics_module._search_flights(
+        bundle_with_cache(cache), make_state(), tool, SEARCH
+    )
+
+    assert len(response.options) == 3
+    assert saved_at is not None
+    assert state.external_tool_responses
+
+
+async def test_with_nothing_saved_a_provider_outage_still_fails_the_run() -> None:
+    from app.agents.errors import ExternalToolUnavailableError
+
+    with pytest.raises(ExternalToolUnavailableError):
+        await logistics_module._search_flights(
+            bundle_with_cache(FakeFlightCache()),
+            make_state(),
+            tool_returning(ExternalToolUnavailableError("flight_search")),
+            SEARCH,
+        )
+
+
+async def test_a_search_too_old_to_trust_is_not_shown_during_an_outage() -> None:
+    from app.agents.errors import ExternalToolUnavailableError
+
+    with pytest.raises(ExternalToolUnavailableError):
+        await logistics_module._search_flights(
+            bundle_with_cache(FakeFlightCache(saved_search(10 * 86400))),
+            make_state(),
+            tool_returning(ExternalToolUnavailableError("flight_search")),
+            SEARCH,
+        )
+
+
+async def test_a_broken_cache_never_breaks_the_search() -> None:
+    cache = FakeFlightCache(fail_reads=True, fail_writes=True)
+    tool = tool_returning(three_flight_options())
+
+    response, _state, saved_at = await logistics_module._search_flights(
+        bundle_with_cache(cache), make_state(), tool, SEARCH
+    )
+
+    assert len(response.options) == 3 and saved_at is None
+
+
+async def test_no_cache_configured_behaves_as_before() -> None:
+    import dataclasses
+
+    bundle = dataclasses.replace(wired_bundle(FakeSupabaseClient()), flight_cache_repo=None)
+    tool = tool_returning(three_flight_options())
+
+    response, _state, saved_at = await logistics_module._search_flights(
+        bundle, make_state(), tool, SEARCH
+    )
+
+    assert len(response.options) == 3 and saved_at is None
+
+
+def test_saved_prices_are_labelled_on_the_card_and_never_passed_off_as_live() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.agents.tools.base import FlightOption
+
+    options = [FlightOption(**o) for o in three_flight_options()]
+    saved_at = datetime.now(UTC) - timedelta(hours=5)
+
+    proposal = logistics_module._build_proposal(options, saved_at=saved_at)
+
+    for item in proposal["items"]:
+        meta = item["meta"]
+        assert meta["tradeOff"].startswith("Saved price from 5 hours ago")
+        assert "Saved price" in meta["tags"]
+        assert meta["priceAsOf"] == saved_at.isoformat()
+    live = logistics_module._build_proposal(options)
+    assert all("priceAsOf" not in i["meta"] for i in live["items"])

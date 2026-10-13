@@ -18,6 +18,21 @@ Notes:
 - All shapes below are conceptual (field lists), not implementation code. IDs are UUID
   strings; timestamps are ISO 8601 strings.
 
+## Trust boundary: a member id is the only credential
+
+There are no accounts, so the only proof of who is asking is the `memberId` in the
+request. Member ids are readable by anyone who can read the room (`room_members` is
+anon-readable so the roster stays live), which means "owner only" below means **"the
+caller names the owner's member id"**, not "the caller has proven they are the owner".
+That is the accepted model for a no-sign-up game among friends who share a room code: the
+backend checks that the id belongs to the room and (for owner-only routes) that it is the
+owner's id, and it stops there. It protects against mistakes and tampering with the UI, not
+against a room member who is determined to impersonate the leader. Do not put anything
+behind these routes that would need real authorisation.
+
+The routes this applies to: change trip dates, close a vote, break a tie, and decide
+(approve/reject) an itinerary version.
+
 ## Guest Identity Flow (No Auth)
 
 There is no sign-up / sign-in. Identity is room-scoped: `room + normalized display name →
@@ -369,10 +384,31 @@ Query: `runType` (optional): `discovery`, `logistics`, `itinerary`, `refinement`
   `checking_answer`, `drafting_days`, `weighing_feedback`, `weighing_options`, `posting`
   (`null` until the first step). The frontend maps these to in-world lines
   (`frontend/src/features/party-lobby/lib/guidePhases.ts`).
-- Poll every ~2s while the guide is working (every ~6s once finished, to catch a
-  retry). `agent_runs` itself stays backend-only.
+- **Pushed, with polling as the backstop.** The backend broadcasts every change on the
+  Supabase Realtime Broadcast channel `run:<roomId>`, event `progress`, payload
+  `{ id, runType, status, phase, elapsedSeconds }` (this same shape, no party data), when a
+  run is created (`pending`), starts (`running`), moves to its next step, and ends
+  (`completed` / `failed`). Subscribe to it through `RunService.subscribeProgress`. Pushes
+  are fire-and-forget, so they can arrive out of order: ignore an earlier status of a run
+  you already hold in a later one (`pending` < `running` < `completed`/`failed`), and
+  confirm with one `GET` shortly after a run ends.
+- **Poll as a backstop.** While the channel is connected, read every ~10s during a run and
+  ~30s otherwise (to refresh `elapsedSeconds` and catch anything missed); when it is not
+  connected, every ~2s during a run and ~6s otherwise. Back off while requests fail and
+  pause in a hidden tab. All the hooks on one screen share one channel and one poll
+  (`lib/runPoller.ts`).
+- The backend answers `GET` from a 2-second in-process cache per `(tripId, runType)`,
+  dropped when a run starts, changes step or ends, so the polling that remains costs about
+  one database read per trip per second however many people are in the room
+  (`backend/scripts/load_test_run_progress.py`: 40 members, 40 reads/s before, 1 now).
+  `agent_runs` itself stays backend-only.
+- `BROADCAST_RUN_PROGRESS=false` switches pushing off; polling then works at its normal pace.
 - A `failed` run whose `phase` is `searching_flights` means the flight provider was
-  unavailable (e.g. out of monthly searches).
+  unavailable (e.g. out of monthly searches) and no earlier search was saved to fall back
+  on. The backend keeps the last successful search per route and dates
+  (`flight_search_cache`): one under 3 hours old is reused instead of searching again, and
+  when every provider fails one up to 7 days old is shown with each card tagged `Saved
+  price` and `meta.priceAsOf` set. Flights are never invented or estimated.
 
 Errors: `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
 
@@ -406,6 +442,10 @@ A member comments on the version under review (the latest `proposed` one).
   itinerary), because the AI revises the plan day by day and activity by activity.
   `section` is optional extra context. Feedback naming neither is rejected with `422`.
 - `comment`: 1–1000 characters, not blank.
+- **Idempotent per member, version and target.** A member has at most one open comment
+  per `(itineraryVersionId, target)`: sending the same target again rewrites that
+  comment instead of adding a row. So a client that retries a half-failed multi-day review
+  (some days saved, then the review call failed) never duplicates feedback.
 
 `201` response: `{ "feedback": { id, tripId, itineraryVersionId, memberId, target, comment,
 status: "open" }, "trip": { … } }`. The member is marked ready for this round and the trip
@@ -416,6 +456,35 @@ moves to `feedback_collected`. To act on the feedback, start a `refinement` run
 Errors: `404 TRIP_NOT_FOUND`, `404 ITINERARY_VERSION_NOT_FOUND`, `409 VERSION_NOT_PROPOSED`
 (the version is superseded, approved, or rejected), `422 MEMBER_NOT_RESOLVED`,
 `422 VALIDATION_ERROR`, `503 DATABASE_ERROR`.
+
+### `POST /trips/{tripId}/itinerary/versions/{versionId}/review` — lock in a review (REFINE)
+
+Each member reviews the version under review once everyone has read it, saying whether
+they are happy (`approve`) or want changes (`refine`, with feedback sent beforehand through
+`POST /trips/{tripId}/feedback`).
+
+```json
+{ "memberId": "…", "decision": "approve" }
+```
+
+- `decision` is `"approve"` or `"refine"`. It is **stored against this version** (one per
+  member; sending it again changes it), so each new version starts a fresh round.
+  Approval never reads the shared `stageReady` flag, which preferences and votes also set.
+- `allReady` is `true` once **every** room member has a decision on this version.
+- The version is approved only when `allReady`, every decision is `approve`, **and** no
+  feedback is still open. The trip then moves to `trip_approved` (stage `wrap`) and the
+  guide posts its final `summary`.
+- `needsRefinement` is `true` when `allReady` and open feedback exists: the caller starts a
+  `refinement` run (`POST /trips/{tripId}/runs`). A `refine` decision with no open feedback
+  does **not** start a run (there is nothing to act on) and also does not approve; it holds
+  approval until that member changes their decision or adds feedback.
+- `stageReady` is still raised for the member, so the "waiting for X of N" line counts them.
+
+`200` response: `{ "version": { … }, "trip": { … }, "allReady": false, "needsRefinement": false }`.
+
+Errors: `404 TRIP_NOT_FOUND`, `404 ITINERARY_VERSION_NOT_FOUND`, `409 VERSION_NOT_PROPOSED`
+(the version is superseded, approved, or rejected), `422 MEMBER_NOT_RESOLVED` (the member
+is not in this trip's room), `422 VALIDATION_ERROR`, `503 DATABASE_ERROR`.
 
 ### `POST /trips/{tripId}/itinerary/versions/{versionId}/decision` — approve or reject (owner only)
 
@@ -531,10 +600,18 @@ note. The caller then starts a fresh `logistics` run (a new idempotency key) to 
 flights for the new dates. A flight vote that is `closed` with no flight selection means
 "dates changed, search again": the frontend hides those flights.
 
+The change is **one database transaction** (`change_trip_dates`): it holds the room, so two
+changes in one room queue up; it re-checks that no flight is locked and that the plan is
+still the one the caller read; and it writes the plan, closes the old flight vote and resets
+readiness together. A flight can only be locked from a vote that is still open (a database
+trigger), so a vote that finishes at the same moment as a date change cannot lock a flight
+for the old dates.
+
 Errors: `422 MEMBER_NOT_RESOLVED` (not the owner), `404 NOT_FOUND` (no destination chosen yet),
 `422 INVALID_TRIP_DATES` (length outside `minDays`–`maxDays`, start in the past, or
 outside every window; the message is safe to show), `409 TRIP_DATES_LOCKED` (flight
-already locked, or a flight search is running; the message is safe to show),
+already locked, a flight search is running, or the dates were just changed by someone
+else; the message is safe to show),
 `404 TRIP_NOT_FOUND`, `503 DATABASE_ERROR`.
 
 ### `POST /trips/{tripId}/export` — the final, shareable trip (WRAP)
@@ -707,7 +784,21 @@ never become cards. Destination `meta` also carries:
 AI suggests a length per destination; the backend keeps it within 2–14 days and within the
 days the party is free, shortens it if the stay would use more than 60% of a hard budget,
 and picks dates that cover the most weekend days (earliest first on a tie; a trip can
-start as soon as tomorrow). The vote is on the destination *with* its trip plan; the
+start as soon as tomorrow, never today or earlier).
+
+**Single source for the stay-budget share.** `STAY_BUDGET_SHARE = 0.6`: with a hard budget
+the stay (`dailyCostSgd × days`) may use at most 60% of it, leaving the rest for flights
+and activities, so `days ≤ floor(0.6 × budgetLimit ÷ dailyCostSgd)` (but never below 2 days,
+or below the longest free window if that is shorter). The backend applies it in
+`app/core/trip_dates.py` and the sidebar's date preview applies it in
+`src/features/party-lobby/lib/tripDates.ts`; both must use this value, and a change here
+is a change to both.
+
+**Only future dates are planned.** Free windows are clipped to start tomorrow, and a plan
+needs at least 2 days left in some window. If the shared windows are all past, or no future
+stretch reaches 2 days, there is no plan: DISCOVER and LOGISTICS ask the party to widen their
+availability (the guide posts an escalation with a `widen_dates` option) instead of
+recommending dates nobody can book. The vote is on the destination *with* its trip plan; the
 locked selection keeps `tripDays` / `tripStart` / `tripEnd`, and the flight search, budget
 and itinerary all use them. Cards without a plan get a default 5-day trip.
 
@@ -715,8 +806,13 @@ and itinerary all use them. Cards without a plan get a default 5-day trip.
 budget + 0.2 × season + 0.2 × tripLength). Suggestions whose cost for the trip clearly
 exceeds the party's budget are dropped while enough options remain, and at most two cards
 come from one country. If the LLM is unavailable, the backend still fills every key: places
-matching the party's trip types, `score` 85 for a place the party named and 70 otherwise,
-plain copy, and `scoreBreakdown`/`estimatedDailyCostSgd` set to `null`.
+matching the party's trip types, affordable ones first, `score` 85 for a place the party
+named and 70 otherwise, and `scoreBreakdown` set to `null`. A place with a hand-written
+guide (Supabase tables `destination_guides` / `destination_activities`; a copy ships with the
+backend as a safety net) gets that guide's description, details, tags,
+`estimatedDailyCostSgd` and typical `tripDays`; any other place gets plain copy with
+`estimatedDailyCostSgd` `null`. Nothing LLM-written is ever stored for reuse, because it
+would carry one party's names and dates into another's trip.
 
 ```json
 {

@@ -15,5 +15,14 @@ export class MockRunService implements RunService {
     };
   }
 
+  subscribeProgress(
+    _roomId: string,
+    _onProgress: (run: RunProgress) => void,
+    onLive: (live: boolean) => void,
+  ): () => void {
+    onLive(false); // nothing is pushed in mock mode; callers poll
+    return () => {};
+  }
+
   async startRun(): Promise<void> {}
 }

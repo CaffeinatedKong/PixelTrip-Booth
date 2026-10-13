@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from app.agents.errors import DestinationNotSelectedError, UnresolvedMemberError
-from app.exceptions import InvalidTripDatesError, TripDatesLockedError
+from app.exceptions import InvalidTripDatesError, RepositoryError, TripDatesLockedError
 from app.schemas.planning import ChangeTripDatesRequest
 from app.services.trip_dates_service import LOCKED_BY_FLIGHT, TripDatesService
 
@@ -83,10 +83,11 @@ def repos(*, selections=None, open_flight_vote=None):
 
     r.selection_repo.get_by_room_and_kind.side_effect = by_kind
 
-    async def upsert(_room, kind, data, vote_session_id=None):
-        rows[kind] = data
+    async def change_trip_dates(_room, expected, data):
+        rows["destination"] = data
+        return "ok"
 
-    r.selection_repo.upsert.side_effect = upsert
+    r.selection_repo.change_trip_dates.side_effect = change_trip_dates
     r.vote_session_repo.get_open_by_room_and_category.return_value = open_flight_vote
     return r
 
@@ -119,7 +120,7 @@ async def test_the_dates_lock_once_a_flight_is_chosen_or_before_a_destination():
 
 
 @anyio
-async def test_the_leader_changes_the_dates_and_the_old_flight_vote_is_closed():
+async def test_the_leader_changes_the_dates_in_one_atomic_database_call():
     r = repos(open_flight_vote={"id": "vs-flight", "tie_pending": True})
 
     dates = await TripDatesService(r).change(TRIP, change(days=6, start_in=10))
@@ -127,16 +128,48 @@ async def test_the_leader_changes_the_dates_and_the_old_flight_vote_is_closed():
     assert dates.trip_days == 6
     assert (dates.trip_start.isoformat(), dates.trip_end.isoformat()) == (iso(10), iso(15))
     assert dates.why_this_long == "Set by the party leader."
-    saved = r.selection_repo.upsert.await_args
-    assert saved.args[1] == "destination" and saved.kwargs["vote_session_id"] == "vs-dest"
-    assert saved.args[2]["title"] == "Penang, Malaysia"  # the rest of the choice is kept
-    # The flight vote was for the old dates: tie cleared, vote closed, everyone un-readied.
-    r.vote_session_repo.clear_tie_pending.assert_awaited_once_with("vs-flight")
-    r.vote_session_repo.close.assert_awaited_once_with("vs-flight")
-    assert [c.args for c in r.member_repo.set_stage_ready.await_args_list] == [
-        (OWNER, False),
-        (MEMBER, False),
-    ]
+    r.selection_repo.change_trip_dates.assert_awaited_once()
+    room_id, expected, data = r.selection_repo.change_trip_dates.await_args.args
+    assert room_id == ROOM
+    # The database compares the plan we read with the one it holds, under the room lock.
+    assert expected == {"tripDays": 4, "tripStart": iso(5), "tripEnd": iso(8)}
+    assert data["title"] == "Penang, Malaysia"  # the rest of the choice is kept
+    assert (data["tripDays"], data["tripStart"], data["tripEnd"]) == (6, iso(10), iso(15))
+
+
+@anyio
+async def test_closing_the_old_flight_vote_and_resetting_readiness_is_the_databases_job():
+    """All of it happens inside change_trip_dates' one transaction, not as separate requests."""
+    r = repos(open_flight_vote={"id": "vs-flight", "tie_pending": True})
+
+    await TripDatesService(r).change(TRIP, change(days=4, start_in=6))
+
+    r.vote_session_repo.close.assert_not_awaited()
+    r.vote_session_repo.clear_tie_pending.assert_not_awaited()
+    r.member_repo.set_stage_ready.assert_not_awaited()
+
+
+@anyio
+@pytest.mark.parametrize(
+    ("outcome", "error", "match"),
+    [
+        ("flight_locked", TripDatesLockedError, "flight is locked"),
+        ("changed", TripDatesLockedError, "just changed"),
+        ("no_destination", DestinationNotSelectedError, None),
+        ("no_room", RepositoryError, None),
+        ("error", RepositoryError, None),
+    ],
+)
+async def test_what_the_database_decides_under_the_lock_is_reported_precisely(
+    outcome, error, match
+):
+    """A flight locked, or another change landing, between our checks and the write."""
+    r = repos()
+    r.selection_repo.change_trip_dates.side_effect = None
+    r.selection_repo.change_trip_dates.return_value = outcome
+
+    with pytest.raises(error, match=match):
+        await TripDatesService(r).change(TRIP, change(days=4, start_in=6))
 
 
 @anyio
@@ -153,7 +186,7 @@ async def test_only_the_leader_may_change_and_only_before_the_flight_locks():
     searching.agent_run_repo.get_active.return_value = {"id": "run-1", "status": "running"}
     with pytest.raises(TripDatesLockedError, match="searching flights"):
         await TripDatesService(searching).change(TRIP, change(4, 5))
-    searching.selection_repo.upsert.assert_not_called()
+    searching.selection_repo.change_trip_dates.assert_not_called()
 
     with pytest.raises(DestinationNotSelectedError):
         await TripDatesService(repos(selections={})).change(TRIP, change(4, 5))
@@ -176,7 +209,7 @@ async def test_dates_that_do_not_fit_are_refused_and_nothing_is_saved(days, star
     with pytest.raises(InvalidTripDatesError, match=message):
         await TripDatesService(r).change(TRIP, change(days, start_in))
 
-    r.selection_repo.upsert.assert_not_called()
+    r.selection_repo.change_trip_dates.assert_not_called()
     r.vote_session_repo.close.assert_not_called()
 
 

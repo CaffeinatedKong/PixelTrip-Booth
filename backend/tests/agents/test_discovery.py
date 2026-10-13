@@ -124,6 +124,38 @@ async def test_empty_overlap_escalates_without_recommendation_or_vote_session() 
     assert client.calls_for("vote_sessions") == []
 
 
+@pytest.mark.parametrize(
+    "window",
+    [
+        {"start": "2026-03-01", "end": "2026-03-09"},  # wholly before the pinned "today"
+        {"start": "2026-05-02", "end": "2026-05-02"},  # one future day: below the 2-day minimum
+    ],
+    ids=["past", "too_short"],
+)
+async def test_unbookable_dates_ask_the_party_to_widen_instead_of_recommending(
+    window: dict[str, str],
+) -> None:
+    """Shared dates that cannot make a trip: escalate, never emit an unbookable plan."""
+    client = FakeSupabaseClient()
+    wire_base_context(
+        client,
+        preferences=[
+            preference_row(MEMBER_1, available_dates=[window]),
+            preference_row(MEMBER_2, available_dates=[window]),
+        ],
+    )
+    client.queue("rpc:insert_message_turn", [{"id": "m1", "kind": "text"}])
+    client.queue("agent_runs", [{"id": RUN, "status": "running", "started_at": "T0"}])
+    client.queue("agent_runs", [{"id": RUN, "status": "completed"}])
+
+    await run_node(client)
+
+    sent = client.calls_for("rpc:insert_message_turn")[0].payload["p_messages"][0]
+    assert sent["kind"] == "text"
+    assert "passed" in str(sent) or "fewer than" in str(sent)
+    assert client.calls_for("vote_sessions") == []
+
+
 # ===========================================================================
 # Candidate set emptied by constraints/budget (Requirement 7.9-7.10)
 # ===========================================================================

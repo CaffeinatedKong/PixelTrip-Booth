@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agents import fallback_catalog
 from app.agents.nodes import discovery
 from app.agents.nodes.logistics import _build_proposal as build_flight_proposal
 from app.agents.party_brief import build_party_brief
@@ -170,8 +171,50 @@ def test_no_llm_fills_from_the_fallback_pool_ranked_for_the_party():
     asian = {name for name, keywords in discovery.FALLBACK_POOL if "asia" in keywords}
     assert {i["title"] for i in items} <= asian and len(items) == 5
     assert items[0]["title"] in {"Bali, Indonesia", "Phuket, Thailand", "Da Nang, Vietnam"}
-    assert items[0]["meta"]["tags"] == [discovery.GUIDE_PICK]
+    assert items[0]["meta"]["tags"][0] == discovery.GUIDE_PICK
     assert items[0]["meta"]["score"] == discovery.SUGGESTED_SCORE
+
+
+def test_fallback_cards_carry_the_catalog_guide_copy_and_cost():
+    party = brief()
+    names, copy = discovery._choose_destinations(party, [], {"destinations": ["asia"]})
+    item = discovery._build_proposal(names, copy, party)["items"][0]
+    guide = fallback_catalog.lookup(item["title"])
+
+    assert guide is not None
+    assert item["description"] == guide.description
+    assert item["meta"]["details"] == guide.details
+    assert item["meta"]["estimatedDailyCostSgd"] == guide.daily_cost_sgd
+    assert item["meta"]["tripDays"] is not None
+    assert "No cost estimate" not in item["meta"]["tradeOff"]
+
+
+def test_a_place_with_no_guide_keeps_the_plain_fallback_copy():
+    party = brief(destinations=["Ulaanbaatar, Mongolia"])
+    names, copy = discovery._choose_destinations(party, [], {})
+    item = discovery._build_proposal(names, copy, party)["items"][0]
+
+    assert item["title"] == "Ulaanbaatar, Mongolia"
+    assert item["meta"]["tags"] == [discovery.PARTY_PICK]
+    assert item["meta"]["estimatedDailyCostSgd"] is None
+
+
+def test_fallback_copy_naming_a_hard_constraint_subject_is_replaced_with_plain_copy():
+    party = brief()
+    profile = {"destinations": ["asia", "beach-escape"], "hard_constraints": ["no surf"]}
+    names, copy = discovery._choose_destinations(party, [], profile)
+    items = discovery._build_proposal(names, copy, party, profile)["items"]
+
+    assert all("surf" not in str(item).lower() for item in items)
+
+
+def test_fallback_places_over_a_hard_budget_go_last():
+    party = brief(budget=600)
+    names, copy = discovery._choose_destinations(party, [], {"destinations": ["asia"]})
+
+    costs = [fallback_catalog.lookup(n).daily_cost_sgd for n in names]
+    assert "Niseko, Japan" not in names
+    assert max(costs) < fallback_catalog.lookup("Niseko, Japan").daily_cost_sgd
 
 
 # --- Flights ------------------------------------------------------------------------

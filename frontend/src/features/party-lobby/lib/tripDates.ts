@@ -4,7 +4,12 @@
  */
 import type { DateWindow, TripDates } from "@/services/tripDates.contract";
 
-/** Above this share of the budget, the stay leaves little for flights. */
+/**
+ * Above this share of the budget, the stay leaves little for flights. The same value the
+ * backend uses to shorten a trip (`STAY_BUDGET_SHARE` in `backend/app/core/trip_dates.py`);
+ * the rule is recorded in `.kiro/steering/api-contracts.md` ("Single source for the
+ * stay-budget share"). Change them together.
+ */
 export const STAY_BUDGET_SHARE = 0.6;
 
 export function addDays(iso: string, days: number): string {

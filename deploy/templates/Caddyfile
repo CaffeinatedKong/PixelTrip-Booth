@@ -1,0 +1,4 @@
+__HOST__ {
+    encode gzip
+    reverse_proxy backend:8000
+}

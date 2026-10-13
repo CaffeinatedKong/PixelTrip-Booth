@@ -43,7 +43,9 @@ ONEWAY_PATH = "/flights/v2/search-oneway"
 #: How many of a city's airport codes to try before giving up on this provider.
 MAX_AIRPORTS_TRIED = 3
 
-_IATA = re.compile(r"[A-Za-z]{3}")
+#: A place typed as a bare airport code. Upper-case only: "Goa" is a city (India), while
+#: "GOA" is Genoa's code, so a mixed-case three-letter word must go through the lookup.
+_IATA = re.compile(r"[A-Z]{3}")
 
 #: ``query.lower() -> IATA codes`` (the place's airports, in lookup order). Process-wide
 #: to save quota.
@@ -127,15 +129,25 @@ class Booking18RapidApiClient:
             ).upper()
             for o in offers
         }
+        convertible: list[dict[str, Any]] = []
         for option in options:
             currency = currency_by_id.get(option["id"], "")
-            if currency == target:
-                continue
-            rate = rates.get(currency)
-            if rate is None:
-                raise UnsupportedSearchError("no exchange rate for the provider's currency")
-            option["price"] = round(option["price"] * rate, 2)
-        return {"options": options}
+            if currency != target:
+                rate = rates.get(currency)
+                if rate is None:
+                    continue  # one offer in a currency we cannot price; keep the rest
+                option["price"] = round(option["price"] * rate, 2)
+            convertible.append(option)
+        if options and not convertible:
+            # Nothing at all could be priced: this provider cannot answer, so the chain
+            # moves on. Anything less is a partial result worth showing.
+            raise UnsupportedSearchError("no exchange rate for the provider's currency")
+        if len(convertible) < len(options):
+            logger.info(
+                "booking-com18 dropped %d offer(s) in a currency with no exchange rate",
+                len(options) - len(convertible),
+            )
+        return {"options": convertible}
 
     async def _resolve_place(self, http: httpx.AsyncClient, query: str) -> list[str]:
         """The place's IATA codes, best first. Never empty (raises instead)."""

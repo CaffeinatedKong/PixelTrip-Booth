@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from app.agents import fallback_catalog
 from app.agents.errors import (
     DestinationNotSelectedError,
     FlightNotSelectedError,
@@ -508,6 +509,27 @@ async def test_persisted_itinerary_dict_includes_id_and_status_fields() -> None:
 
 PLACEHOLDER_TITLE = "Free time to explore"
 
+#: Osaka (the default locked destination) has a guide in the fallback catalog.
+OSAKA_TITLES = {a.title for a in fallback_catalog.lookup("Osaka, Japan").activities}
+ARRIVAL_TITLE = "Arrive and check in"
+DEPARTURE_TITLE = "Pack up and head to the airport"
+
+
+def assert_fallback_plan(days: list[dict[str, Any]], *, from_day: int = 1) -> None:
+    """Days from ``from_day`` follow the guide: arrive, three sights a day, depart."""
+    for day in days[from_day - 1 :]:
+        titles = [i["title"] for i in day["items"]]
+        assert PLACEHOLDER_TITLE not in titles
+        if day["day"] == 1:
+            assert titles[0] == ARRIVAL_TITLE
+        elif day["day"] == len(days):
+            assert titles[-1] == DEPARTURE_TITLE
+        else:
+            assert len(titles) == 3
+        assert [i["id"] for i in day["items"]] == [
+            f"d{day['day']}-i{n}" for n in range(1, len(titles) + 1)
+        ]
+
 
 def draft(*days: tuple[int, list[tuple[str, str | None]]]) -> _ItineraryDraft:
     """Build a model answer: ``(day, [(title, time), ...])`` per day."""
@@ -568,30 +590,71 @@ async def test_llm_drafted_days_replace_the_placeholders() -> None:
     assert PLACEHOLDER_TITLE not in str(days)
 
 
-async def test_an_llm_failure_leaves_the_exact_placeholder_itinerary() -> None:
-    """A Gemini outage or missing key must never break the BUILD stage."""
+async def test_an_llm_failure_falls_back_to_the_destination_guide() -> None:
+    """A Gemini outage or missing key must never break BUILD, nor leave it empty."""
     baseline = await build_with_llm(FakeSupabaseClient(), None)
     failed = await build_with_llm(
         FakeSupabaseClient(), llm_double(LLMGenerationError("itinerary_days"))
     )
 
     assert failed == baseline
-    assert all(d["items"][0]["title"] == PLACEHOLDER_TITLE for d in failed)
+    assert_fallback_plan(failed)
+    assert {i["title"] for i in failed[1]["items"]} <= OSAKA_TITLES, "the guide comes first"
+    sights = [i["title"] for d in failed for i in d["items"] if i["title"] in OSAKA_TITLES]
+    assert len(sights) == len(set(sights)), "no guide activity repeats"
 
 
 async def test_an_unexpected_llm_error_also_falls_back() -> None:
     days = await build_with_llm(FakeSupabaseClient(), llm_double(RuntimeError("sdk blew up")))
 
-    assert all(d["items"][0]["title"] == PLACEHOLDER_TITLE for d in days)
+    assert_fallback_plan(days)
 
 
-async def test_days_the_model_skips_get_placeholders_and_the_rest_keep_their_plan() -> None:
+async def test_days_the_model_skips_come_from_the_guide_and_the_rest_keep_their_plan() -> None:
     partial = draft((1, [("Castle visit", "10:00")]), (2, [("Market stroll", "11:00")]))
 
     days = await build_with_llm(FakeSupabaseClient(), llm_double(partial))
 
-    titles = [d["items"][0]["title"] for d in days]
-    assert titles == ["Castle visit", "Market stroll"] + [PLACEHOLDER_TITLE] * 4
+    assert [d["items"][0]["title"] for d in days[:2]] == ["Castle visit", "Market stroll"]
+    assert_fallback_plan(days, from_day=3)
+
+
+async def test_the_fallback_guide_ranks_by_interest_and_respects_hard_constraints() -> None:
+    days = await build_with_llm(
+        FakeSupabaseClient(),
+        None,
+        preferences=[
+            preference_row(MEMBER_1, interests=["family"], hard_constraints=["no castle"])
+        ],
+    )
+
+    titles = [i["title"] for d in days for i in d["items"]]
+    assert "Osaka Castle and park" not in titles
+    assert days[1]["items"][0]["title"] == "Universal Studios Japan"
+
+
+async def test_the_fallback_guide_stays_within_the_money_left_for_activities() -> None:
+    plan = fallback_catalog.fallback_days(
+        "Osaka, Japan", 6, words={"family"}, allowed=lambda _text: True, ceiling=50
+    )
+
+    assert sum(i.cost or 0 for items in plan.values() for i in items) <= 50
+    assert "Universal Studios Japan" not in str(plan)
+    assert all(len(plan[day]) == 3 for day in range(2, 6))
+
+
+async def test_a_destination_with_no_guide_gets_a_generic_plan() -> None:
+    days = await build_with_llm(
+        FakeSupabaseClient(),
+        None,
+        selections=[destination_row(data={"title": "Ulaanbaatar, Mongolia"}), flight_row()],
+    )
+
+    assert days[0]["items"][0]["title"] == ARRIVAL_TITLE
+    assert days[-1]["items"][-1]["title"] == DEPARTURE_TITLE
+    assert all(len(d["items"]) == 3 for d in days[1:-1])
+    assert days[1]["items"][0]["title"] == "Explore central Ulaanbaatar"
+    assert PLACEHOLDER_TITLE not in str(days)
 
 
 async def test_unrequested_and_duplicate_day_numbers_are_ignored() -> None:
@@ -622,7 +685,8 @@ async def test_items_violating_a_hard_constraint_are_dropped() -> None:
     )
 
     assert [i["title"] for i in days[0]["items"]] == ["Street food crawl"]
-    assert days[1]["items"][0]["title"] == PLACEHOLDER_TITLE
+    # Day 2's only drafted item was forbidden, so the guide plans it instead.
+    assert days[1]["items"][0]["title"] in OSAKA_TITLES
 
 
 async def test_model_text_is_clipped_and_a_day_never_exceeds_ten_items() -> None:
@@ -727,3 +791,59 @@ async def test_a_destination_carrying_only_a_label_is_named_in_the_prompt_and_th
     assert "Destination: Kyoto, Japan" in llm.generate_structured.await_args.kwargs["user_prompt"]
     insert_call = next(c for c in client.calls_for("itinerary_versions") if c.op == "insert")
     assert insert_call.payload["itinerary"]["title"] == "The Kyoto, Japan Quest"
+
+
+# ===========================================================================
+# BUILD budget: the model is told, and held to, what is left for activities
+# ===========================================================================
+
+#: 1500 limit - 600 stay (100/day x the fixture's 6 days) - 320 flight = 580 for activities.
+BUDGET_WIRE: dict[str, Any] = {
+    "selections": [
+        destination_row(data={"title": "Osaka, Japan", "estimatedDailyCostSgd": 100}),
+        flight_row(data={**flight_row()["data"], "price": 320}),
+    ],
+    "preferences": [preference_row(MEMBER_1, budget=1500)],
+}
+
+
+async def test_the_prompt_gets_the_activities_only_budget_not_the_whole_trip_budget() -> None:
+    llm = llm_double(six_day_draft())
+
+    await build_with_llm(FakeSupabaseClient(), llm, **BUDGET_WIRE)
+
+    prompt = llm.generate_structured.await_args.kwargs["user_prompt"]
+    assert "Money left per person for paid activities: SGD 580" in prompt
+    assert "1,500" not in prompt
+
+
+async def test_drafted_paid_activities_beyond_the_ceiling_are_dropped() -> None:
+    def paid(title: str, cost: float) -> _ItemDraft:
+        return _ItemDraft(title=title, time="10:00", description=title, estimated_cost_sgd=cost)
+
+    answer = _ItineraryDraft(
+        days=[
+            _DayDraft(day=1, items=[paid("Theme park", 500), paid("Park stroll", 0)]),
+            _DayDraft(day=2, items=[paid("Walking tour", 60), paid("Spa day", 200)]),
+            _DayDraft(day=3, items=[paid("Private tour", 900)]),
+        ]
+    )
+
+    days = await build_with_llm(FakeSupabaseClient(), llm_double(answer), **BUDGET_WIRE)
+
+    kept = [(i["title"], i["cost"]) for d in days[:2] for i in d["items"]]
+    assert ("Theme park", 500.0) in kept and ("Walking tour", 60.0) in kept
+    assert "Spa day" not in str(days), "560 + 200 is past 580"
+    assert "Private tour" not in str(days)
+    assert [i["id"] for i in days[1]["items"]] == ["d2-i1"]
+    # The fallback fills day 3 and spends only what is left (580 - 560).
+    total = sum(i["cost"] or 0 for d in days for i in d["items"])
+    assert total <= 580
+
+
+async def test_fallback_days_stay_inside_the_ceiling_left_after_drafted_days() -> None:
+    answer = draft((1, [("Opening day", "10:00")]))
+
+    days = await build_with_llm(FakeSupabaseClient(), llm_double(answer), **BUDGET_WIRE)
+
+    assert sum(i["cost"] or 0 for d in days for i in d["items"]) <= 580

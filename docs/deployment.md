@@ -22,7 +22,8 @@ browser ──HTTPS──> Caddy (ports 80/443) ──> backend container (port 
 - **HTTPS:** Caddy runs next to the app and gets a free certificate automatically. The
   address uses sslip.io, which turns `1-2-3-4.sslip.io` into the IP `1.2.3.4`, so no
   domain has to be bought. If the team buys a domain later, point it at the server's IP
-  and change the hostname in `/opt/pixeltrip/Caddyfile` on the server.
+  and change the hostname in `deploy/templates/Caddyfile`, then deploy: every deploy sends
+  the Caddyfile and reloads Caddy when it changed.
 - **Settings and keys:** stored encrypted in AWS Parameter Store under `/pixeltrip/prod`.
   The server reads them on every deploy. They are never in the repo or the image.
 - **No SSH:** only ports 80 and 443 are open. Deploys and log access go through AWS
@@ -93,14 +94,27 @@ FRONTEND_ORIGIN="https://pixel-trip-booth.vercel.app,https://aws-pixeltrip.verce
 
 | Task | Command |
 |---|---|
-| Deploy new backend code | `./deploy/deploy.sh` |
+| Deploy new backend code | commit `backend/`, then `./deploy/deploy.sh` (`--allow-dirty` ships uncommitted changes under a unique tag) |
 | Change a key or setting | edit `backend/.env`, `./deploy/push-env.sh`, then `./deploy/deploy.sh --restart` |
 | Check it is up | `curl https://<address>/health` |
 | Read the logs | see below |
 
-A deploy restarts the backend, which takes about ten seconds. An AI run in progress at
-that moment is lost; the leader can start it again from the screen. Avoid deploying while
-people are mid-session.
+A deploy starts the new version beside the old one and switches only once the new one
+answers its health check, so a bad image or bad settings leave the previous version
+running (the deploy then fails and prints the new container's last log lines). The switch
+itself is a few seconds, and an AI run in progress at that moment is lost; the leader can
+start it again from the screen. Avoid deploying while people are mid-session.
+
+Every deploy also sends `deploy/templates/update.sh` and `deploy/templates/Caddyfile` to
+the server, so edits to either take effect on the next deploy. Image tags are the git
+commit and are immutable in ECR; deploying a commit that is already built reuses its image.
+`push-env.sh` mirrors `backend/.env` exactly: a key you remove is deleted from Parameter
+Store too, and a value spanning several lines is refused (containers cannot carry one).
+Test the update script without AWS or Docker with `./deploy/tests/update_sh_test.sh`.
+
+Run progress reaches browsers over Supabase Realtime Broadcast (on by default in a
+Supabase project; nothing to set up). If it is unreachable, the backend rests for a minute
+and browsers poll at the normal pace, so the worst case is the old behaviour.
 
 Database migrations are not part of a deploy. Run new files from `supabase/migrations/`
 in the Supabase SQL editor first, then deploy the code that needs them.
@@ -116,7 +130,8 @@ sudo docker logs --tail 50 caddy           # HTTPS and certificates
 ```
 
 **Roll back.** Every image is tagged with its git commit. On the server:
-`sudo /opt/pixeltrip/update.sh <short-commit>`.
+`sudo /opt/pixeltrip/update.sh <short-commit>` (the same safe switch applies), or check out
+that commit and run `./deploy/deploy.sh`.
 
 ## Upkeep
 

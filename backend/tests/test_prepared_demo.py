@@ -65,6 +65,7 @@ class World:
         ]
         self.messages, self.sessions, self.votes, self.selections = {}, {}, {}, {}
         self.versions, self.feedback, self.runs = [], [], {}
+        self.reviews: dict[tuple[str, str], dict] = {}
         names = [
             "trip",
             "room",
@@ -76,6 +77,7 @@ class World:
             "selection",
             "itinerary_version",
             "feedback",
+            "review",
             "agent_run",
         ]
         self.repos = SimpleNamespace(**{name + "_repo": AsyncMock() for name in names})
@@ -135,7 +137,11 @@ class World:
         r.itinerary_version_repo.get_approved.side_effect = lambda _: next(
             (v for v in self.versions if v["status"] == "approved"), None
         )
-        r.feedback_repo.create.side_effect = self.add_feedback
+        r.feedback_repo.upsert_open.side_effect = self.add_feedback
+        r.review_repo.upsert.side_effect = self.add_review
+        r.review_repo.list_by_version.side_effect = lambda vid: [
+            deepcopy(v) for (version, _), v in self.reviews.items() if version == vid
+        ]
         r.feedback_repo.list_open_by_trip.side_effect = lambda _: [
             f for f in self.feedback if f["status"] == "open"
         ]
@@ -152,7 +158,10 @@ class World:
         r.agent_run_repo.mark_failed.side_effect = lambda rid, error: self.run_status(rid, "failed")
         self.llm = AsyncMock()
         self.llm.generate_structured.side_effect = AssertionError("Demo called Gemini")
-        self.service = RunEndpointService(**vars(r), llm_client=self.llm)
+        self.service = RunEndpointService(
+            **{name: repo for name, repo in vars(r).items() if name != "review_repo"},
+            llm_client=self.llm,
+        )
 
     async def advance(self, tid, status, stage):
         if self.room["planning_stage"] != stage or status == "refinement_completed":
@@ -220,6 +229,11 @@ class World:
     async def add_feedback(self, **data):
         row = {"id": str(uuid4()), "status": "open", **data}
         self.feedback.append(row)
+        return row
+
+    async def add_review(self, trip_id, version_id, member_id, decision):
+        row = {"member_id": member_id, "itinerary_version_id": version_id, "decision": decision}
+        self.reviews[(version_id, member_id)] = row
         return row
 
     async def address(self, ids):

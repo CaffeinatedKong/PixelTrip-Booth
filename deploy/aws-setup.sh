@@ -24,6 +24,9 @@ echo "==> ECR repository"
 aws ecr describe-repositories --repository-names "$APP_NAME" >/dev/null 2>&1 ||
   aws ecr create-repository --repository-name "$APP_NAME" \
     --image-scanning-configuration scanOnPush=true >/dev/null
+# A tag always means the same image, so a rollback to "abc1234" is really abc1234.
+aws ecr put-image-tag-mutability --repository-name "$APP_NAME" \
+  --image-tag-mutability IMMUTABLE >/dev/null
 # Keep the last 10 images so the repository does not grow (and cost) without limit.
 aws ecr put-lifecycle-policy --repository-name "$APP_NAME" --lifecycle-policy-text '{
   "rules": [{"rulePriority": 1, "description": "keep the last 10 images",
@@ -90,14 +93,7 @@ if [ -z "$INSTANCE_ID" ]; then
   AMI="$(aws ssm get-parameter \
     --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 \
     --query Parameter.Value --output text)"
-  USER_DATA="$(mktemp)"
-  trap 'rm -f "$USER_DATA"' EXIT
-  sed -e "s|__REGION__|${AWS_REGION}|g" \
-      -e "s|__REGISTRY__|$(ecr_registry)|g" \
-      -e "s|__APP_NAME__|${APP_NAME}|g" \
-      -e "s|__PARAM_PATH__|${PARAM_PATH}|g" \
-      -e "s|__HOST__|${HOST}|g" \
-      ./server-init.sh > "$USER_DATA"
+  USER_DATA="./server-init.sh"   # installs Docker only; deploy.sh sends everything else
   INSTANCE_ID="$(aws ec2 run-instances \
     --image-id "$AMI" --instance-type "$INSTANCE_TYPE" \
     --iam-instance-profile "Name=${ROLE}" \

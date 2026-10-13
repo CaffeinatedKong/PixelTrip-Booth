@@ -29,9 +29,10 @@ around that is deterministic. Day count, dates, ids, ordering and the
 goes back through :class:`~app.agents.proposals.ItineraryProposal`'s strict
 validation before anything is persisted. Items that break a party hard
 constraint are dropped. The LLM is an enhancement, not a dependency: with no
-client, no API key, or a failed call, the affected days fall back to a single
-well-formed placeholder activity each, so BUILD still completes and the
-itinerary stays structurally valid and immediately refinable.
+client, no API key, or a failed call, the affected days are planned from the
+destination's hand-written guide (:func:`~app.agents.fallback_catalog.fallback_days`),
+or a generic arrive-explore-eat-depart shape for a place with no guide, so BUILD
+still completes with a usable, refinable plan.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agents import fallback_catalog
 from app.agents.errors import (
     DestinationNotSelectedError,
     FlightNotSelectedError,
@@ -52,7 +54,9 @@ from app.agents.errors import (
     PreferencesNotCollectedError,
     RepeatedVersionContentionError,
 )
-from app.agents.group_profile import compute_group_profile, format_party_for_prompt
+from app.agents.fallback_catalog import GuideCatalog
+from app.agents.group_profile import compute_group_profile, format_party_for_prompt, vibe_keywords
+from app.agents.guide_catalog_loader import load_catalog
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_for_prompt, clip_text
 from app.agents.messages import SummaryMessageContent, emit_npc_message
 from app.agents.nodes.discovery import _violates_hard_constraints
@@ -269,21 +273,40 @@ def _derive_day_count(
 # ---------------------------------------------------------------------------
 
 
-def _generate_items(day_index: int) -> list[ItineraryItemModel]:
-    """Return the deterministic placeholder for one day.
+def _party_words(group_profile: dict[str, Any]) -> set[str]:
+    """Lower-cased words the party used for what it wants to do, for ranking activities."""
+    words: set[str] = set()
+    for key in ("interests", "activities", "required_activities", "travel_styles"):
+        for entry in group_profile.get(key) or []:
+            text = str(entry).lower()
+            words.update(text.replace(",", " ").replace("-", " ").split())
+            words.update(vibe_keywords(str(entry)))
+    return words
 
-    Used for any day the LLM did not (or could not) draft. A single well-formed
-    activity keeps the itinerary structurally complete; ordering
-    (Requirement 9.6) and unique ids (Requirement 9.9) hold regardless of what
-    fills each slot.
+
+def _fallback_items(
+    destination: str,
+    day_count: int,
+    group_profile: dict[str, Any],
+    ceiling: float | None,
+    drafted_days: set[int],
+    catalog: GuideCatalog | None = None,
+) -> dict[int, list[ItineraryItemModel]]:
+    """Plan every day the LLM did not draft from the destination's guide.
+
+    Ordering (Requirement 9.6) and unique ids (Requirement 9.9) hold regardless of
+    which path filled a day.
     """
-    return [
-        ItineraryItemModel(
-            id=f"d{day_index}-i1",
-            title="Free time to explore",
-            description="The guide has not yet filled in this day's plan.",
-        )
-    ]
+    hard_constraints = [str(c) for c in (group_profile.get("hard_constraints") or [])]
+    return fallback_catalog.fallback_days(
+        destination,
+        day_count,
+        words=_party_words(group_profile),
+        allowed=lambda text: _violates_hard_constraints(text, hard_constraints) is None,
+        ceiling=ceiling,
+        skip_days=drafted_days,
+        catalog=catalog,
+    )
 
 
 class _ItemDraft(BaseModel):
@@ -409,8 +432,8 @@ async def _draft_days_with_llm(
     """Ask the LLM to draft the days, a chunk at a time.
 
     Returns whatever it managed to draft, keyed by day number. Never raises: a
-    failed chunk simply leaves its days out, and the caller fills them with the
-    placeholder.
+    failed chunk simply leaves its days out, and the caller plans them from the
+    fallback guide.
     """
     if llm is None:
         return {}
@@ -482,10 +505,12 @@ async def _draft_days_with_llm(
             )
             drafted_days = draft.days
         except LLMGenerationError:
-            logger.info("LLM itinerary drafting unavailable; using placeholder days")
+            logger.info("LLM itinerary drafting unavailable; using the fallback guide")
             continue
         except Exception:  # a malformed double or SDK surprise must not break BUILD
-            logger.info("LLM itinerary drafting returned an unusable result; using placeholders")
+            logger.info(
+                "LLM itinerary drafting returned an unusable result; using the fallback guide"
+            )
             continue
 
         for day_draft in drafted_days:
@@ -507,6 +532,41 @@ def _destination_title(destination_selection: dict[str, Any]) -> str:
     return str(data.get("title") or data.get("label") or "the destination")
 
 
+def _enforce_ceiling(drafted: dict[int, list[ItineraryItemModel]], ceiling: float | None) -> float:
+    """Drop drafted paid activities that would push the total past ``ceiling``.
+
+    Walks the days in order, keeping a running total of costed items; a paid item that
+    does not fit is dropped (free and unpriced items always stay). A day left with no
+    items is removed from ``drafted`` so the fallback guide plans it. Returns the total
+    spent by what was kept. ``None`` means no limit: nothing is dropped.
+    """
+    spent = 0.0
+    for day in sorted(drafted):
+        kept: list[ItineraryItemModel] = []
+        for item in drafted[day]:
+            cost = item.cost or 0.0
+            if ceiling is not None and cost and spent + cost > ceiling:
+                continue
+            spent += cost
+            kept.append(item)
+        # Ids stay unique and ordered; re-number so a dropped item leaves no gap.
+        kept = [item.model_copy(update={"id": f"d{day}-i{n}"}) for n, item in enumerate(kept, 1)]
+        if kept:
+            drafted[day] = kept
+        else:
+            del drafted[day]
+    return spent
+
+
+def _free_time(day_number: int) -> ItineraryItemModel:
+    """Last resort for a day nothing else could fill (every option forbidden)."""
+    return ItineraryItemModel(
+        id=f"d{day_number}-i1",
+        title="Free time to explore",
+        description="A free day to explore at your own pace.",
+    )
+
+
 def _build_itinerary(
     trip_id: str,
     room_id: str,
@@ -517,8 +577,8 @@ def _build_itinerary(
 ) -> ItineraryModel:
     """Build the itinerary object for a fresh BUILD-stage version.
 
-    ``drafted_items`` holds the LLM's validated items by day number; any day
-    absent from it gets the deterministic placeholder.
+    ``drafted_items`` holds each day's validated items by day number (from the
+    LLM or the fallback guide); a day absent from it gets one free-time item.
     """
     destination_title = _destination_title(destination_selection)
     drafted_items = drafted_items or {}
@@ -527,7 +587,7 @@ def _build_itinerary(
         ItineraryDayModel(
             day=day_number,
             date=(outbound + timedelta(days=day_number - 1)).isoformat(),
-            items=drafted_items.get(day_number) or _generate_items(day_number),
+            items=drafted_items.get(day_number) or [_free_time(day_number)],
         )
         for day_number in range(1, day_count + 1)
     ]
@@ -590,16 +650,15 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
 
     day_count = _derive_day_count(flight_selection, profile, destination_selection)
     # For an itinerary run the ceiling is what the budget leaves for paid activities
-    # once the flight and the stay are paid for; the business guardrail checks the
-    # itinerary's costed activities against it.
-    state = state.with_group_profile(
-        {
-            **profile,
-            "budget_ceiling": _activities_ceiling(
-                context, day_count, destination_selection.get("data"), flight_selection.get("data")
-            ),
-        }
+    # once the flight and the stay are paid for. Rebind ``profile`` (as logistics does)
+    # so the prompt, the fallback planner and the state all see the narrowed figure, not
+    # the party's whole-trip budget. BUILD runs no guardrail loop, so the ceiling is
+    # enforced in code by :func:`_enforce_ceiling` below.
+    ceiling = _activities_ceiling(
+        context, day_count, destination_selection.get("data"), flight_selection.get("data")
     )
+    profile = {**profile, "budget_ceiling": ceiling}
+    state = state.with_group_profile(profile)
 
     flight_data = flight_selection.get("data") or {}
     outbound = _parse_date(flight_data.get("depart_at") or flight_data.get("departAt"))
@@ -616,6 +675,17 @@ async def itinerary_node(state: AgentState, config: RunnableConfig) -> AgentStat
         day_count=day_count,
         flight_data=flight_data,
         group_profile=profile,
+    )
+    spent = _enforce_ceiling(drafted_items, ceiling)
+    drafted_items.update(
+        _fallback_items(
+            destination_title,
+            day_count,
+            profile,
+            None if ceiling is None else max(0.0, ceiling - spent),
+            set(drafted_items),
+            await load_catalog(repos),
+        )
     )
     itinerary = _build_itinerary(
         state.trip_id,

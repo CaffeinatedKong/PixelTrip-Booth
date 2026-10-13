@@ -50,6 +50,26 @@ class SelectionRepository(BaseRepository):
             self._handle_error(exc, operation="list_by_room", table=_TABLE)
         return self._rows(response)
 
+    async def change_trip_dates(
+        self, room_id: str, expected: dict[str, Any], data: dict[str, Any]
+    ) -> str:
+        """Change the destination's trip plan atomically (the ``change_trip_dates`` function).
+
+        One transaction, holding the room: it checks that no flight is locked and that the
+        plan is still ``expected`` (the caller's last read), writes ``data``, closes the stale
+        flight vote and resets every member's readiness. Returns ``"ok"``, ``"no_room"``,
+        ``"no_destination"``, ``"flight_locked"`` or ``"changed"``.
+        """
+        try:
+            response = await self._client.rpc(
+                "change_trip_dates",
+                {"p_room_id": room_id, "p_expected": expected, "p_data": data},
+            ).execute()
+        except Exception as exc:
+            self._handle_error(exc, operation="change_trip_dates", table=_TABLE)
+        result = getattr(response, "data", None)
+        return result if isinstance(result, str) else "error"
+
     async def upsert(
         self,
         room_id: str,

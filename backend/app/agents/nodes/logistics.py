@@ -37,26 +37,35 @@ place no one in the party may be starting from.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
 
-from app.agents.errors import DestinationNotSelectedError
+from app.agents.errors import DestinationNotSelectedError, ExternalToolUnavailableError
 from app.agents.group_profile import compute_group_profile
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
 from app.agents.progress import report_phase
 from app.agents.proposals import FlightRecommendationProposal
-from app.agents.tools.base import FlightOption
+from app.agents.tools.base import FlightOption, FlightSearchResponse
 from app.agents.tools.flights import FlightSearchTool
 from app.core.budget import party_budget
 from app.core.config import get_settings
-from app.core.trip_dates import trip_for
+from app.core.trip_dates import has_bookable_window, trip_for
+from app.repositories.flight_cache_repository import CachedSearch, cache_key
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.agents.state import AgentState, RepositoryBundle
 
 logger = logging.getLogger(__name__)
+
+#: A saved search younger than this is reused instead of paying for the same search again.
+FLIGHT_CACHE_FRESH_SECONDS = 3 * 3600
+
+#: When every provider fails, the last saved search up to this old is shown, marked with
+#: its age. Older than this, prices mean too little to put in front of a vote.
+FLIGHT_CACHE_STALE_SECONDS = 7 * 24 * 3600
 
 #: Requirement 8.4: a recommendation carries 3-5 items.
 MIN_RECOMMENDATION_ITEMS = 3
@@ -263,10 +272,23 @@ def overlap_of(profile: dict[str, Any]) -> list[dict[str, str]]:
     return profile.get("availability_overlap") or []
 
 
+def _age_text(seconds: float) -> str:
+    """ "45 minutes", "5 hours", "3 days": how old a saved price is, for the card."""
+    if seconds < 3600:
+        minutes = max(1, round(seconds / 60))
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    if seconds < 86400:
+        hours = round(seconds / 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    days = round(seconds / 86400)
+    return f"{days} day{'s' if days != 1 else ''}"
+
+
 def _build_proposal(
     options: list[FlightOption],
     currency: str | None = None,
     budget_left: float | None = None,
+    saved_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Build a raw flight recommendation payload from ranked options.
 
@@ -285,6 +307,15 @@ def _build_proposal(
                 f"{currency} {over:,.0f} over what the party's budget leaves for flights."
             )
             card["meta"]["tags"] = ["Over budget", *card["meta"]["tags"]][:5]
+        if saved_at is not None:
+            # Live search was down: say so on the card, never present old prices as current.
+            age = _age_text((datetime.now(saved_at.tzinfo) - saved_at).total_seconds())
+            note = (
+                f"Saved price from {age} ago (live search was unavailable); check before booking."
+            )
+            card["meta"]["tradeOff"] = f"{note} {card['meta'].get('tradeOff') or ''}".strip()
+            card["meta"]["tags"] = ["Saved price", *card["meta"]["tags"]][:5]
+            card["meta"]["priceAsOf"] = saved_at.isoformat()
         items.append(
             {
                 "id": option.id,
@@ -313,6 +344,71 @@ def _build_proposal(
         "items": items,
         "question": "Which flight suits the party best?"[:MAX_QUESTION_LENGTH],
     }
+
+
+def _saved_response(saved: CachedSearch) -> FlightSearchResponse | None:
+    """A saved search as a validated tool response, or ``None`` if it no longer fits."""
+    try:
+        return FlightSearchResponse.model_validate({"options": saved.options})
+    except Exception:  # the stored shape is older than the code; treat it as absent
+        return None
+
+
+async def _search_flights(
+    repos: RepositoryBundle, state: AgentState, tool: FlightSearchTool, params: dict[str, Any]
+) -> tuple[FlightSearchResponse, AgentState, datetime | None]:
+    """Search for flights, with the saved-search cache around the paid providers.
+
+    * A saved search younger than :data:`FLIGHT_CACHE_FRESH_SECONDS` is used as it is: the
+      same route and dates were just searched, and the providers charge per search.
+    * Otherwise the providers are asked. A successful, non-empty answer is saved.
+    * If every provider fails, the last saved search (up to
+      :data:`FLIGHT_CACHE_STALE_SECONDS` old) is used and its time is returned, so the
+      cards can say the prices are old. With nothing saved the failure propagates as before.
+
+    Returns ``(response, state, saved_at)``; ``saved_at`` is set only for the stale case.
+    Cache problems never fail the search: a broken cache is the same as an empty one.
+    Either way the response is recorded in the state, because the factual guardrail
+    checks every flight shown against the responses recorded there.
+    """
+    cache = repos.flight_cache_repo
+    key = cache_key(
+        params["origin"], params["destination"], params["depart_after"], params.get("depart_before")
+    )
+    saved: CachedSearch | None = None
+    if cache is not None:
+        try:
+            saved = await cache.get(key)
+        except Exception as exc:
+            logger.warning("Flight cache unreadable (%s); searching live", type(exc).__name__)
+        if saved is not None and saved.age_seconds <= FLIGHT_CACHE_FRESH_SECONDS:
+            reused = _saved_response(saved)
+            if reused is not None:
+                return reused, state.append_tool_response(reused.model_dump()), None
+
+    try:
+        response, state = await tool.invoke(state, **params)
+    except ExternalToolUnavailableError:
+        stale = _saved_response(saved) if saved is not None else None
+        if saved is None or stale is None or not stale.options:
+            raise
+        if saved.age_seconds > FLIGHT_CACHE_STALE_SECONDS:
+            raise
+        logger.info(
+            "Flight providers unavailable; showing the search saved %.0fs ago", saved.age_seconds
+        )
+        return stale, state.append_tool_response(stale.model_dump()), saved.fetched_at
+
+    if cache is not None and response.options:
+        try:
+            await cache.put(
+                key,
+                [option.model_dump() for option in response.options],
+                get_settings().flight_currency,
+            )
+        except Exception as exc:
+            logger.warning("Flight cache not written (%s)", type(exc).__name__)
+    return response, state, None
 
 
 async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentState:
@@ -350,11 +446,17 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
     }
     state = state.with_group_profile(profile)
 
-    if not profile["availability_overlap"]:
+    if not profile["availability_overlap"] or (
+        trip is None and not has_bookable_window(profile["availability_overlap"])
+    ):
         await perform_human_escalation(
             state,
             repos,
-            constraint="no shared travel dates exist across the party",
+            constraint=(
+                "no shared travel dates exist across the party"
+                if not profile["availability_overlap"]
+                else "the dates the party shares have passed or are too short to travel in"
+            ),
             question="Would the party like to widen their available dates?",
             options=[("widen_dates", "Widen our available dates")],
         )
@@ -383,7 +485,7 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
 
     tool = FlightSearchTool()
     await report_phase(repos, state, "searching_flights")
-    response, state = await tool.invoke(state, **search_params)
+    response, state, saved_at = await _search_flights(repos, state, tool, search_params)
 
     await report_phase(repos, state, "checking_budget")
     survivors, eliminating_reason = _filter_and_rank(response.options, profile)
@@ -434,13 +536,13 @@ async def logistics_node(state: AgentState, config: RunnableConfig) -> AgentStat
         for flights already in hand, would not change their price or dates.
         """
         await _load_context(repair_state, repos)
-        return _build_proposal(survivors, budget_left=budget_left)
+        return _build_proposal(survivors, budget_left=budget_left, saved_at=saved_at)
 
     await report_phase(repos, state, "checking_answer")
     loop_outcome = await run_guardrail_loop(
         state,
         repos,
-        _build_proposal(survivors, budget_left=budget_left),
+        _build_proposal(survivors, budget_left=budget_left, saved_at=saved_at),
         "flight_recommendation",
         _producer,
         cap,

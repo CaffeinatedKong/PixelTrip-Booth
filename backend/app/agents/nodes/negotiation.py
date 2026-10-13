@@ -404,8 +404,18 @@ async def interpret_feedback(
     ]
 
 
+#: A day holds at most this many activities (Requirement 9.3).
+MAX_ITEMS_PER_DAY = 10
+
+
+def day_item_counts(itinerary: dict[str, Any]) -> dict[int, int]:
+    """How many activities each day of ``itinerary`` already has."""
+    return {int(d["day"]): len(d.get("items") or []) for d in itinerary.get("days") or []}
+
+
 def detect_conflicts(
     resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    existing_items: dict[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Detect incompatible outcomes requested for the same day/item.
 
@@ -414,8 +424,15 @@ def detect_conflicts(
     (creation-time ascending) is itself deterministic — so the same open
     `feedback` rows always yield the same conflict set.
 
-    A conflict is removal versus retention of the same target, or two or more
-    distinctly-worded "edit" requests for the same target (Requirement 10.8).
+    A conflict is removal versus retention of the same target, removal versus an
+    edit or an addition, or two or more distinctly-worded "edit" requests for the
+    same target (Requirement 10.8).
+
+    Additions are *additive*: "add a museum after lunch" and "add a café before
+    dinner" on the same day are both honoured, not collapsed into a false conflict.
+    Several additions on one target only conflict when the day cannot hold them all
+    (``existing_items`` maps day number to the activities it already has; without it
+    the cap is not checked here, and applying the additions still enforces it).
 
     Returns:
         One entry per conflicting target, sorted for a stable return order:
@@ -427,18 +444,34 @@ def detect_conflicts(
         key = (resolved.day, resolved.item_id)
         grouped.setdefault(key, []).append((row, _feedback_outcome(row)))
 
+    # How many new rows each day was asked to take, over every target on that day.
+    requested: dict[int, int] = {}
+    for (day, _item_id), entries in grouped.items():
+        requested[day] = requested.get(day, 0) + sum(
+            int(row.get("_addition_count") or 1) for row, outcome in entries if outcome == "add"
+        )
+
     conflicts: list[dict[str, Any]] = []
     for (day, item_id), entries in grouped.items():
         if len(entries) < 2:
             continue
         outcomes = {outcome for _row, outcome in entries}
+        # Only rewrites of the same thing compete; additions are separate rows.
         edit_texts = {
-            row.get("comment", "").strip() for row, outcome in entries if outcome in {"edit", "add"}
+            row.get("comment", "").strip() for row, outcome in entries if outcome == "edit"
         }
+        adds = sum(1 for _row, outcome in entries if outcome == "add")
+        over_cap = (
+            adds > 1
+            and existing_items is not None
+            and day in existing_items
+            and existing_items[day] + requested[day] > MAX_ITEMS_PER_DAY
+        )
         is_conflict = (
             ("remove" in outcomes and "retain" in outcomes)
             or ("remove" in outcomes and bool(outcomes & {"edit", "add"}))
             or len(edit_texts) > 1
+            or over_cap
         )
         if not is_conflict:
             continue
@@ -473,8 +506,38 @@ def _winning_feedback(
 
     winners: dict[tuple[int, str | None], dict[str, Any]] = {}
     for key, rows in grouped.items():
-        winners[key] = rows[0] if key in conflict_keys else rows[-1]
+        if key in conflict_keys:
+            winners[key] = rows[0]
+            continue
+        # Additions do not compete with anything (see _winning_additions); among the
+        # rest, the latest request for the target is the one applied.
+        others = [row for row in rows if _feedback_outcome(row) != "add"]
+        if others:
+            winners[key] = others[-1]
     return winners
+
+
+def _winning_additions(
+    resolvable: list[tuple[dict[str, Any], ResolvedTarget]],
+    conflicts: list[dict[str, Any]],
+) -> dict[tuple[int, str | None], list[dict[str, Any]]]:
+    """The addition requests to apply per target: all of them, unless the target conflicts.
+
+    Compatible additions on one day (different places or times) are all honoured. For a
+    conflicting target only the oldest request is considered, as for every other outcome.
+    """
+    conflict_keys = {(c["day"], c["item_id"]) for c in conflicts}
+    grouped: dict[tuple[int, str | None], list[dict[str, Any]]] = {}
+    for row, resolved in resolvable:
+        grouped.setdefault((resolved.day, resolved.item_id), []).append(row)
+
+    additions: dict[tuple[int, str | None], list[dict[str, Any]]] = {}
+    for key, rows in grouped.items():
+        chosen = rows[:1] if key in conflict_keys else rows
+        adds = [row for row in chosen if _feedback_outcome(row) == "add"]
+        if adds:
+            additions[key] = adds
+    return additions
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +608,7 @@ def regenerate_affected_only(
         ``(new_itinerary, addressed_feedback_ids)``.
     """
     winners = _winning_feedback(resolvable, conflicts)
+    additive = _winning_additions(resolvable, conflicts)
     in_scope_days = affected_days(affected_scope)
     revisions = revisions or {}
     additions = additions or {}
@@ -583,27 +647,29 @@ def regenerate_affected_only(
                 new_items.append(updated)
             day_addressed_ids.append(winning_row["id"])
 
-        for (target_day, _item_id), row in winners.items():
-            if target_day != day_num or _feedback_outcome(row) != "add":
+        for (target_day, _item_id), rows in additive.items():
+            if target_day != day_num:
                 continue
-            inserted = additions.get(row["id"], [])
-            anchors = {item["id"] for item in new_items}
-            if not inserted or len(new_items) + len(inserted) > 10:
-                continue
-            if any(entry["anchor_item_id"] not in anchors for entry in inserted):
-                continue
-            expanded: list[dict[str, Any]] = []
-            for item in new_items:
-                for placement in ("before", "after"):
-                    if placement == "after":
-                        expanded.append(item)
-                    expanded.extend(
-                        entry["item"]
-                        for entry in sorted(inserted, key=lambda e: e["item"]["time"])
-                        if entry["anchor_item_id"] == item["id"] and entry["placement"] == placement
-                    )
-            new_items = expanded
-            day_addressed_ids.append(row["id"])
+            for row in rows:
+                inserted = additions.get(row["id"], [])
+                anchors = {item["id"] for item in new_items}
+                if not inserted or len(new_items) + len(inserted) > MAX_ITEMS_PER_DAY:
+                    continue
+                if any(entry["anchor_item_id"] not in anchors for entry in inserted):
+                    continue
+                expanded: list[dict[str, Any]] = []
+                for item in new_items:
+                    for placement in ("before", "after"):
+                        if placement == "after":
+                            expanded.append(item)
+                        expanded.extend(
+                            entry["item"]
+                            for entry in sorted(inserted, key=lambda e: e["item"]["time"])
+                            if entry["anchor_item_id"] == item["id"]
+                            and entry["placement"] == placement
+                        )
+                new_items = expanded
+                day_addressed_ids.append(row["id"])
 
         if not new_items:
             # Never publish an invalid empty day or settle unapplied feedback.
@@ -667,12 +733,13 @@ async def draft_activity_additions(
     hard_constraints: list[str],
 ) -> dict[str, list[dict[str, Any]]]:
     """Draft insertions separately from edits; failed additions remain open."""
-    winners = _winning_feedback(resolvable, conflicts)
+    additive = _winning_additions(resolvable, conflicts)
     days, _ = _index_itinerary(base_itinerary)
     requests = {
         row["id"]: (row, day, item_id)
-        for (day, item_id), row in winners.items()
-        if _feedback_outcome(row) == "add" and len(days[day]["items"]) < 10
+        for (day, item_id), rows in additive.items()
+        for row in rows
+        if len(days[day]["items"]) < MAX_ITEMS_PER_DAY
     }
     if llm is None or not requests:
         return {}
@@ -1040,7 +1107,7 @@ async def negotiation_node(state: AgentState, config: RunnableConfig) -> AgentSt
     await report_phase(repos, state, "asking_guide")
     resolvable = await interpret_feedback(repos.llm, base_itinerary, resolvable)
     affected_scope = compute_affected_scope(resolvable, base_itinerary)
-    conflicts = detect_conflicts(resolvable)
+    conflicts = detect_conflicts(resolvable, day_item_counts(base_itinerary))
     await report_phase(repos, state, "asking_guide")
     revisions = await draft_item_revisions(
         repos.llm,

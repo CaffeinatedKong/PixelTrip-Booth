@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.agents.errors import DestinationNotSelectedError, TripNotFoundError, UnresolvedMemberError
 from app.agents.group_profile import compute_availability_overlap
@@ -19,7 +19,7 @@ from app.agents.messages import TextMessageContent, emit_npc_message
 from app.core.budget import party_budget
 from app.core.trip_dates import MAX_TRIP_DAYS, MIN_TRIP_DAYS, selected_trip, windows
 from app.demo import is_demo
-from app.exceptions import InvalidTripDatesError, TripDatesLockedError
+from app.exceptions import InvalidTripDatesError, RepositoryError, TripDatesLockedError
 from app.schemas.planning import ChangeTripDatesRequest, DateRange, TripDatesResponse
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -31,6 +31,13 @@ LOCKED_BY_FLIGHT = "The flight is locked, so the dates can no longer change."
 NO_DESTINATION = "Choose a destination first."
 SEARCH_RUNNING = "The guide is searching flights right now. Try again when it finishes."
 SET_BY_LEADER = "Set by the party leader."
+CHANGED_MEANWHILE = "The dates were just changed by someone else. Check them and try again."
+
+
+def _plan_of(selection: dict[str, Any]) -> dict[str, Any]:
+    """The trip plan stored on a destination selection, for the database to compare."""
+    data = selection.get("data") or {}
+    return {key: data.get(key) for key in ("tripDays", "tripStart", "tripEnd")}
 
 
 class TripDatesService:
@@ -123,6 +130,10 @@ class TripDatesService:
                 f"({free or 'no shared dates'})."
             )
 
+        # The checks above are a fast path for friendly messages. The change itself is one
+        # database transaction that holds the room, re-checks that no flight is locked and
+        # that the plan is still what we read, then writes it, closes the old flight vote and
+        # resets readiness, so nothing can slip in between those steps.
         data = {
             **(selection.get("data") or {}),
             "tripDays": request.days,
@@ -130,18 +141,15 @@ class TripDatesService:
             "tripEnd": end.isoformat(),
             "whyThisLong": SET_BY_LEADER,
         }
-        await repos.selection_repo.upsert(
-            room_id, "destination", data, vote_session_id=selection.get("vote_session_id")
-        )
-
-        # Any open flight vote was for the old dates: close it so the party searches again.
-        stale = await repos.vote_session_repo.get_open_by_room_and_category(room_id, "flight")
-        if stale is not None:
-            if stale.get("tie_pending"):
-                await repos.vote_session_repo.clear_tie_pending(stale["id"])
-            await repos.vote_session_repo.close(stale["id"])
-            for member in await repos.member_repo.list_by_room(room_id):
-                await repos.member_repo.set_stage_ready(member["id"], False)
+        outcome = await repos.selection_repo.change_trip_dates(room_id, _plan_of(selection), data)
+        if outcome == "flight_locked":
+            raise TripDatesLockedError(LOCKED_BY_FLIGHT)
+        if outcome == "changed":
+            raise TripDatesLockedError(CHANGED_MEANWHILE)
+        if outcome == "no_destination":
+            raise DestinationNotSelectedError()
+        if outcome != "ok":
+            raise RepositoryError("Database operation 'change_trip_dates' on 'selections' failed.")
 
         try:
             await emit_npc_message(

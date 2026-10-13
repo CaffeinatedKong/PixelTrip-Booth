@@ -22,10 +22,13 @@ from app.api import deps
 from app.repositories.agent_run_repository import AgentRunRepository
 from app.repositories.base import BaseRepository
 from app.repositories.feedback_repository import FeedbackRepository
+from app.repositories.flight_cache_repository import FlightCacheRepository
+from app.repositories.guide_repository import GuideRepository
 from app.repositories.itinerary_version_repository import ItineraryVersionRepository
 from app.repositories.member_repository import MemberRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.profile_repository import ProfileRepository
+from app.repositories.review_repository import ReviewRepository
 from app.repositories.room_repository import RoomRepository
 from app.repositories.selection_repository import SelectionRepository
 from app.repositories.trip_repository import TripRepository
@@ -53,13 +56,16 @@ PROVIDERS: dict[str, type[BaseRepository]] = {
     "get_selection_repo": SelectionRepository,
     "get_itinerary_version_repo": ItineraryVersionRepository,
     "get_feedback_repo": FeedbackRepository,
+    "get_review_repo": ReviewRepository,
+    "get_guide_repo": GuideRepository,
+    "get_flight_cache_repo": FlightCacheRepository,
     "get_agent_run_repo": AgentRunRepository,
 }
 
 
 def test_every_provider_exists() -> None:
     """Each repository the agent layer needs has a wired provider."""
-    assert len(PROVIDERS) == 11
+    assert len(PROVIDERS) == 14
     for name in PROVIDERS:
         assert hasattr(deps, name), f"missing provider {name}"
 
@@ -187,6 +193,8 @@ def test_agent_run_service_receives_the_injected_llm_client() -> None:
         feedback_repo=repos["get_feedback_repo"],
         vote_session_repo=repos["get_vote_session_repo"],
         vote_repo=repos["get_vote_repo"],
+        guide_repo=repos["get_guide_repo"],
+        flight_cache_repo=repos["get_flight_cache_repo"],
         llm_client=llm,
     )
 

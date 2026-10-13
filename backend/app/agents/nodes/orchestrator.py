@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 from langchain_core.runnables import RunnableConfig
 
 from app.agents.errors import InvalidRunTypeError
+from app.agents.progress import report_phase
 from app.agents.state import RUN_TYPES, load_trip_context
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -66,4 +67,7 @@ async def orchestrator_node(state: AgentState, config: RunnableConfig) -> AgentS
 
     repos = config["configurable"]["repos"]
     context = await load_trip_context(repos, state.trip_id, state.run_type)
-    return state.with_trip_context(context)
+    state = state.with_trip_context(context)
+    # Reported only once the preconditions hold: a refused run writes nothing (Req 1.5-1.6).
+    await report_phase(repos, state, "reading_party")
+    return state

@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     #: Mounts the ``/dev`` routes that exist only to test the AI agents by hand (lock a
     #: test flight, add feedback). Off unless explicitly enabled; never set in production.
     enable_dev_endpoints: bool = Field(default=False)
+    #: Keep one metadata row per language-model call in ``llm_calls`` (operation, model,
+    #: outcome, latency; never prompt or answer text). Switch off to write nothing.
+    log_llm_calls: bool = Field(default=True)
+    #: Push AI run progress to the room over Supabase Realtime Broadcast (topic
+    #: ``run:<roomId>``), so browsers need to poll only as a slow backstop. The payload is
+    #: the run's id, type, status and step: no party data. Switch off to rely on polling.
+    broadcast_run_progress: bool = Field(default=True)
 
     # --- Supabase (service-role; backend only) ---
     # Required: the backend cannot serve any data operation without these.

@@ -75,9 +75,13 @@ class DestinationApiService implements DestinationService {
   subscribeDiscover(
     roomId: string,
     onChange: (state: DiscoverState) => void,
+    onError?: (error: Error | null) => void,
   ): Unsubscribe {
-    return subscribeStage(roomId, "destination", (snapshot) =>
-      onChange(toDiscoverState(snapshot)),
+    return subscribeStage(
+      roomId,
+      "destination",
+      (snapshot) => onChange(toDiscoverState(snapshot)),
+      onError,
     );
   }
 }

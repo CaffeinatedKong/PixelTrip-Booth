@@ -54,3 +54,32 @@ Settings.model_config["env_file"] = None
 def anyio_backend():
     """Run ``@pytest.mark.anyio`` async tests on asyncio only."""
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin "today" for trip-date planning to early May 2026.
+
+    Fixtures across the suite use fixed 2026 dates; with the real clock they would
+    drift into the past, and planning (rightly) refuses dates that cannot be booked.
+    Tests of the past-date rules pass ``today`` explicitly.
+    """
+    from datetime import date
+
+    monkeypatch.setattr("app.core.trip_dates.current_date", lambda: date(2026, 5, 1))
+
+
+@pytest.fixture(autouse=True)
+def fresh_run_progress_cache() -> None:
+    """The run-progress cache is process-wide; start every test with it empty."""
+    from app.services.run_events import RUN_PROGRESS_CACHE
+
+    RUN_PROGRESS_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def fresh_guide_cache() -> None:
+    """Loaded destination guides are cached per process; start every test without them."""
+    from app.agents.guide_catalog_loader import GUIDE_CACHE
+
+    GUIDE_CACHE.clear()

@@ -29,8 +29,19 @@ from app.agents.state import AgentState
 from app.exceptions import RunNotFoundError
 from app.schemas.agent_run import AgentRunProgressSchema, AgentRunSchema
 from app.services.agent_run_service import RUN_FAILED_ERROR, AgentRunService
+from app.services.run_events import (
+    RUN_PROGRESS_CACHE,
+    elapsed_seconds,
+    finish_run,
+    forget_run_progress,
+    progress_payload,
+    publish_progress,
+)
 
 logger = logging.getLogger(__name__)
+
+#: Stands in the cache for "this trip has no run yet" (a falsy, non-``None`` value).
+_NO_RUN: dict[str, Any] = {}
 
 
 @dataclass(frozen=True)
@@ -75,23 +86,57 @@ class RunEndpointService(AgentRunService):
         run = await self.agent_run_repo.create_pending(
             trip_id, run_type, member_id, base_version, idempotency_key
         )
+        forget_run_progress(trip_id)
+        publish_progress(trip["room_id"], progress_payload(run["id"], run_type, "pending", None, 0))
         # A concurrent request with the same key may have won the insert; only the
         # owner of a still-pending run executes it.
         if run.get("status") != "pending":
             return StartedRun(run=AgentRunSchema.from_row(run), execute=None)
 
         async def execute() -> None:
-            await self.execute_run(run)
+            await self.execute_run(run, trip["room_id"])
 
         return StartedRun(run=AgentRunSchema.from_row(run), execute=execute)
 
-    async def execute_run(self, run: dict[str, Any]) -> None:
+    async def execute_run(self, run: dict[str, Any], room_id: str | None = None) -> None:
         """Run the graph for a ``pending`` run and finalize it. Never raises.
 
         Mirrors the parent's ``_create_and_execute`` after row creation. Any failure,
         including in the bookkeeping writes, ends with the run marked failed so it never
         stays ``running`` forever.
         """
+        run_id, trip_id = run["id"], run["trip_id"]
+        publish_progress(
+            room_id,
+            progress_payload(run_id, run["run_type"], "running", None, elapsed_seconds(run_id)),
+        )
+        try:
+            await self._execute_run(run)
+        finally:
+            forget_run_progress(trip_id)
+            await self._announce_outcome(run, room_id)
+            finish_run(run_id)
+
+    async def _announce_outcome(self, run: dict[str, Any], room_id: str | None) -> None:
+        """Tell the room how the run ended. Best-effort: never raises."""
+        try:
+            final = await self.agent_run_repo.get_by_id(run["id"])
+            if not isinstance(final, dict):
+                return
+            publish_progress(
+                room_id,
+                progress_payload(
+                    run["id"],
+                    run["run_type"],
+                    final["status"],
+                    final.get("phase"),
+                    elapsed_seconds(run["id"]),
+                ),
+            )
+        except Exception:
+            logger.debug("Could not announce the outcome of run %s", run.get("id"))
+
+    async def _execute_run(self, run: dict[str, Any]) -> None:
         run_id = run["id"]
         trip_id = run["trip_id"]
         try:
@@ -124,10 +169,14 @@ class RunEndpointService(AgentRunService):
         self, trip_id: str, run_type: str | None
     ) -> AgentRunProgressSchema | None:
         """The trip's most recent run (optionally of one type) and its step, or ``None``."""
-        if await self.trip_repo.get_by_id(trip_id) is None:
-            raise TripNotFoundError(trip_id)
-        run = await self.agent_run_repo.get_latest_for_trip(trip_id, run_type)
-        if run is None:
+
+        async def load() -> dict[str, Any]:
+            if await self.trip_repo.get_by_id(trip_id) is None:
+                raise TripNotFoundError(trip_id)
+            return await self.agent_run_repo.get_latest_for_trip(trip_id, run_type) or _NO_RUN
+
+        run = await RUN_PROGRESS_CACHE.get_or_load((trip_id, run_type), load)
+        if not run:
             return None
         started = _parse_time(run.get("started_at") or run.get("created_at"))
         end = _parse_time(run.get("completed_at")) or datetime.now(UTC)

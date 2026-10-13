@@ -67,7 +67,9 @@ class RefineService:
             ):
                 raise ValidationError("Choose the prepared demo change for this day.")
 
-        row = await self._repos.feedback_repo.create(
+        # An upsert, so a client retrying a half-failed multi-day review does not
+        # duplicate the rows that already landed.
+        row = await self._repos.feedback_repo.upsert_open(
             trip_id=trip_id,
             itinerary_version_id=version["id"],
             member_id=member_id,
@@ -98,35 +100,31 @@ class RefineService:
         if room and is_demo(room):
             require_demo_pair(await self._repos.member_repo.list_by_room(trip["room_id"]))
 
-        if request.decision == "refine":
-            await self._repos.member_repo.set_stage_ready(member_id, True)
-            members = await self._repos.member_repo.list_members_by_room(trip["room_id"])
-            all_ready = bool(members) and all(bool(member.get("stage_ready")) for member in members)
-            needs_refinement = bool(await self._repos.feedback_repo.list_open_by_trip(trip_id))
+        # Consent lives on a per-version record, not on the shared ``stage_ready`` flag
+        # (which preferences and votes also set). ``stage_ready`` is still raised so the
+        # "waiting for X of N" line counts this member.
+        review_repo = self._require_review_repo()
+        await review_repo.upsert(trip_id, version_id, member_id, request.decision)
+        await self._repos.member_repo.set_stage_ready(member_id, True)
+
+        members = await self._repos.member_repo.list_members_by_room(trip["room_id"])
+        decisions = {
+            str(row["member_id"]): row["decision"]
+            for row in await review_repo.list_by_version(version_id)
+        }
+        all_ready = bool(members) and all(str(m["id"]) in decisions for m in members)
+        wants_changes = any(decision == "refine" for decision in decisions.values())
+        has_open_feedback = bool(await self._repos.feedback_repo.list_open_by_trip(trip_id))
+
+        if not all_ready or wants_changes or has_open_feedback:
+            # Approval needs every member's "approve" and nothing left to address. A
+            # refinement run can only act on feedback, so one is requested only then; a
+            # "refine" with no feedback just blocks approval until it is changed.
             return ReviewItineraryResponse(
                 version=ItineraryVersionSchema.model_validate(version),
                 trip=TripSchema.model_validate(trip),
                 all_ready=all_ready,
-                needs_refinement=all_ready and needs_refinement,
-            )
-
-        await self._repos.member_repo.set_stage_ready(member_id, True)
-        members = await self._repos.member_repo.list_members_by_room(trip["room_id"])
-        all_ready = bool(members) and all(bool(member.get("stage_ready")) for member in members)
-        needs_refinement = bool(await self._repos.feedback_repo.list_open_by_trip(trip_id))
-        if not all_ready:
-            return ReviewItineraryResponse(
-                version=ItineraryVersionSchema.model_validate(version),
-                trip=TripSchema.model_validate(trip),
-                all_ready=False,
-                needs_refinement=False,
-            )
-        if needs_refinement:
-            return ReviewItineraryResponse(
-                version=ItineraryVersionSchema.model_validate(version),
-                trip=TripSchema.model_validate(trip),
-                all_ready=True,
-                needs_refinement=True,
+                needs_refinement=all_ready and has_open_feedback,
             )
 
         approved = await self._repos.itinerary_version_repo.mark_approved(version_id)
@@ -171,6 +169,12 @@ class RefineService:
             await produce_wrap_summary(self._repos, trip_id)
         except BackendError as exc:
             logger.info("WRAP summary skipped for trip %s: %s", trip_id, type(exc).__name__)
+
+    def _require_review_repo(self) -> Any:
+        review_repo = getattr(self._repos, "review_repo", None)
+        if review_repo is None:
+            raise RuntimeError("RepositoryBundle.review_repo is required for itinerary reviews")
+        return review_repo
 
     async def _require_trip(self, trip_id: str) -> dict[str, Any]:
         trip = await self._repos.trip_repo.get_by_id(trip_id)

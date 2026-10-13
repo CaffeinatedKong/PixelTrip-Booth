@@ -25,7 +25,8 @@ The flow, each step with exactly one way to fail without reaching the next:
 **The LLM is never a single point of failure.** If the call fails or returns too
 little, the remaining slots are filled from :data:`FALLBACK_POOL`, narrowed to any
 region the party named and ranked by the party's own words (:func:`_fallback_order`),
-with plain card copy. Repair iterations of the
+affordable places first, with the hand-written guide copy, cost and trip length from
+:mod:`app.agents.fallback_catalog`. Repair iterations of the
 guardrail loop reuse the first answer and never call the model again.
 """
 
@@ -38,9 +39,12 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agents import fallback_catalog
 from app.agents.errors import LLMGenerationError, PreferencesNotCollectedError
+from app.agents.fallback_catalog import GuideCatalog
 from app.agents.group_profile import compute_group_profile, is_region_word, vibe_keywords
 from app.agents.guardrails import perform_human_escalation, run_guardrail_loop
+from app.agents.guide_catalog_loader import load_catalog
 from app.agents.llm import UNTRUSTED_INPUT_GUARD, clip_text
 from app.agents.messages import RecommendationMessageContent, emit_npc_message
 from app.agents.party_brief import (
@@ -58,7 +62,7 @@ from app.agents.prompts import render
 from app.agents.proposals import DestinationRecommendationProposal
 from app.core.budget import CURRENCY, TIER_LABELS, band_text
 from app.core.config import get_settings
-from app.core.trip_dates import plan_trip
+from app.core.trip_dates import MIN_TRIP_DAYS, has_bookable_window, plan_trip
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from app.agents.state import AgentState, RepositoryBundle
@@ -71,45 +75,11 @@ MAX_RECOMMENDATION_ITEMS = 5
 
 #: Region-aware safety net, used only when the LLM cannot suggest anything. Each entry is
 #: ``(name, region/vibe keywords)``; the party's own words pick which ones are offered, so
-#: an Asia-and-beach party is never padded out with European cities.
-FALLBACK_POOL: tuple[tuple[str, frozenset[str]], ...] = (
-    ("Kyoto, Japan", frozenset({"asia", "east asia", "japan", "culture", "temples", "food"})),
-    ("Bali, Indonesia", frozenset({"asia", "southeast asia", "beach", "island", "nature"})),
-    ("Phuket, Thailand", frozenset({"asia", "southeast asia", "beach", "island", "nightlife"})),
-    ("Da Nang, Vietnam", frozenset({"asia", "southeast asia", "beach", "food", "budget"})),
-    ("Bangkok, Thailand", frozenset({"asia", "southeast asia", "food", "city", "nightlife"})),
-    ("Seoul, South Korea", frozenset({"asia", "east asia", "city", "food", "shopping"})),
-    ("Lisbon, Portugal", frozenset({"europe", "city", "food", "culture", "coast"})),
-    ("Barcelona, Spain", frozenset({"europe", "beach", "city", "food", "nightlife"})),
-    ("Rome, Italy", frozenset({"europe", "culture", "history", "food", "city"})),
-    ("Reykjavik, Iceland", frozenset({"europe", "nature", "adventure", "hiking"})),
-    ("Cape Town, South Africa", frozenset({"africa", "beach", "nature", "adventure"})),
-    ("Sydney, Australia", frozenset({"oceania", "beach", "city", "nature"})),
-    ("Cancun, Mexico", frozenset({"north america", "beach", "island", "nightlife"})),
-    (
-        "Niseko, Japan",
-        frozenset(
-            {"asia", "east asia", "japan", "snow", "ski", "skiing", "snowboarding", "winter"}
-        ),
-    ),
-    (
-        "Chamonix, France",
-        frozenset({"europe", "snow", "ski", "skiing", "snowboarding", "winter", "hiking", "alps"}),
-    ),
-    (
-        "Banff, Canada",
-        frozenset({"north america", "snow", "ski", "skiing", "snowboarding", "hiking", "nature"}),
-    ),
-    (
-        "Queenstown, New Zealand",
-        frozenset({"oceania", "adventure", "hiking", "ski", "skiing", "snowboarding", "nature"}),
-    ),
-    ("Kathmandu, Nepal", frozenset({"asia", "south asia", "hiking", "trekking", "mountains"})),
-    (
-        "Torres del Paine, Chile",
-        frozenset({"south america", "hiking", "trekking", "mountains", "nature"}),
-    ),
-)
+#: an Asia-and-beach party is never padded out with European cities. Each place has a
+#: hand-written guide, so its card still has real copy. This is the pool bundled with the
+#: code; a run uses the one loaded from Supabase (see :func:`load_catalog`), which falls
+#: back to this.
+FALLBACK_POOL = fallback_catalog.FALLBACK_POOL
 
 
 #: A name longer than this is not a destination name; treat it as junk.
@@ -176,7 +146,9 @@ def _profile_words(group_profile: dict[str, Any]) -> set[str]:
     return words
 
 
-def _fallback_order(group_profile: dict[str, Any]) -> list[str]:
+def _fallback_order(
+    group_profile: dict[str, Any], catalog: GuideCatalog | None = None
+) -> list[str]:
     """The fallback pool ranked by how many of the party's own words each entry matches.
 
     When the party named a region ("Asia", "Europe") the pool is first narrowed to that
@@ -186,7 +158,7 @@ def _fallback_order(group_profile: dict[str, Any]) -> list[str]:
     """
     words = _profile_words(group_profile)
     regions = {word for word in words if is_region_word(word)}
-    pool = list(FALLBACK_POOL)
+    pool = list((catalog or fallback_catalog.bundled_catalog()).pool)
     if regions:
         in_region = [entry for entry in pool if entry[1] & regions]
         if len(in_region) >= MIN_RECOMMENDATION_ITEMS:
@@ -401,29 +373,64 @@ def _card_from_llm(
     return copy
 
 
-def _fallback_card(name: str, brief: PartyBrief) -> dict[str, Any]:
-    """Plain card copy for a place no usable LLM card covers."""
+def _fallback_card(
+    name: str,
+    brief: PartyBrief,
+    forbidden: list[str] | None = None,
+    catalog: GuideCatalog | None = None,
+) -> dict[str, Any]:
+    """Card copy for a place no usable LLM card covers.
+
+    A place with a guide in :mod:`~app.agents.fallback_catalog` gets its hand-written
+    copy, cost and typical length; any other place (or a guide whose copy names a
+    hard-constraint subject) gets plain copy that says the estimate is missing.
+    """
     named = name.lower() in {p.lower() for p in brief.named_places}
     if named:
         why = "Someone in the party named this place."
     else:
         why = "A backup pick that matches the party's trip types and interests."
-    details = ""
-    return {
-        "description": why,
-        "meta": {
-            "score": WISHLIST_SCORE if named else SUGGESTED_SCORE,
-            "whyThisFits": why,
-            "tags": [PARTY_PICK if named else GUIDE_PICK],
-            "tradeOff": "No cost estimate yet; check prices before you vote.",
-            "details": (details + why).strip(),
-            "pick": PARTY_PICK if named else GUIDE_PICK,
-            "bestFor": [],
-            "estimatedDailyCostSgd": None,
-            "scoreBreakdown": None,
-            **_trip_meta(brief, None, None, None),
-        },
+    pick = PARTY_PICK if named else GUIDE_PICK
+    guide = (catalog or fallback_catalog.bundled_catalog()).lookup(name)
+    if guide is not None:
+        text = " ".join([guide.description, guide.details, *guide.tags]).lower()
+        if any(subject in text for subject in forbidden or []):
+            guide = None
+    if guide is None:
+        return {
+            "description": why,
+            "meta": {
+                "score": WISHLIST_SCORE if named else SUGGESTED_SCORE,
+                "whyThisFits": why,
+                "tags": [pick],
+                "tradeOff": "No cost estimate yet; check prices before you vote.",
+                "details": why,
+                "pick": pick,
+                "bestFor": [],
+                "estimatedDailyCostSgd": None,
+                "scoreBreakdown": None,
+                **_trip_meta(brief, None, None, None),
+            },
+        }
+    meta: dict[str, Any] = {
+        "score": WISHLIST_SCORE if named else SUGGESTED_SCORE,
+        "whyThisFits": why,
+        "tags": _clean_tags([pick, *guide.tags]),
+        "tradeOff": "Rough guide estimate; check current prices before you vote.",
+        "details": guide.details,
+        "pick": pick,
+        "bestFor": [],
+        "estimatedDailyCostSgd": guide.daily_cost_sgd,
+        "scoreBreakdown": None,
+        **_trip_meta(brief, guide.typical_days, guide.daily_cost_sgd, None),
     }
+    budget = brief.budget
+    if not budget.is_hard and budget.above_level(guide.daily_cost_sgd):
+        meta["tradeOff"] = (
+            f"{meta['tradeOff']} Above the party's {TIER_LABELS[budget.tier or 'low']} budget "
+            f"level (about {band_text(budget.tier or 'low')} a day)."
+        )
+    return {"description": guide.description, "meta": meta}
 
 
 def _trip_meta(
@@ -453,7 +460,10 @@ def _trip_meta(
 
 
 def _choose_destinations(
-    brief: PartyBrief, answer: list[_DestinationCard], group_profile: dict[str, Any]
+    brief: PartyBrief,
+    answer: list[_DestinationCard],
+    group_profile: dict[str, Any],
+    catalog: GuideCatalog | None = None,
 ) -> tuple[list[str], dict[str, dict[str, Any]]]:
     """Pick the destination names, in order, and their card copy (keyed by lower name).
 
@@ -491,12 +501,15 @@ def _choose_destinations(
         taken.add(card["name"].lower())
         per_country[country] = per_country.get(country, 0) + 1
 
-    for name in _fallback_order(group_profile):
+    # Fallback places: affordable ones first, the rest only if still short.
+    fallback = [n for n in _fallback_order(group_profile, catalog) if n.lower() not in taken]
+    copies = {n.lower(): _fallback_card(n, brief, forbidden, catalog) for n in fallback}
+    fallback.sort(key=lambda n: _over_budget(copies[n.lower()], brief))
+    for name in fallback:
         if len(names) >= MAX_RECOMMENDATION_ITEMS:
             break
-        if name.lower() not in taken:
-            names.append(name)
-            taken.add(name.lower())
+        names.append(name)
+        taken.add(name.lower())
 
     return names, cards
 
@@ -523,6 +536,8 @@ def _build_proposal(
     names: list[str],
     cards: dict[str, dict[str, Any]] | None = None,
     brief: PartyBrief | None = None,
+    group_profile: dict[str, Any] | None = None,
+    catalog: GuideCatalog | None = None,
 ) -> dict[str, Any]:
     """Build a raw destination recommendation payload.
 
@@ -532,9 +547,10 @@ def _build_proposal(
     ``tripStart``, ``tripEnd``, ``whyThisLong``).
     """
     brief = brief or build_party_brief([], [], [], [])
+    forbidden = _forbidden_subjects(group_profile or {})
     items = []
     for name in names[:MAX_RECOMMENDATION_ITEMS]:
-        card = (cards or {}).get(name.lower()) or _fallback_card(name, brief)
+        card = (cards or {}).get(name.lower()) or _fallback_card(name, brief, forbidden, catalog)
         items.append(
             {
                 "id": _slugify(name),
@@ -663,6 +679,20 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
             options=[("widen_dates", "Widen our available dates")],
         )
         return state
+    if not has_bookable_window(profile["availability_overlap"]):
+        # The shared dates exist but are past, or too short to travel in: no plan can be
+        # booked from them, so ask rather than recommend places with no usable dates.
+        await perform_human_escalation(
+            state,
+            repos,
+            constraint=(
+                f"the dates the party shares have passed or leave fewer than "
+                f"{MIN_TRIP_DAYS} days to travel"
+            ),
+            question="Would the party like to widen their available dates?",
+            options=[("widen_dates", "Widen our available dates")],
+        )
+        return state
 
     await report_phase(repos, state, "asking_guide")
     brief = build_party_brief(
@@ -671,7 +701,8 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
     )  # fmt: skip
     answer = await _ask_llm(brief, repos.llm)
     await report_phase(repos, state, "checking_budget")
-    candidates, cards = _choose_destinations(brief, answer, profile)
+    catalog = await load_catalog(repos)
+    candidates, cards = _choose_destinations(brief, answer, profile, catalog)
     survivors, eliminating_reason = _filter_candidates(candidates, profile)
     if not survivors:
         await perform_human_escalation(
@@ -698,13 +729,13 @@ async def discovery_node(state: AgentState, config: RunnableConfig) -> AgentStat
             fresh_context["members"], fresh_context["preferences"], fresh_context["characters"]
         )
         fresh_survivors, _reason = _filter_candidates(candidates, fresh_profile)
-        return _build_proposal(fresh_survivors or survivors, cards, brief)
+        return _build_proposal(fresh_survivors or survivors, cards, brief, fresh_profile, catalog)
 
     await report_phase(repos, state, "checking_answer")
     loop_outcome = await run_guardrail_loop(
         state,
         repos,
-        _build_proposal(survivors, cards, brief),
+        _build_proposal(survivors, cards, brief, profile, catalog),
         "destination_recommendation",
         _producer,
         cap,

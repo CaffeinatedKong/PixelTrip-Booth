@@ -66,6 +66,8 @@ export interface FlightService {
   subscribeLogistics(
     roomId: string,
     onChange: (state: LogisticsState) => void,
+    /** Called with the read failure, or `null` once a later read succeeds. */
+    onError?: (error: Error | null) => void,
   ): Unsubscribe;
 
   /** Cast (or change) this member's flight vote. */

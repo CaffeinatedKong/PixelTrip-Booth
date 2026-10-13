@@ -1,0 +1,2515 @@
+{
+ "version": 1,
+ "guides": [
+  {
+   "name": "Kyoto, Japan",
+   "keywords": [
+    "asia",
+    "culture",
+    "east asia",
+    "food",
+    "japan",
+    "temples"
+   ],
+   "description": "Japan's old capital: wooden machiya streets, gardens and over a thousand temples.",
+   "details": "Spring blossom and autumn leaves are peak season; summer is hot and humid. Fill days with shrines and gardens, evenings with izakaya in Pontocho. Stay near Kyoto Station or Gion; buses and the subway cover the sights.",
+   "tags": [
+    "Temples",
+    "Food",
+    "Culture"
+   ],
+   "daily_cost_sgd": 180,
+   "typical_days": 4,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Fushimi Inari torii gate hike",
+     "slot": "morning",
+     "description": "Walk the vermilion gate tunnels up Mount Inari before the crowds.",
+     "location": "Fushimi Inari Taisha",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "hiking",
+      "nature",
+      "temples"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Arashiyama bamboo grove and Tenryu-ji",
+     "slot": "morning",
+     "description": "Stroll the bamboo grove, then the Zen garden at Tenryu-ji.",
+     "location": "Arashiyama",
+     "cost_sgd": 7,
+     "tags": [
+      "culture",
+      "nature",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Kiyomizu-dera and Higashiyama lanes",
+     "slot": "afternoon",
+     "description": "The wooden stage temple, then the stepped lanes of Sannenzaka.",
+     "location": "Higashiyama",
+     "cost_sgd": 5,
+     "tags": [
+      "culture",
+      "shopping",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Nishiki Market tasting walk",
+     "slot": "afternoon",
+     "description": "Graze on pickles, tamagoyaki and skewers along 'Kyoto's kitchen'.",
+     "location": "Nishiki Market",
+     "cost_sgd": 30,
+     "tags": [
+      "food",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Kinkaku-ji, the Golden Pavilion",
+     "slot": "afternoon",
+     "description": "The gold-leafed pavilion mirrored in its pond.",
+     "location": "Kita Ward",
+     "cost_sgd": 6,
+     "tags": [
+      "culture",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Gion evening walk",
+     "slot": "evening",
+     "description": "Lantern-lit Hanamikoji Street and the Shirakawa canal at dusk.",
+     "location": "Gion",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Pontocho izakaya dinner",
+     "slot": "evening",
+     "description": "Small plates and sake in the narrow riverside alley.",
+     "location": "Pontocho",
+     "cost_sgd": 50,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Bali, Indonesia",
+   "keywords": [
+    "asia",
+    "beach",
+    "island",
+    "nature",
+    "southeast asia"
+   ],
+   "description": "Rice terraces, surf beaches and temple ceremonies on Indonesia's island of the gods.",
+   "details": "April to October is the dry season; the rest brings tropical downpours. Split time between Ubud for culture and the south coast for beaches. Villas are good value for groups; hire a driver to get around.",
+   "tags": [
+    "Beach",
+    "Nature",
+    "Relaxed"
+   ],
+   "daily_cost_sgd": 110,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Tegallalang rice terraces",
+     "slot": "morning",
+     "description": "Walk the terraced paddies north of Ubud in the soft morning light.",
+     "location": "Tegallalang, Ubud",
+     "cost_sgd": 5,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Ubud Monkey Forest and market",
+     "slot": "morning",
+     "description": "The sacred forest temple, then Ubud's craft market.",
+     "location": "Ubud",
+     "cost_sgd": 8,
+     "tags": [
+      "culture",
+      "nature",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Uluwatu Temple sunset and Kecak dance",
+     "slot": "evening",
+     "description": "Clifftop temple at sunset, followed by the fire dance.",
+     "location": "Uluwatu",
+     "cost_sgd": 15,
+     "tags": [
+      "culture",
+      "temples"
+     ],
+     "time": "17:30"
+    },
+    {
+     "title": "Surf lesson at Kuta or Canggu",
+     "slot": "morning",
+     "description": "Beginner-friendly beach breaks with a local instructor.",
+     "location": "Canggu",
+     "cost_sgd": 45,
+     "tags": [
+      "adventure",
+      "beach"
+     ],
+     "time": null
+    },
+    {
+     "title": "Beach club afternoon",
+     "slot": "afternoon",
+     "description": "Pool, sea view and a slow lunch at a Seminyak beach club.",
+     "location": "Seminyak",
+     "cost_sgd": 40,
+     "tags": [
+      "beach",
+      "nightlife",
+      "relaxed"
+     ],
+     "time": null
+    },
+    {
+     "title": "Tirta Empul water temple",
+     "slot": "afternoon",
+     "description": "The spring-fed purification pools of a working temple.",
+     "location": "Tampaksiring",
+     "cost_sgd": 4,
+     "tags": [
+      "culture",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Jimbaran seafood dinner on the sand",
+     "slot": "evening",
+     "description": "Grilled catch of the day at tables on the beach.",
+     "location": "Jimbaran Bay",
+     "cost_sgd": 35,
+     "tags": [
+      "beach",
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Phuket, Thailand",
+   "keywords": [
+    "asia",
+    "beach",
+    "island",
+    "nightlife",
+    "southeast asia"
+   ],
+   "description": "Thailand's biggest island: long beaches, limestone bays and lively nights.",
+   "details": "November to April is dry and calm; May to October brings rough seas on the west coast. Base in Kata or Karon for beaches, Patong for nightlife. Island-hop by longtail or speedboat; tuk-tuks and Grab cover the rest.",
+   "tags": [
+    "Beach",
+    "Islands",
+    "Nightlife"
+   ],
+   "daily_cost_sgd": 120,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Phang Nga Bay boat trip",
+     "slot": "morning",
+     "description": "Limestone karsts, sea caves and James Bond Island by boat.",
+     "location": "Phang Nga Bay",
+     "cost_sgd": 90,
+     "tags": [
+      "adventure",
+      "island",
+      "nature"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Kata Beach swim and lounge",
+     "slot": "afternoon",
+     "description": "Golden sand and clear water on the south-west coast.",
+     "location": "Kata Beach",
+     "cost_sgd": 0,
+     "tags": [
+      "beach",
+      "relaxed"
+     ],
+     "time": null
+    },
+    {
+     "title": "Big Buddha viewpoint",
+     "slot": "morning",
+     "description": "The 45-metre marble Buddha with island-wide views.",
+     "location": "Nakkerd Hill",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Phuket Old Town walk",
+     "slot": "afternoon",
+     "description": "Sino-Portuguese shophouses, cafés and street art.",
+     "location": "Phuket Town",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "food",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Promthep Cape sunset",
+     "slot": "evening",
+     "description": "The island's southern tip, made for sunset.",
+     "location": "Promthep Cape",
+     "cost_sgd": 0,
+     "tags": [
+      "nature"
+     ],
+     "time": "18:00"
+    },
+    {
+     "title": "Bangla Road night out",
+     "slot": "evening",
+     "description": "Patong's neon-lit nightlife strip.",
+     "location": "Patong",
+     "cost_sgd": 30,
+     "tags": [
+      "nightlife"
+     ],
+     "time": null
+    },
+    {
+     "title": "Weekend night market dinner",
+     "slot": "evening",
+     "description": "Street food and stalls at the Naka market.",
+     "location": "Naka Weekend Market",
+     "cost_sgd": 15,
+     "tags": [
+      "food",
+      "shopping"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Da Nang, Vietnam",
+   "keywords": [
+    "asia",
+    "beach",
+    "budget",
+    "food",
+    "southeast asia"
+   ],
+   "description": "A breezy beach city between the Marble Mountains and lantern-lit Hoi An.",
+   "details": "February to May is the sweet spot; autumn brings typhoon rain. Mix My Khe Beach days with a trip to Hoi An's old town and the Ba Na Hills. Excellent value: beachfront hotels and Grab rides are cheap.",
+   "tags": [
+    "Beach",
+    "Food",
+    "Budget"
+   ],
+   "daily_cost_sgd": 80,
+   "typical_days": 4,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "My Khe Beach morning",
+     "slot": "morning",
+     "description": "Swim and coffee on Da Nang's long city beach.",
+     "location": "My Khe Beach",
+     "cost_sgd": 0,
+     "tags": [
+      "beach",
+      "relaxed"
+     ],
+     "time": "07:30"
+    },
+    {
+     "title": "Marble Mountains caves and pagodas",
+     "slot": "morning",
+     "description": "Climb through grottoes and shrines inside the marble hills.",
+     "location": "Ngu Hanh Son",
+     "cost_sgd": 5,
+     "tags": [
+      "culture",
+      "hiking",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Ba Na Hills and the Golden Bridge",
+     "slot": "morning",
+     "description": "Cable car to the hilltop and the giant-hands bridge.",
+     "location": "Ba Na Hills",
+     "cost_sgd": 60,
+     "tags": [
+      "adventure",
+      "nature"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Hoi An Ancient Town",
+     "slot": "afternoon",
+     "description": "Merchant houses, the Japanese Covered Bridge and tailors.",
+     "location": "Hoi An",
+     "cost_sgd": 8,
+     "tags": [
+      "culture",
+      "history",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Hoi An lantern river evening",
+     "slot": "evening",
+     "description": "Float a lantern on the Thu Bon River at dusk.",
+     "location": "Hoi An",
+     "cost_sgd": 5,
+     "tags": [
+      "culture"
+     ],
+     "time": null
+    },
+    {
+     "title": "Mi Quang and banh mi food crawl",
+     "slot": "afternoon",
+     "description": "Da Nang's own noodles and the famous Hoi An banh mi.",
+     "location": "Hai Chau",
+     "cost_sgd": 15,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Dragon Bridge and night market",
+     "slot": "evening",
+     "description": "Watch the bridge breathe fire (weekends), then the Son Tra market.",
+     "location": "Han River",
+     "cost_sgd": 10,
+     "tags": [
+      "city",
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Bangkok, Thailand",
+   "keywords": [
+    "asia",
+    "city",
+    "food",
+    "nightlife",
+    "southeast asia"
+   ],
+   "description": "Golden temples, canal boats and some of the world's best street food.",
+   "details": "November to February is the cool, dry season; April is hottest. Temples by morning, malls or a massage in the afternoon heat, markets and rooftops at night. The BTS, MRT and river ferries beat the traffic.",
+   "tags": [
+    "Food",
+    "City",
+    "Nightlife"
+   ],
+   "daily_cost_sgd": 100,
+   "typical_days": 4,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Grand Palace and Wat Pho",
+     "slot": "morning",
+     "description": "The royal palace, then the Reclining Buddha next door.",
+     "location": "Rattanakosin",
+     "cost_sgd": 40,
+     "tags": [
+      "culture",
+      "history",
+      "temples"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Wat Arun by river ferry",
+     "slot": "morning",
+     "description": "Cross the Chao Phraya to the porcelain-tiled Temple of Dawn.",
+     "location": "Thonburi",
+     "cost_sgd": 5,
+     "tags": [
+      "culture",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Chatuchak Weekend Market",
+     "slot": "morning",
+     "description": "Thousands of stalls for clothes, crafts and snacks.",
+     "location": "Chatuchak",
+     "cost_sgd": 20,
+     "tags": [
+      "food",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Thai massage at Wat Pho school",
+     "slot": "afternoon",
+     "description": "A traditional massage where the craft is taught.",
+     "location": "Wat Pho",
+     "cost_sgd": 25,
+     "tags": [
+      "relaxed",
+      "wellness"
+     ],
+     "time": null
+    },
+    {
+     "title": "Siam shopping afternoon",
+     "slot": "afternoon",
+     "description": "Air-conditioned escape through Siam Paragon and MBK.",
+     "location": "Siam",
+     "cost_sgd": 0,
+     "tags": [
+      "city",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Yaowarat street food night",
+     "slot": "evening",
+     "description": "Chinatown's neon street of seafood, noodles and desserts.",
+     "location": "Yaowarat",
+     "cost_sgd": 25,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    },
+    {
+     "title": "Rooftop bar sunset",
+     "slot": "evening",
+     "description": "Skyline drinks above the river.",
+     "location": "Silom",
+     "cost_sgd": 35,
+     "tags": [
+      "city",
+      "nightlife"
+     ],
+     "time": "18:00"
+    }
+   ]
+  },
+  {
+   "name": "Seoul, South Korea",
+   "keywords": [
+    "asia",
+    "city",
+    "east asia",
+    "food",
+    "shopping"
+   ],
+   "description": "Palaces beside neon districts, Korean barbecue and all-night shopping.",
+   "details": "Spring and autumn are mild and clear; winter is very cold, summer humid. Pair palaces and hanok villages with Myeongdong and Hongdae for food and shopping. The subway reaches everything; stay near Myeongdong or Hongdae.",
+   "tags": [
+    "City",
+    "Food",
+    "Shopping"
+   ],
+   "daily_cost_sgd": 170,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Gyeongbokgung Palace guard ceremony",
+     "slot": "morning",
+     "description": "The main Joseon palace and its changing of the guard.",
+     "location": "Jongno",
+     "cost_sgd": 4,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Bukchon Hanok Village walk",
+     "slot": "morning",
+     "description": "Lanes of traditional tiled-roof houses between two palaces.",
+     "location": "Bukchon",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Myeongdong street food and beauty shops",
+     "slot": "afternoon",
+     "description": "Skewers, egg bread and K-beauty stores.",
+     "location": "Myeongdong",
+     "cost_sgd": 25,
+     "tags": [
+      "food",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "N Seoul Tower at dusk",
+     "slot": "evening",
+     "description": "Cable car up Namsan for the city lights.",
+     "location": "Namsan",
+     "cost_sgd": 20,
+     "tags": [
+      "city"
+     ],
+     "time": "18:00"
+    },
+    {
+     "title": "Gwangjang Market lunch",
+     "slot": "afternoon",
+     "description": "Bindaetteok pancakes and kalguksu at the old market.",
+     "location": "Jongno",
+     "cost_sgd": 15,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Hongdae night out",
+     "slot": "evening",
+     "description": "Buskers, bars and karaoke in the university district.",
+     "location": "Hongdae",
+     "cost_sgd": 40,
+     "tags": [
+      "nightlife"
+     ],
+     "time": null
+    },
+    {
+     "title": "Korean barbecue dinner",
+     "slot": "evening",
+     "description": "Grill-your-own pork belly and soju.",
+     "location": "Mapo",
+     "cost_sgd": 40,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Lisbon, Portugal",
+   "keywords": [
+    "city",
+    "coast",
+    "culture",
+    "europe",
+    "food"
+   ],
+   "description": "Pastel hills, yellow trams and custard tarts on the Atlantic coast.",
+   "details": "Spring and early autumn are warm without the summer crowds. Explore Alfama and Belém by day, Bairro Alto by night, and take a day trip to Sintra. Trams and the metro are cheap; the hills are steep, so bring good shoes.",
+   "tags": [
+    "City",
+    "Food",
+    "Coast"
+   ],
+   "daily_cost_sgd": 190,
+   "typical_days": 4,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Tram 28 through Alfama",
+     "slot": "morning",
+     "description": "Ride the vintage tram up through the old Moorish quarter.",
+     "location": "Alfama",
+     "cost_sgd": 5,
+     "tags": [
+      "city",
+      "culture"
+     ],
+     "time": null
+    },
+    {
+     "title": "Belém Tower and pastéis de Belém",
+     "slot": "morning",
+     "description": "The riverside tower, Jerónimos Monastery and the original custard tarts.",
+     "location": "Belém",
+     "cost_sgd": 20,
+     "tags": [
+      "culture",
+      "food",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Sintra palaces day trip",
+     "slot": "morning",
+     "description": "Pena Palace and the Moorish Castle in the hills.",
+     "location": "Sintra",
+     "cost_sgd": 45,
+     "tags": [
+      "culture",
+      "hiking",
+      "history"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Time Out Market lunch",
+     "slot": "afternoon",
+     "description": "A food hall of Lisbon's best cooks under one roof.",
+     "location": "Cais do Sodré",
+     "cost_sgd": 25,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Miradouro sunset",
+     "slot": "evening",
+     "description": "Golden hour over the rooftops from a city viewpoint.",
+     "location": "Miradouro da Senhora do Monte",
+     "cost_sgd": 0,
+     "tags": [
+      "city"
+     ],
+     "time": "18:00"
+    },
+    {
+     "title": "Fado dinner in Alfama",
+     "slot": "evening",
+     "description": "Portugal's soulful music over a traditional dinner.",
+     "location": "Alfama",
+     "cost_sgd": 55,
+     "tags": [
+      "culture",
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Bairro Alto bar hop",
+     "slot": "evening",
+     "description": "Street-side drinks in the lively upper town.",
+     "location": "Bairro Alto",
+     "cost_sgd": 30,
+     "tags": [
+      "nightlife"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Barcelona, Spain",
+   "keywords": [
+    "beach",
+    "city",
+    "europe",
+    "food",
+    "nightlife"
+   ],
+   "description": "Gaudí's city by the sea: modernist landmarks, tapas bars and a city beach.",
+   "details": "May, June and September are warm without peak crowds. Book the Sagrada Família ahead; pair Gaudí mornings with beach afternoons and late tapas. The metro is quick; the Gothic Quarter is best on foot.",
+   "tags": [
+    "City",
+    "Beach",
+    "Food"
+   ],
+   "daily_cost_sgd": 210,
+   "typical_days": 4,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Sagrada Família",
+     "slot": "morning",
+     "description": "Gaudí's unfinished basilica and its light-filled nave.",
+     "location": "Eixample",
+     "cost_sgd": 40,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Park Güell",
+     "slot": "morning",
+     "description": "Mosaic terraces and city views.",
+     "location": "Gràcia",
+     "cost_sgd": 15,
+     "tags": [
+      "culture",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Gothic Quarter walk",
+     "slot": "afternoon",
+     "description": "Medieval lanes, the cathedral and hidden squares.",
+     "location": "Barri Gòtic",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "La Boqueria market",
+     "slot": "afternoon",
+     "description": "Fresh juice, jamón and seafood at the famous market.",
+     "location": "La Rambla",
+     "cost_sgd": 20,
+     "tags": [
+      "food",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Barceloneta beach afternoon",
+     "slot": "afternoon",
+     "description": "Swim and sunbathe on the city's beach.",
+     "location": "Barceloneta",
+     "cost_sgd": 0,
+     "tags": [
+      "beach",
+      "relaxed"
+     ],
+     "time": null
+    },
+    {
+     "title": "Tapas crawl in El Born",
+     "slot": "evening",
+     "description": "Pintxos and vermouth in Born's small bars.",
+     "location": "El Born",
+     "cost_sgd": 45,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": "20:30"
+    },
+    {
+     "title": "Montjuïc sunset",
+     "slot": "evening",
+     "description": "Gardens and views from the hill above the port.",
+     "location": "Montjuïc",
+     "cost_sgd": 0,
+     "tags": [
+      "city",
+      "nature"
+     ],
+     "time": "19:00"
+    }
+   ]
+  },
+  {
+   "name": "Rome, Italy",
+   "keywords": [
+    "city",
+    "culture",
+    "europe",
+    "food",
+    "history"
+   ],
+   "description": "Three thousand years of history around every corner, and pasta to match.",
+   "details": "April to June and September to October are best; August is hot and crowded. Book the Colosseum and Vatican ahead; save evenings for Trastevere trattorias. The historic centre is walkable; the metro covers the rest.",
+   "tags": [
+    "History",
+    "Food",
+    "Culture"
+   ],
+   "daily_cost_sgd": 200,
+   "typical_days": 4,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Colosseum and Roman Forum",
+     "slot": "morning",
+     "description": "The arena and the ruins of the ancient city centre.",
+     "location": "Colosseo",
+     "cost_sgd": 30,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Vatican Museums and Sistine Chapel",
+     "slot": "morning",
+     "description": "Michelangelo's ceiling and the papal collections.",
+     "location": "Vatican City",
+     "cost_sgd": 35,
+     "tags": [
+      "art",
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Pantheon and Trevi Fountain walk",
+     "slot": "afternoon",
+     "description": "Piazza Navona, the Pantheon and a coin in the Trevi.",
+     "location": "Centro Storico",
+     "cost_sgd": 0,
+     "tags": [
+      "city",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Gelato and Spanish Steps",
+     "slot": "afternoon",
+     "description": "An afternoon stroll from the Steps down Via del Corso.",
+     "location": "Piazza di Spagna",
+     "cost_sgd": 6,
+     "tags": [
+      "food",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Borghese Gallery and gardens",
+     "slot": "afternoon",
+     "description": "Bernini sculptures in a villa park.",
+     "location": "Villa Borghese",
+     "cost_sgd": 25,
+     "tags": [
+      "art",
+      "culture",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Trastevere trattoria dinner",
+     "slot": "evening",
+     "description": "Cacio e pepe and carbonara in cobbled lanes.",
+     "location": "Trastevere",
+     "cost_sgd": 45,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Campo de' Fiori aperitivo",
+     "slot": "evening",
+     "description": "Spritz and snacks on a lively square.",
+     "location": "Campo de' Fiori",
+     "cost_sgd": 20,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": "18:30"
+    }
+   ]
+  },
+  {
+   "name": "Reykjavik, Iceland",
+   "keywords": [
+    "adventure",
+    "europe",
+    "hiking",
+    "nature"
+   ],
+   "description": "The gateway to waterfalls, glaciers, geothermal lagoons and the northern lights.",
+   "details": "June to August brings midnight sun and open roads; September to March, the aurora. Day trips run the Golden Circle and the south coast; weather changes fast, so pack layers. Iceland is expensive: self-catering saves a lot.",
+   "tags": [
+    "Nature",
+    "Adventure",
+    "Aurora"
+   ],
+   "daily_cost_sgd": 320,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Golden Circle day tour",
+     "slot": "morning",
+     "description": "Þingvellir rift valley, Geysir and Gullfoss waterfall.",
+     "location": "Golden Circle",
+     "cost_sgd": 110,
+     "tags": [
+      "adventure",
+      "nature"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "South coast waterfalls",
+     "slot": "morning",
+     "description": "Seljalandsfoss, Skógafoss and the black sand of Reynisfjara.",
+     "location": "South Coast",
+     "cost_sgd": 130,
+     "tags": [
+      "adventure",
+      "hiking",
+      "nature"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Blue Lagoon soak",
+     "slot": "afternoon",
+     "description": "Milky geothermal water in a lava field.",
+     "location": "Grindavík",
+     "cost_sgd": 120,
+     "tags": [
+      "nature",
+      "relaxed",
+      "wellness"
+     ],
+     "time": null
+    },
+    {
+     "title": "Hallgrímskirkja and old town",
+     "slot": "afternoon",
+     "description": "The basalt-column church tower and the harbour streets.",
+     "location": "Reykjavik",
+     "cost_sgd": 15,
+     "tags": [
+      "city",
+      "culture"
+     ],
+     "time": null
+    },
+    {
+     "title": "Northern lights tour",
+     "slot": "evening",
+     "description": "Chase the aurora away from city lights (winter months).",
+     "location": "Outside Reykjavik",
+     "cost_sgd": 90,
+     "tags": [
+      "adventure",
+      "nature"
+     ],
+     "time": "21:00"
+    },
+    {
+     "title": "Icelandic dinner downtown",
+     "slot": "evening",
+     "description": "Lamb soup, arctic char and skyr.",
+     "location": "Laugavegur",
+     "cost_sgd": 60,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Cape Town, South Africa",
+   "keywords": [
+    "adventure",
+    "africa",
+    "beach",
+    "nature"
+   ],
+   "description": "Table Mountain above Atlantic beaches, penguins and the winelands.",
+   "details": "November to March is warm and dry; winter is green and wet. Hike or cable car up Table Mountain, drive the Cape Peninsula, lunch in Stellenbosch. Stay in the City Bowl or Camps Bay; use Uber after dark.",
+   "tags": [
+    "Nature",
+    "Beach",
+    "Wine"
+   ],
+   "daily_cost_sgd": 150,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Table Mountain",
+     "slot": "morning",
+     "description": "Hike Platteklip Gorge or ride the cableway to the top.",
+     "location": "Table Mountain",
+     "cost_sgd": 35,
+     "tags": [
+      "adventure",
+      "hiking",
+      "nature"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Cape Peninsula and Boulders Beach penguins",
+     "slot": "morning",
+     "description": "Chapman's Peak, the Cape of Good Hope and the penguin colony.",
+     "location": "Cape Peninsula",
+     "cost_sgd": 50,
+     "tags": [
+      "beach",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Stellenbosch wine tasting",
+     "slot": "afternoon",
+     "description": "Estates and tastings in the winelands.",
+     "location": "Stellenbosch",
+     "cost_sgd": 40,
+     "tags": [
+      "food",
+      "relaxed"
+     ],
+     "time": null
+    },
+    {
+     "title": "V&A Waterfront",
+     "slot": "afternoon",
+     "description": "Harbour, markets and the Zeitz MOCAA gallery.",
+     "location": "V&A Waterfront",
+     "cost_sgd": 20,
+     "tags": [
+      "art",
+      "city",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Camps Bay sunset",
+     "slot": "evening",
+     "description": "Palm-lined beach under the Twelve Apostles.",
+     "location": "Camps Bay",
+     "cost_sgd": 0,
+     "tags": [
+      "beach"
+     ],
+     "time": "18:30"
+    },
+    {
+     "title": "Bo-Kaap Cape Malay dinner",
+     "slot": "evening",
+     "description": "Bobotie and curries in the colourful quarter.",
+     "location": "Bo-Kaap",
+     "cost_sgd": 35,
+     "tags": [
+      "culture",
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Sydney, Australia",
+   "keywords": [
+    "beach",
+    "city",
+    "nature",
+    "oceania"
+   ],
+   "description": "Harbour icons, ocean pools and a famous coastal walk.",
+   "details": "Spring and autumn are mild; December to February is beach season. Mix harbour sights with Bondi and Manly, and a day in the Blue Mountains. Ferries are the best way to see the harbour; an Opal card covers everything.",
+   "tags": [
+    "Beach",
+    "City",
+    "Nature"
+   ],
+   "daily_cost_sgd": 230,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Bondi to Coogee coastal walk",
+     "slot": "morning",
+     "description": "Clifftop path past ocean pools and beaches.",
+     "location": "Bondi",
+     "cost_sgd": 0,
+     "tags": [
+      "beach",
+      "hiking",
+      "nature"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Opera House and Royal Botanic Garden",
+     "slot": "morning",
+     "description": "Circular Quay, the Opera House and harbour gardens.",
+     "location": "Circular Quay",
+     "cost_sgd": 0,
+     "tags": [
+      "city",
+      "culture"
+     ],
+     "time": null
+    },
+    {
+     "title": "Ferry to Manly",
+     "slot": "afternoon",
+     "description": "The classic harbour ferry ride, then the beach.",
+     "location": "Manly",
+     "cost_sgd": 10,
+     "tags": [
+      "beach",
+      "city"
+     ],
+     "time": null
+    },
+    {
+     "title": "Blue Mountains day trip",
+     "slot": "morning",
+     "description": "The Three Sisters and eucalyptus valleys.",
+     "location": "Katoomba",
+     "cost_sgd": 60,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Taronga Zoo",
+     "slot": "afternoon",
+     "description": "Australian wildlife with harbour views.",
+     "location": "Mosman",
+     "cost_sgd": 55,
+     "tags": [
+      "family",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "The Rocks dinner",
+     "slot": "evening",
+     "description": "Pubs and restaurants in Sydney's oldest quarter.",
+     "location": "The Rocks",
+     "cost_sgd": 50,
+     "tags": [
+      "food",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Darling Harbour night",
+     "slot": "evening",
+     "description": "Waterfront bars and the city lights.",
+     "location": "Darling Harbour",
+     "cost_sgd": 35,
+     "tags": [
+      "city",
+      "nightlife"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Cancun, Mexico",
+   "keywords": [
+    "beach",
+    "island",
+    "nightlife",
+    "north america"
+   ],
+   "description": "Caribbean beaches, cenotes and Mayan ruins on the Yucatán coast.",
+   "details": "December to April is dry and sunny; June to November is hurricane season. Beach days in the Hotel Zone, a ferry to Isla Mujeres, a day at Chichén Itzá or Tulum. Buses are cheap; tours handle the ruins.",
+   "tags": [
+    "Beach",
+    "Ruins",
+    "Nightlife"
+   ],
+   "daily_cost_sgd": 170,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Isla Mujeres ferry and Playa Norte",
+     "slot": "morning",
+     "description": "Calm turquoise water on a small island.",
+     "location": "Isla Mujeres",
+     "cost_sgd": 30,
+     "tags": [
+      "beach",
+      "island"
+     ],
+     "time": null
+    },
+    {
+     "title": "Chichén Itzá and cenote swim",
+     "slot": "morning",
+     "description": "The great Mayan pyramid, then a swim in a sinkhole.",
+     "location": "Chichén Itzá",
+     "cost_sgd": 90,
+     "tags": [
+      "adventure",
+      "culture",
+      "history"
+     ],
+     "time": "07:30"
+    },
+    {
+     "title": "Tulum ruins by the sea",
+     "slot": "morning",
+     "description": "Clifftop Mayan ruins above the Caribbean.",
+     "location": "Tulum",
+     "cost_sgd": 40,
+     "tags": [
+      "beach",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Hotel Zone beach afternoon",
+     "slot": "afternoon",
+     "description": "White sand and swimming at Playa Delfines.",
+     "location": "Hotel Zone",
+     "cost_sgd": 0,
+     "tags": [
+      "beach",
+      "relaxed"
+     ],
+     "time": null
+    },
+    {
+     "title": "Snorkel the underwater museum (MUSA)",
+     "slot": "afternoon",
+     "description": "Sculptures on the reef off Isla Mujeres.",
+     "location": "MUSA",
+     "cost_sgd": 60,
+     "tags": [
+      "adventure",
+      "beach"
+     ],
+     "time": null
+    },
+    {
+     "title": "Tacos in El Centro",
+     "slot": "evening",
+     "description": "Tacos al pastor where the locals eat.",
+     "location": "Parque de las Palapas",
+     "cost_sgd": 15,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Party Center night out",
+     "slot": "evening",
+     "description": "Cancún's clubs on the Hotel Zone strip.",
+     "location": "Hotel Zone",
+     "cost_sgd": 50,
+     "tags": [
+      "nightlife"
+     ],
+     "time": "22:00"
+    }
+   ]
+  },
+  {
+   "name": "Niseko, Japan",
+   "keywords": [
+    "asia",
+    "east asia",
+    "japan",
+    "ski",
+    "skiing",
+    "snow",
+    "snowboarding",
+    "winter"
+   ],
+   "description": "Hokkaido's powder-snow capital, with onsen and ramen after the slopes.",
+   "details": "December to March has famously light powder; summer is for hiking and rafting. Ski the linked Niseko United resorts, soak in an onsen, eat in Hirafu village. Fly into Sapporo and take the resort bus.",
+   "tags": [
+    "Ski",
+    "Onsen",
+    "Winter"
+   ],
+   "daily_cost_sgd": 280,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Full day on the Niseko United slopes",
+     "slot": "morning",
+     "description": "Grand Hirafu, Hanazono and Annupuri on one lift pass.",
+     "location": "Grand Hirafu",
+     "cost_sgd": 110,
+     "tags": [
+      "ski",
+      "skiing",
+      "snow",
+      "snowboarding"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Ski or snowboard lesson",
+     "slot": "morning",
+     "description": "Group lesson for beginners and improvers.",
+     "location": "Niseko Village",
+     "cost_sgd": 120,
+     "tags": [
+      "ski",
+      "skiing",
+      "snowboarding"
+     ],
+     "time": null
+    },
+    {
+     "title": "Snowshoe walk",
+     "slot": "afternoon",
+     "description": "Quiet forest trails in deep snow.",
+     "location": "Niseko",
+     "cost_sgd": 50,
+     "tags": [
+      "hiking",
+      "nature",
+      "snow"
+     ],
+     "time": null
+    },
+    {
+     "title": "Onsen soak",
+     "slot": "afternoon",
+     "description": "Outdoor hot springs with views of Mount Yotei.",
+     "location": "Niseko Village",
+     "cost_sgd": 15,
+     "tags": [
+      "relaxed",
+      "wellness"
+     ],
+     "time": "16:00"
+    },
+    {
+     "title": "Night skiing under lights",
+     "slot": "evening",
+     "description": "Floodlit runs on Grand Hirafu.",
+     "location": "Grand Hirafu",
+     "cost_sgd": 30,
+     "tags": [
+      "ski",
+      "skiing",
+      "snowboarding"
+     ],
+     "time": "17:30"
+    },
+    {
+     "title": "Hirafu village ramen and izakaya",
+     "slot": "evening",
+     "description": "Miso ramen and Hokkaido seafood.",
+     "location": "Hirafu",
+     "cost_sgd": 35,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Chamonix, France",
+   "keywords": [
+    "alps",
+    "europe",
+    "hiking",
+    "ski",
+    "skiing",
+    "snow",
+    "snowboarding",
+    "winter"
+   ],
+   "description": "An Alpine town under Mont Blanc, for skiing in winter and high trails in summer.",
+   "details": "Ski December to April; hike June to September. Ride to the Aiguille du Midi for Mont Blanc views; the valley bus links every resort. Stay in town; it is lively and walkable.",
+   "tags": [
+    "Alps",
+    "Ski",
+    "Hiking"
+   ],
+   "daily_cost_sgd": 300,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Aiguille du Midi cable car",
+     "slot": "morning",
+     "description": "Up to 3,842 metres facing Mont Blanc.",
+     "location": "Aiguille du Midi",
+     "cost_sgd": 110,
+     "tags": [
+      "adventure",
+      "alps",
+      "nature"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Skiing at Brévent-Flégère",
+     "slot": "morning",
+     "description": "Sunny slopes facing the Mont Blanc massif.",
+     "location": "Brévent",
+     "cost_sgd": 90,
+     "tags": [
+      "ski",
+      "skiing",
+      "snow",
+      "snowboarding"
+     ],
+     "time": null
+    },
+    {
+     "title": "Montenvers train to the Mer de Glace",
+     "slot": "afternoon",
+     "description": "Rack railway to France's largest glacier and its ice cave.",
+     "location": "Montenvers",
+     "cost_sgd": 55,
+     "tags": [
+      "alps",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Lac Blanc hike (summer)",
+     "slot": "morning",
+     "description": "A classic trail to an Alpine lake mirroring the peaks.",
+     "location": "Flégère",
+     "cost_sgd": 0,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Town centre and riverside stroll",
+     "slot": "afternoon",
+     "description": "The Arve river, shops and Alpine museum.",
+     "location": "Chamonix centre",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Savoyard fondue dinner",
+     "slot": "evening",
+     "description": "Fondue or tartiflette by the fire.",
+     "location": "Chamonix",
+     "cost_sgd": 55,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Après-ski in town",
+     "slot": "evening",
+     "description": "Bars along Rue des Moulins.",
+     "location": "Rue des Moulins",
+     "cost_sgd": 30,
+     "tags": [
+      "nightlife"
+     ],
+     "time": "17:30"
+    }
+   ]
+  },
+  {
+   "name": "Banff, Canada",
+   "keywords": [
+    "hiking",
+    "nature",
+    "north america",
+    "ski",
+    "skiing",
+    "snow",
+    "snowboarding"
+   ],
+   "description": "Turquoise lakes, Rocky Mountain peaks and wildlife in Canada's first national park.",
+   "details": "Summer is for lakes and trails; December to April for skiing at three resorts. Lake Louise and Moraine Lake are the icons; drive the Icefields Parkway if you can. Stay in Banff town; Roam buses link the sights.",
+   "tags": [
+    "Nature",
+    "Hiking",
+    "Ski"
+   ],
+   "daily_cost_sgd": 240,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Lake Louise and the Lake Agnes teahouse",
+     "slot": "morning",
+     "description": "The famous lake, then a hike to a mountain teahouse.",
+     "location": "Lake Louise",
+     "cost_sgd": 10,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Moraine Lake",
+     "slot": "morning",
+     "description": "Ten peaks above a glacier-blue lake (shuttle in summer).",
+     "location": "Moraine Lake",
+     "cost_sgd": 10,
+     "tags": [
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Skiing at Sunshine Village",
+     "slot": "morning",
+     "description": "High-altitude powder on the Continental Divide.",
+     "location": "Sunshine Village",
+     "cost_sgd": 140,
+     "tags": [
+      "ski",
+      "skiing",
+      "snow",
+      "snowboarding"
+     ],
+     "time": null
+    },
+    {
+     "title": "Banff Gondola",
+     "slot": "afternoon",
+     "description": "Up Sulphur Mountain for the valley view.",
+     "location": "Sulphur Mountain",
+     "cost_sgd": 70,
+     "tags": [
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Johnston Canyon walk",
+     "slot": "afternoon",
+     "description": "Catwalks past waterfalls in a limestone canyon.",
+     "location": "Bow Valley Parkway",
+     "cost_sgd": 0,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Banff Upper Hot Springs",
+     "slot": "evening",
+     "description": "A mountain-view thermal pool.",
+     "location": "Banff",
+     "cost_sgd": 15,
+     "tags": [
+      "relaxed",
+      "wellness"
+     ],
+     "time": "18:00"
+    },
+    {
+     "title": "Banff Avenue dinner",
+     "slot": "evening",
+     "description": "Alberta beef and cosy mountain pubs.",
+     "location": "Banff Avenue",
+     "cost_sgd": 55,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Queenstown, New Zealand",
+   "keywords": [
+    "adventure",
+    "hiking",
+    "nature",
+    "oceania",
+    "ski",
+    "skiing",
+    "snowboarding"
+   ],
+   "description": "New Zealand's adventure capital on a lake ringed by the Remarkables.",
+   "details": "Summer is for hiking and lake days; June to September for skiing. Bungy, jet boats and a day trip to Milford Sound are the classics. The town is walkable; tours pick up from hotels.",
+   "tags": [
+    "Adventure",
+    "Hiking",
+    "Lakes"
+   ],
+   "daily_cost_sgd": 230,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Milford Sound cruise",
+     "slot": "morning",
+     "description": "Fiordland's waterfalls and sheer cliffs by boat.",
+     "location": "Milford Sound",
+     "cost_sgd": 180,
+     "tags": [
+      "adventure",
+      "nature"
+     ],
+     "time": "07:00"
+    },
+    {
+     "title": "Kawarau Bridge bungy or Shotover jet",
+     "slot": "morning",
+     "description": "The original bungy, or a jet boat through the canyon.",
+     "location": "Kawarau Gorge",
+     "cost_sgd": 150,
+     "tags": [
+      "adventure"
+     ],
+     "time": null
+    },
+    {
+     "title": "Skyline gondola and luge",
+     "slot": "afternoon",
+     "description": "Views over Lake Wakatipu, then race down the luge.",
+     "location": "Bob's Peak",
+     "cost_sgd": 65,
+     "tags": [
+      "adventure",
+      "family"
+     ],
+     "time": null
+    },
+    {
+     "title": "Queenstown Hill walk",
+     "slot": "morning",
+     "description": "A short climb to the 'Basket of Dreams' viewpoint.",
+     "location": "Queenstown Hill",
+     "cost_sgd": 0,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Skiing at The Remarkables",
+     "slot": "morning",
+     "description": "Family-friendly slopes above the lake (winter).",
+     "location": "The Remarkables",
+     "cost_sgd": 120,
+     "tags": [
+      "ski",
+      "skiing",
+      "snowboarding"
+     ],
+     "time": null
+    },
+    {
+     "title": "Arrowtown and Gibbston wine",
+     "slot": "afternoon",
+     "description": "A gold-rush village, then wineries in the valley.",
+     "location": "Arrowtown",
+     "cost_sgd": 40,
+     "tags": [
+      "food",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Fergburger and lakefront evening",
+     "slot": "evening",
+     "description": "The famous burger, then the waterfront.",
+     "location": "Queenstown centre",
+     "cost_sgd": 20,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Kathmandu, Nepal",
+   "keywords": [
+    "asia",
+    "hiking",
+    "mountains",
+    "south asia",
+    "trekking"
+   ],
+   "description": "Temple squares, prayer flags and the gateway to Himalayan treks.",
+   "details": "October to November and March to April have clear mountain views. Explore the three Durbar Squares, then a short trek or a Himalaya flight. Stay in Thamel; taxis are cheap but agree the fare first.",
+   "tags": [
+    "Mountains",
+    "Temples",
+    "Trekking"
+   ],
+   "daily_cost_sgd": 70,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Swayambhunath, the Monkey Temple",
+     "slot": "morning",
+     "description": "Hilltop stupa with prayer wheels and valley views.",
+     "location": "Swayambhu",
+     "cost_sgd": 5,
+     "tags": [
+      "culture",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Kathmandu Durbar Square",
+     "slot": "morning",
+     "description": "Royal palaces and pagoda temples.",
+     "location": "Basantapur",
+     "cost_sgd": 15,
+     "tags": [
+      "culture",
+      "history",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Boudhanath stupa at dusk",
+     "slot": "evening",
+     "description": "Join the circling pilgrims around the great stupa.",
+     "location": "Boudha",
+     "cost_sgd": 5,
+     "tags": [
+      "culture",
+      "temples"
+     ],
+     "time": "17:00"
+    },
+    {
+     "title": "Everest mountain flight",
+     "slot": "morning",
+     "description": "An early sightseeing flight along the Himalaya.",
+     "location": "Tribhuvan Airport",
+     "cost_sgd": 250,
+     "tags": [
+      "adventure",
+      "mountains"
+     ],
+     "time": "06:30"
+    },
+    {
+     "title": "Bhaktapur day trip",
+     "slot": "afternoon",
+     "description": "A medieval Newar town of potters and temples.",
+     "location": "Bhaktapur",
+     "cost_sgd": 20,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Nagarkot sunrise hike",
+     "slot": "morning",
+     "description": "Short trek on the valley rim with Himalayan views.",
+     "location": "Nagarkot",
+     "cost_sgd": 30,
+     "tags": [
+      "hiking",
+      "mountains",
+      "trekking"
+     ],
+     "time": "05:30"
+    },
+    {
+     "title": "Thamel momo dinner",
+     "slot": "evening",
+     "description": "Dumplings and dal bhat in the backpacker quarter.",
+     "location": "Thamel",
+     "cost_sgd": 10,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Torres del Paine, Chile",
+   "keywords": [
+    "hiking",
+    "mountains",
+    "nature",
+    "south america",
+    "trekking"
+   ],
+   "description": "Granite towers, glaciers and wild Patagonian trails at the end of the world.",
+   "details": "October to April is trekking season; expect wind in any month. Day hikes reach the Base of the Towers and Grey Glacier; the W Trek takes 4-5 days. Stay in Puerto Natales or park lodges; book refugios early.",
+   "tags": [
+    "Trekking",
+    "Mountains",
+    "Wild"
+   ],
+   "daily_cost_sgd": 260,
+   "typical_days": 5,
+   "suggest": true,
+   "activities": [
+    {
+     "title": "Base of the Towers hike",
+     "slot": "morning",
+     "description": "The park's signature climb to the three granite towers.",
+     "location": "Las Torres",
+     "cost_sgd": 0,
+     "tags": [
+      "hiking",
+      "mountains",
+      "trekking"
+     ],
+     "time": "07:00"
+    },
+    {
+     "title": "Grey Glacier boat",
+     "slot": "afternoon",
+     "description": "Sail among icebergs to the glacier face.",
+     "location": "Lago Grey",
+     "cost_sgd": 110,
+     "tags": [
+      "adventure",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Mirador Cuernos walk",
+     "slot": "morning",
+     "description": "An easy trail to views of the Paine horns.",
+     "location": "Lago Pehoé",
+     "cost_sgd": 0,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Wildlife drive",
+     "slot": "afternoon",
+     "description": "Guanacos, condors and, with luck, a puma.",
+     "location": "Laguna Amarga",
+     "cost_sgd": 60,
+     "tags": [
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "Puerto Natales waterfront",
+     "slot": "afternoon",
+     "description": "The town's seafront and gear shops.",
+     "location": "Puerto Natales",
+     "cost_sgd": 0,
+     "tags": [
+      "city",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Patagonian lamb dinner",
+     "slot": "evening",
+     "description": "Cordero al palo and Chilean wine.",
+     "location": "Puerto Natales",
+     "cost_sgd": 45,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Tokyo, Japan",
+   "keywords": [
+    "asia",
+    "city",
+    "east asia",
+    "food",
+    "japan",
+    "shopping"
+   ],
+   "description": "A vast, safe megacity of shrines, food halls and neon districts.",
+   "details": "Spring and autumn are mild; summer is hot and humid. The JR and metro reach everything.",
+   "tags": [
+    "City",
+    "Food",
+    "Shopping"
+   ],
+   "daily_cost_sgd": 200,
+   "typical_days": 5,
+   "suggest": false,
+   "activities": [
+    {
+     "title": "Senso-ji and Nakamise Street",
+     "slot": "morning",
+     "description": "Tokyo's oldest temple and its snack-stall approach.",
+     "location": "Asakusa",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "food",
+      "temples"
+     ],
+     "time": null
+    },
+    {
+     "title": "Meiji Shrine and Harajuku",
+     "slot": "morning",
+     "description": "Forest shrine, then Takeshita Street.",
+     "location": "Harajuku",
+     "cost_sgd": 0,
+     "tags": [
+      "culture",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Tsukiji Outer Market breakfast",
+     "slot": "morning",
+     "description": "Sushi, tamagoyaki and grilled seafood.",
+     "location": "Tsukiji",
+     "cost_sgd": 25,
+     "tags": [
+      "food"
+     ],
+     "time": "08:00"
+    },
+    {
+     "title": "Shibuya Crossing and Shibuya Sky",
+     "slot": "afternoon",
+     "description": "The famous scramble, then the rooftop view.",
+     "location": "Shibuya",
+     "cost_sgd": 30,
+     "tags": [
+      "city"
+     ],
+     "time": null
+    },
+    {
+     "title": "teamLab digital art museum",
+     "slot": "afternoon",
+     "description": "Immersive light and art installations.",
+     "location": "Toyosu",
+     "cost_sgd": 45,
+     "tags": [
+      "art",
+      "family"
+     ],
+     "time": null
+    },
+    {
+     "title": "Shinjuku Omoide Yokocho dinner",
+     "slot": "evening",
+     "description": "Yakitori in tiny smoky alley bars.",
+     "location": "Shinjuku",
+     "cost_sgd": 35,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    },
+    {
+     "title": "Akihabara arcades",
+     "slot": "evening",
+     "description": "Retro games, arcades and anime shops.",
+     "location": "Akihabara",
+     "cost_sgd": 20,
+     "tags": [
+      "nightlife",
+      "shopping"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Osaka, Japan",
+   "keywords": [
+    "asia",
+    "city",
+    "east asia",
+    "food",
+    "japan",
+    "nightlife"
+   ],
+   "description": "Japan's kitchen: street food, castles and neon canals.",
+   "details": "Spring and autumn are best. Kyoto and Nara are easy day trips by train.",
+   "tags": [
+    "Food",
+    "City",
+    "Nightlife"
+   ],
+   "daily_cost_sgd": 170,
+   "typical_days": 4,
+   "suggest": false,
+   "activities": [
+    {
+     "title": "Osaka Castle and park",
+     "slot": "morning",
+     "description": "The landmark castle keep and its moat gardens.",
+     "location": "Chuo Ward",
+     "cost_sgd": 8,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Nara deer park day trip",
+     "slot": "morning",
+     "description": "Todai-ji's giant Buddha and the bowing deer.",
+     "location": "Nara",
+     "cost_sgd": 15,
+     "tags": [
+      "culture",
+      "nature",
+      "temples"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Kuromon Market lunch",
+     "slot": "afternoon",
+     "description": "Fresh seafood, wagyu skewers and fruit.",
+     "location": "Nipponbashi",
+     "cost_sgd": 30,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Universal Studios Japan",
+     "slot": "morning",
+     "description": "Super Nintendo World and the big rides.",
+     "location": "Universal City",
+     "cost_sgd": 110,
+     "tags": [
+      "adventure",
+      "family"
+     ],
+     "time": "08:30"
+    },
+    {
+     "title": "Umeda Sky Building",
+     "slot": "afternoon",
+     "description": "The floating garden observatory.",
+     "location": "Umeda",
+     "cost_sgd": 20,
+     "tags": [
+      "city"
+     ],
+     "time": null
+    },
+    {
+     "title": "Dotonbori street food night",
+     "slot": "evening",
+     "description": "Takoyaki and okonomiyaki under the Glico sign.",
+     "location": "Dotonbori",
+     "cost_sgd": 30,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    },
+    {
+     "title": "Shinsekai kushikatsu",
+     "slot": "evening",
+     "description": "Fried skewers in the retro district by Tsutenkaku.",
+     "location": "Shinsekai",
+     "cost_sgd": 25,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Taipei, Taiwan",
+   "keywords": [
+    "asia",
+    "city",
+    "east asia",
+    "food",
+    "nature"
+   ],
+   "description": "Night markets, mountain hot springs and a famous dumpling house.",
+   "details": "October to April is cooler; summer is hot with typhoons. The MRT is spotless and cheap.",
+   "tags": [
+    "Food",
+    "City",
+    "Hot springs"
+   ],
+   "daily_cost_sgd": 120,
+   "typical_days": 4,
+   "suggest": false,
+   "activities": [
+    {
+     "title": "Elephant Mountain hike",
+     "slot": "morning",
+     "description": "A short, steep climb to the classic Taipei 101 view.",
+     "location": "Xinyi",
+     "cost_sgd": 0,
+     "tags": [
+      "hiking",
+      "nature"
+     ],
+     "time": null
+    },
+    {
+     "title": "National Palace Museum",
+     "slot": "morning",
+     "description": "Imperial Chinese treasures, jade cabbage included.",
+     "location": "Shilin",
+     "cost_sgd": 12,
+     "tags": [
+      "art",
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Jiufen old street",
+     "slot": "afternoon",
+     "description": "Teahouses and lanterns on a hillside mining town.",
+     "location": "Jiufen",
+     "cost_sgd": 10,
+     "tags": [
+      "culture",
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Beitou hot springs",
+     "slot": "afternoon",
+     "description": "Thermal valley and public baths.",
+     "location": "Beitou",
+     "cost_sgd": 10,
+     "tags": [
+      "relaxed",
+      "wellness"
+     ],
+     "time": null
+    },
+    {
+     "title": "Din Tai Fung dumplings",
+     "slot": "afternoon",
+     "description": "Xiaolongbao at the original branch.",
+     "location": "Xinyi",
+     "cost_sgd": 30,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "Shilin Night Market",
+     "slot": "evening",
+     "description": "Fried chicken, bubble tea and games.",
+     "location": "Shilin",
+     "cost_sgd": 15,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    },
+    {
+     "title": "Taipei 101 at night",
+     "slot": "evening",
+     "description": "Observatory views over the lit city.",
+     "location": "Xinyi",
+     "cost_sgd": 35,
+     "tags": [
+      "city"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "Paris, France",
+   "keywords": [
+    "art",
+    "city",
+    "culture",
+    "europe",
+    "food"
+   ],
+   "description": "Museums, cafés and riverside walks in the city of light.",
+   "details": "Spring and autumn are lovely; August is quiet as locals leave. The metro reaches everything.",
+   "tags": [
+    "Culture",
+    "Food",
+    "Art"
+   ],
+   "daily_cost_sgd": 250,
+   "typical_days": 5,
+   "suggest": false,
+   "activities": [
+    {
+     "title": "Louvre highlights",
+     "slot": "morning",
+     "description": "The Mona Lisa, Winged Victory and the glass pyramid.",
+     "location": "1st arrondissement",
+     "cost_sgd": 35,
+     "tags": [
+      "art",
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Musée d'Orsay",
+     "slot": "morning",
+     "description": "Impressionists in a former railway station.",
+     "location": "7th arrondissement",
+     "cost_sgd": 25,
+     "tags": [
+      "art",
+      "culture"
+     ],
+     "time": null
+    },
+    {
+     "title": "Montmartre and Sacré-Cœur",
+     "slot": "afternoon",
+     "description": "Artists' square and the hilltop basilica.",
+     "location": "Montmartre",
+     "cost_sgd": 0,
+     "tags": [
+      "city",
+      "culture"
+     ],
+     "time": null
+    },
+    {
+     "title": "Le Marais café and boutique stroll",
+     "slot": "afternoon",
+     "description": "Falafel, galleries and small shops.",
+     "location": "Le Marais",
+     "cost_sgd": 20,
+     "tags": [
+      "food",
+      "shopping"
+     ],
+     "time": null
+    },
+    {
+     "title": "Eiffel Tower summit",
+     "slot": "evening",
+     "description": "Up the tower as the lights come on.",
+     "location": "Champ de Mars",
+     "cost_sgd": 45,
+     "tags": [
+      "city"
+     ],
+     "time": "18:30"
+    },
+    {
+     "title": "Seine river cruise",
+     "slot": "evening",
+     "description": "The monuments lit up from the water.",
+     "location": "Port de la Bourdonnais",
+     "cost_sgd": 25,
+     "tags": [
+      "city",
+      "relaxed"
+     ],
+     "time": "21:00"
+    },
+    {
+     "title": "Bistro dinner",
+     "slot": "evening",
+     "description": "Steak frites and wine in a classic bistro.",
+     "location": "Saint-Germain",
+     "cost_sgd": 60,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    }
+   ]
+  },
+  {
+   "name": "London, United Kingdom",
+   "keywords": [
+    "city",
+    "culture",
+    "europe",
+    "history",
+    "shopping"
+   ],
+   "description": "Free world-class museums, royal landmarks and historic pubs.",
+   "details": "Late spring to early autumn has the best weather; carry an umbrella anyway. Tap in on the Tube.",
+   "tags": [
+    "History",
+    "Culture",
+    "City"
+   ],
+   "daily_cost_sgd": 260,
+   "typical_days": 5,
+   "suggest": false,
+   "activities": [
+    {
+     "title": "Tower of London",
+     "slot": "morning",
+     "description": "The Crown Jewels and the Beefeaters.",
+     "location": "Tower Hill",
+     "cost_sgd": 55,
+     "tags": [
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "British Museum",
+     "slot": "morning",
+     "description": "The Rosetta Stone and two million years of history, free.",
+     "location": "Bloomsbury",
+     "cost_sgd": 0,
+     "tags": [
+      "art",
+      "culture",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Westminster and Buckingham Palace",
+     "slot": "morning",
+     "description": "Big Ben, the Abbey and the Changing of the Guard.",
+     "location": "Westminster",
+     "cost_sgd": 0,
+     "tags": [
+      "city",
+      "history"
+     ],
+     "time": null
+    },
+    {
+     "title": "Borough Market lunch",
+     "slot": "afternoon",
+     "description": "Street food stalls by London Bridge.",
+     "location": "Southwark",
+     "cost_sgd": 25,
+     "tags": [
+      "food"
+     ],
+     "time": null
+    },
+    {
+     "title": "South Bank walk to Tate Modern",
+     "slot": "afternoon",
+     "description": "Riverside walk to the modern art gallery.",
+     "location": "South Bank",
+     "cost_sgd": 0,
+     "tags": [
+      "art",
+      "city"
+     ],
+     "time": null
+    },
+    {
+     "title": "West End show",
+     "slot": "evening",
+     "description": "A musical or play in Theatreland.",
+     "location": "Covent Garden",
+     "cost_sgd": 90,
+     "tags": [
+      "culture",
+      "nightlife"
+     ],
+     "time": "19:30"
+    },
+    {
+     "title": "Historic pub dinner",
+     "slot": "evening",
+     "description": "Pie and a pint in a centuries-old pub.",
+     "location": "The City",
+     "cost_sgd": 40,
+     "tags": [
+      "food",
+      "nightlife"
+     ],
+     "time": null
+    }
+   ]
+  }
+ ]
+}

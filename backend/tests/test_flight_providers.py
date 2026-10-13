@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -205,9 +206,43 @@ async def test_all_providers_resting_fails_fast_without_a_request():
     assert tool.calls == []
 
 
-async def test_each_provider_gets_the_full_timeout():
-    tool = FakeChain("booking_rapidapi,skyscanner_rapidapi", {})
-    assert tool._call_timeout_seconds() == 2 * tool._settings.external_tool_timeout_seconds
+async def test_the_timeout_budgets_the_whole_chain_not_each_provider():
+    """Four providers must not turn the configured timeout into four times as long."""
+    chain = "booking_rapidapi,skyscanner_rapidapi,priceline_rapidapi,booking18_rapidapi"
+    tool = FakeChain(chain, {})
+    configured = tool._settings.external_tool_timeout_seconds
+
+    assert tool._chain_budget_seconds() == configured
+    assert tool._call_timeout_seconds() <= configured + 1.0
+
+
+class StallingChain(FakeChain):
+    """A chain whose first provider never answers."""
+
+    async def _search(self, provider: str, **params: Any) -> dict[str, Any]:
+        if provider == "booking_rapidapi":
+            self.calls.append(provider)
+            await asyncio.sleep(3600)
+        return await super()._search(provider, **params)
+
+
+async def test_a_stalled_provider_cannot_starve_the_rest_of_the_chain():
+    tool = StallingChain("booking_rapidapi,skyscanner_rapidapi", {"skyscanner_rapidapi": FLIGHTS})
+    tool._chain_budget_seconds = lambda: 0.4  # type: ignore[method-assign]
+
+    assert await tool._call(**QUERY) == FLIGHTS
+    assert tool.calls == ["booking_rapidapi", "skyscanner_rapidapi"]
+
+
+async def test_every_provider_stalling_ends_within_the_chain_budget():
+    tool = StallingChain("booking_rapidapi", {})
+    tool._chain_budget_seconds = lambda: 0.2  # type: ignore[method-assign]
+    started = asyncio.get_running_loop().time()
+
+    with pytest.raises(TimeoutError):
+        await tool._call(**QUERY)
+
+    assert asyncio.get_running_loop().time() - started < 1.0
 
 
 # --- booking-com18 (v2 search, prices converted on our side) -------------------------
@@ -278,6 +313,19 @@ async def test_booking18_uses_the_rate_for_whatever_currency_comes_back():
     result = await b18_client([], usd, flight_fx_rates="USD:1.28").search(**QUERY)
 
     assert result["options"][0]["price"] == 129.28
+
+
+async def test_booking18_drops_one_unconvertible_offer_and_keeps_the_rest():
+    mixed = json.loads(json.dumps(B18_FIXTURE))
+    offers = mixed["data"]["flightOffers"]
+    assert len(offers) >= 2
+    offers[0]["priceBreakdown"]["total"] = {"currencyCode": "XYZ", "units": 10, "nanos": 0}
+    ids = {str(o.get("flightKey") or o.get("token")) for o in offers}
+
+    result = await b18_client([], mixed, flight_fx_rates="CAD:0.93").search(**QUERY)
+
+    kept = {o["id"] for o in result["options"]}
+    assert kept and kept < ids, "the unpriced offer is left out, the others survive"
 
 
 async def test_booking18_refuses_a_currency_it_has_no_rate_for():
@@ -358,7 +406,9 @@ PRICELINE_FIXTURE = json.loads(
 )
 
 
-def priceline_client(requests: list[httpx.Request], **overrides: Any):
+def priceline_client(
+    requests: list[httpx.Request], body: dict[str, Any] | None = None, **overrides: Any
+):
     from app.agents.tools import priceline_rapidapi
 
     priceline_rapidapi._place_cache.clear()
@@ -369,7 +419,7 @@ def priceline_client(requests: list[httpx.Request], **overrides: Any):
             return httpx.Response(
                 200, json={"data": {"searchItems": [{"type": "AIRPORT", "id": "PEN"}]}}
             )
-        return httpx.Response(200, json=PRICELINE_FIXTURE)
+        return httpx.Response(200, json=body or PRICELINE_FIXTURE)
 
     s = settings("priceline_rapidapi").model_copy(update=overrides)
     return priceline_rapidapi.PricelineRapidApiClient(s, transport=httpx.MockTransport(handler))
@@ -397,6 +447,48 @@ async def test_priceline_maps_listings_and_converts_usd_to_sgd():
     assert search.url.params["originAirportCode"] == "SIN"
     assert search.url.params["destinationAirportCode"] == "PEN"
     assert search.url.params["returnDate"] == "2026-11-16"
+
+
+async def test_priceline_drops_a_listing_it_cannot_price_but_keeps_the_others():
+    mixed = json.loads(json.dumps(PRICELINE_FIXTURE))
+    listings = mixed["data"]["listings"]
+    assert len(listings) >= 2
+    listings[0]["fareBrands"][0]["price"][0]["currencyCode"] = "XYZ"
+
+    result = await priceline_client([], mixed, flight_fx_rates="USD:1.28").search(**QUERY)
+
+    assert 0 < len(result["options"]) < len(listings)
+
+
+@pytest.mark.parametrize("client_factory", ["booking18", "priceline"])
+async def test_a_short_city_name_is_looked_up_not_taken_for_an_airport_code(client_factory):
+    """ "Goa" is a city in India; "GOA" would be Genoa. Only an all-caps code skips lookup."""
+    requests: list[httpx.Request] = []
+    client = b18_client(requests) if client_factory == "booking18" else priceline_client(requests)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: requests.append(request) or httpx.Response(200, json={"data": []})
+        ),
+        base_url="https://example.test",
+    ) as http:
+        with pytest.raises(LookupError):
+            await client._resolve_place(http, "Goa")
+    assert requests, "a mixed-case three-letter name must reach the autocomplete lookup"
+
+
+@pytest.mark.parametrize("client_factory", ["booking18", "priceline"])
+async def test_an_all_caps_code_skips_the_lookup(client_factory):
+    requests: list[httpx.Request] = []
+    client = b18_client(requests) if client_factory == "booking18" else priceline_client(requests)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: requests.append(request)),
+        base_url="https://example.test",
+    ) as http:
+        resolved = await client._resolve_place(http, "SIN")
+
+    assert resolved in ("SIN", ["SIN"]) and requests == []
 
 
 async def test_priceline_one_way_and_unknown_currency():
