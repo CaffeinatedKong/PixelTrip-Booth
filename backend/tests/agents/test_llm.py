@@ -394,17 +394,17 @@ async def test_a_quota_error_is_recognised_by_status_text_too(monkeypatch) -> No
     assert models[PRIMARY].call_count == 1
 
 
-async def test_a_model_that_keeps_failing_gets_its_retry_then_the_next_model_runs(
+async def test_an_overloaded_model_is_passed_over_at_once_while_others_remain(
     monkeypatch,
 ) -> None:
     client, models = make_chain_client(
         monkeypatch,
-        {PRIMARY: [RuntimeError("503"), RuntimeError("503")], SECOND: [GOOD], THIRD: []},
+        {PRIMARY: [RuntimeError("503"), GOOD], SECOND: [GOOD], THIRD: []},
     )
 
     assert await generate(client) == GOOD
 
-    assert models[PRIMARY].call_count == MAX_ATTEMPTS
+    assert models[PRIMARY].call_count == 1  # no retry while another model can answer
     assert models[SECOND].call_count == 1
 
 
@@ -499,19 +499,21 @@ async def test_with_every_model_cooling_down_no_call_is_attempted(monkeypatch) -
     assert {name: m.call_count for name, m in models.items()} == calls_after_first
 
 
-async def test_a_one_off_failure_that_recovers_on_retry_does_not_rest_the_model(
-    monkeypatch,
-) -> None:
+async def test_the_last_model_left_still_gets_its_retry(monkeypatch) -> None:
     client, models = make_chain_client(
         monkeypatch,
-        {PRIMARY: [RuntimeError("503"), GOOD, GOOD], SECOND: [], THIRD: []},
+        {
+            PRIMARY: [RuntimeError("503")],
+            SECOND: [RuntimeError("503")],
+            THIRD: [RuntimeError("503"), GOOD],
+        },
     )
 
-    await generate(client)  # fails once, then the retry succeeds
-    await generate(client)  # still first in line
+    assert await generate(client) == GOOD
 
-    assert models[PRIMARY].call_count == 3
-    assert models[SECOND].call_count == 0
+    assert models[PRIMARY].call_count == 1
+    assert models[SECOND].call_count == 1
+    assert models[THIRD].call_count == MAX_ATTEMPTS  # nothing left to swap to, so retry
 
 
 async def test_a_model_that_fails_every_attempt_rests_briefly_then_returns(monkeypatch) -> None:
@@ -521,21 +523,21 @@ async def test_a_model_that_fails_every_attempt_rests_briefly_then_returns(monke
     client, models = make_chain_client(
         monkeypatch,
         {
-            PRIMARY: [RuntimeError("503"), RuntimeError("503"), GOOD],
+            PRIMARY: [RuntimeError("503"), GOOD],
             SECOND: [GOOD, GOOD],
             THIRD: [],
         },
     )
 
-    await generate(client)  # primary fails both attempts; second answers
+    await generate(client)  # primary fails; second answers
     await generate(client)  # primary is resting, so this goes straight to second
-    assert models[PRIMARY].call_count == MAX_ATTEMPTS
+    assert models[PRIMARY].call_count == 1
     assert models[SECOND].call_count == 2
 
     clock[0] += llm_module.FAILURE_COOLDOWN_SECONDS + 1
     await generate(client)  # the rest is over: primary is first in line again
 
-    assert models[PRIMARY].call_count == MAX_ATTEMPTS + 1
+    assert models[PRIMARY].call_count == 2
 
 
 async def test_a_timeout_rests_the_model(monkeypatch) -> None:

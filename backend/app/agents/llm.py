@@ -28,8 +28,8 @@ different resource and must not share that budget or its semantics.
     only burn time) and rested for a few minutes;
   - timing out: no retry, straight on to the next model (a model that just used the
     whole timeout is likely to again); it rests for a minute;
-  - overloaded: one retry on that model, then on to the next; a model that fails
-    both attempts rests for a minute so later calls skip it;
+  - overloaded or another provider error: straight on to the next model, which rests
+    for a minute so later calls skip it; only the last model left gets one retry;
   - the request is rejected as invalid (HTTP 400): passed over for this call only;
   - a malformed answer stops the call. Asking another model is a different
     decision from trying again.
@@ -301,8 +301,12 @@ class LLMClient:
             {"role": "user", "content": user_prompt},
         ]
 
-        for model_name in self._usable_models():
+        usable = self._usable_models()
+        for index, model_name in enumerate(usable):
             model = self._get_model(model_name).with_structured_output(response_model)
+            #: Only the last model left is worth a second try; while there is another
+            #: model to ask, an overloaded one is passed over at once.
+            others_left = index < len(usable) - 1
 
             for attempt in range(MAX_ATTEMPTS):
                 wrong_shape = False
@@ -344,9 +348,9 @@ class LLMClient:
                             _error_summary(exc),
                         )
                         break
-                    if attempt == MAX_ATTEMPTS - 1:
+                    if others_left or attempt == MAX_ATTEMPTS - 1:
                         logger.warning(
-                            "LLM call '%s' failed on model '%s' after retry: %s",
+                            "LLM call '%s' failed on model '%s': %s",
                             operation,
                             model_name,
                             _error_summary(exc),
