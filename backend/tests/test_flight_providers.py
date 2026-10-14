@@ -502,3 +502,65 @@ async def test_priceline_one_way_and_unknown_currency():
 
     with pytest.raises(UnsupportedCurrencyError):
         await priceline_client([], flight_fx_rates="CAD:0.93").search(**QUERY)  # fixture is USD
+
+
+class SlowChain(FakeChain):
+    """Providers that take ``delays[provider]`` seconds to answer."""
+
+    def __init__(self, provider: str, answers: dict[str, Any], delays: dict[str, float]) -> None:
+        super().__init__(provider, answers)
+        self.delays = delays
+
+    async def _search(self, provider: str, **params: Any) -> dict[str, Any]:
+        await asyncio.sleep(self.delays.get(provider, 0))
+        return await super()._search(provider, **params)
+
+
+async def test_a_working_provider_behind_failing_ones_is_not_cut_off_by_an_even_split():
+    """Four providers on a 4s budget would give each 1s; the working one needs 1.5s.
+
+    A provider gets what is left minus a small reserve for those behind it, so the
+    slow-but-working third provider finishes.
+    """
+    tool = SlowChain(
+        "booking18_rapidapi,priceline_rapidapi,booking_rapidapi,skyscanner_rapidapi",
+        {
+            "booking18_rapidapi": http_error(403),
+            "priceline_rapidapi": http_error(403),
+            "booking_rapidapi": FLIGHTS,
+            "skyscanner_rapidapi": http_error(429),
+        },
+        {"booking_rapidapi": 1.5},
+    )
+    tool._chain_budget_seconds = lambda: 4.0  # type: ignore[method-assign]
+
+    assert await tool._call(**QUERY) == FLIGHTS
+
+
+async def test_the_floor_never_lets_the_chain_overrun_its_budget():
+    tool = SlowChain(
+        "booking_rapidapi,skyscanner_rapidapi",
+        {"booking_rapidapi": FLIGHTS, "skyscanner_rapidapi": FLIGHTS},
+        {"booking_rapidapi": 60, "skyscanner_rapidapi": 60},
+    )
+    tool._chain_budget_seconds = lambda: 0.4  # type: ignore[method-assign]
+    started = asyncio.get_running_loop().time()
+
+    with pytest.raises(TimeoutError):
+        await tool._call(**QUERY)
+
+    assert asyncio.get_running_loop().time() - started < 1.0
+
+
+async def test_the_first_provider_may_use_nearly_the_whole_budget_when_it_is_the_one_that_works():
+    """The case that failed for real: a good provider first, three weaker ones behind it,
+    answering in 2.2s on a 4s budget (an even split would have allowed 1s)."""
+    tool = SlowChain(
+        "booking_rapidapi,booking18_rapidapi,priceline_rapidapi,skyscanner_rapidapi",
+        {"booking_rapidapi": FLIGHTS},
+        {"booking_rapidapi": 2.2},
+    )
+    tool._chain_budget_seconds = lambda: 4.0  # type: ignore[method-assign]
+
+    assert await tool._call(**QUERY) == FLIGHTS
+    assert tool.calls == ["booking_rapidapi"]

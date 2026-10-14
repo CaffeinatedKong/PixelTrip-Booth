@@ -94,9 +94,17 @@ class FlightSearchTool(ExternalTool):
             remaining = deadline - clock()
             if remaining <= 0:
                 break
-            # Each provider gets an even share of what is left, so one that stalls
-            # cannot starve the rest, and one that answers quickly leaves more for them.
-            share = remaining / (len(chain) - index)
+            # A search is several requests (two place lookups, then the flights) and a
+            # healthy provider can need 10-15 seconds, while a dead one (not subscribed, out
+            # of quota) answers in well under one. So a provider gets everything that is
+            # left except a small reserve for each provider queued behind it: a stalled one
+            # still cannot starve the rest, and a slow-but-working one is not cut off by an
+            # even split meant for four equals.
+            later = len(chain) - index - 1
+            reserve = min(
+                RESERVE_PER_LATER_PROVIDER, self._chain_budget_seconds() / (2 * len(chain))
+            )
+            share = max(remaining / (later + 1), remaining - reserve * later)
             try:
                 result = await asyncio.wait_for(self._search(provider, **params), timeout=share)
             except httpx.HTTPStatusError as exc:
@@ -104,7 +112,13 @@ class FlightSearchTool(ExternalTool):
                 last_error = exc
                 continue
             except Exception as exc:  # unknown place, transport error, timeout, bad body
-                logger.info("Flight provider %s failed (%s)", provider, type(exc).__name__)
+                # A warning, not info: this is the line that explains "no flights" when
+                # every provider falls through.
+                logger.warning(
+                    "Flight provider %s failed (%s); trying the next",
+                    provider,
+                    type(exc).__name__ or "error",
+                )
                 last_error = exc
                 continue
             if result.get("options"):
@@ -137,6 +151,11 @@ class FlightSearchTool(ExternalTool):
             )
             response.raise_for_status()
             return response.json()
+
+
+#: Time held back for each provider still waiting behind the current one (see ``_call``):
+#: enough for a dead provider to say so, or a quick one to answer.
+RESERVE_PER_LATER_PROVIDER = 4.0
 
 
 def _rest_after_http_error(provider: str, response: httpx.Response) -> None:
