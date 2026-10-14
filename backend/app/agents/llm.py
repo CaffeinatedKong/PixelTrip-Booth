@@ -26,8 +26,10 @@ different resource and must not share that budget or its semantics.
 
   - out of quota, or the model no longer exists: skipped at once (a retry would
     only burn time) and rested for a few minutes;
-  - overloaded or timing out: one retry on that model, then on to the next; a model
-    that fails both attempts rests for a minute so later calls skip it;
+  - timing out: no retry, straight on to the next model (a model that just used the
+    whole timeout is likely to again); it rests for a minute;
+  - overloaded: one retry on that model, then on to the next; a model that fails
+    both attempts rests for a minute so later calls skip it;
   - the request is rejected as invalid (HTTP 400): passed over for this call only;
   - a malformed answer stops the call. Asking another model is a different
     decision from trying again.
@@ -315,16 +317,16 @@ class LLMClient:
                     # message (which can quote the completion) is never chained.
                     wrong_shape = True
                 except TimeoutError:
-                    if attempt == MAX_ATTEMPTS - 1:
-                        logger.warning(
-                            "LLM call '%s' timed out on model '%s' after retry",
-                            operation,
-                            model_name,
-                        )
-                        self._unavailable_until[model_name] = _now() + FAILURE_COOLDOWN_SECONDS
-                        break
-                    await asyncio.sleep(RETRY_DELAY_SECONDS)
-                    continue
+                    # Not retried: a model that just used the whole timeout is very
+                    # likely to do it again, and the party is waiting. Rest it and
+                    # ask the next model instead.
+                    logger.warning(
+                        "LLM call '%s' timed out on model '%s'; trying the next model",
+                        operation,
+                        model_name,
+                    )
+                    self._unavailable_until[model_name] = _now() + FAILURE_COOLDOWN_SECONDS
+                    break
                 except Exception as exc:  # provider or transport error
                     if _is_model_unavailable(exc):
                         # Out of quota or retired: skip the retry and rest this model.

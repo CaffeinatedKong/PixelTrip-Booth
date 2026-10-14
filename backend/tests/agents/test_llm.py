@@ -179,26 +179,16 @@ async def test_two_provider_errors_exhaust_the_retry(monkeypatch) -> None:
     assert model.call_count == MAX_ATTEMPTS
 
 
-async def test_a_timeout_retries_exactly_once_then_raises(monkeypatch) -> None:
-    async def _hangs() -> Any:
-        await asyncio.sleep(10)
-
-    client, model = make_client(monkeypatch, [_hangs, _hangs])
-
-    with pytest.raises(LLMGenerationError):
-        await generate(client)
-
-    assert model.call_count == MAX_ATTEMPTS
-
-
-async def test_a_timeout_followed_by_success_returns_the_result(monkeypatch) -> None:
+async def test_a_timeout_is_not_retried_on_the_same_model(monkeypatch) -> None:
     async def _hangs() -> Any:
         await asyncio.sleep(10)
 
     client, model = make_client(monkeypatch, [_hangs, _Candidates(destinations=["Oslo, Norway"])])
 
-    assert (await generate(client)).destinations == ["Oslo, Norway"]
-    assert model.call_count == MAX_ATTEMPTS
+    with pytest.raises(LLMGenerationError):
+        await generate(client)
+
+    assert model.call_count == 1  # the waiting party is not made to sit through it twice
 
 
 # ===========================================================================
@@ -427,7 +417,7 @@ async def test_a_timeout_on_one_model_falls_through_to_the_next(monkeypatch) -> 
     )
 
     assert await generate(client) == GOOD
-    assert models[PRIMARY].call_count == MAX_ATTEMPTS
+    assert models[PRIMARY].call_count == 1
 
 
 async def test_a_wrong_shape_stops_the_call_and_never_tries_another_model(monkeypatch) -> None:
@@ -548,7 +538,7 @@ async def test_a_model_that_fails_every_attempt_rests_briefly_then_returns(monke
     assert models[PRIMARY].call_count == MAX_ATTEMPTS + 1
 
 
-async def test_a_timeout_that_exhausts_the_retry_also_rests_the_model(monkeypatch) -> None:
+async def test_a_timeout_rests_the_model(monkeypatch) -> None:
     async def _hangs() -> Any:
         await asyncio.sleep(10)
 
@@ -561,7 +551,7 @@ async def test_a_timeout_that_exhausts_the_retry_also_rests_the_model(monkeypatc
     await generate(client)
     await generate(client)
 
-    assert models[PRIMARY].call_count == MAX_ATTEMPTS
+    assert models[PRIMARY].call_count == 1
     assert models[SECOND].call_count == 2
 
 

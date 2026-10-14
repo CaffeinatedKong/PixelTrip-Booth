@@ -211,7 +211,7 @@ class _DestinationCard(BaseModel):
     pick: str = Field(description='One of "Best fit", "Budget pick", "Hidden gem", "Wildcard".')
     description: str = Field(description="1-2 sentences capturing the place's character.")
     why_this_fits: str = Field(
-        description="2-3 sentences naming the party's own preferences it matches, with real "
+        description="1-2 sentences naming the party's own preferences it matches, with real "
         "examples, and how it suits their budget and dates."
     )
     best_for: list[str] = Field(
@@ -222,8 +222,8 @@ class _DestinationCard(BaseModel):
         description="1-2 sentences: the biggest downside for this party and how to work around it."
     )
     details: str = Field(
-        description="4-6 sentences: weather on their dates, top things to do for this party, "
-        "the food scene, rough daily cost per person, where to stay or how to get around."
+        description="2-3 sentences: weather on their dates, top things to do for this party "
+        "and the food scene. Kept short: the whole answer is generated while the party waits."
     )
     estimated_daily_cost_sgd: int = Field(
         description="Rough cost per person per day in SGD for stay, food and local "
