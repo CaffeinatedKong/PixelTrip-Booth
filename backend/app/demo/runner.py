@@ -22,8 +22,8 @@ from app.agents.proposals import (
 from app.agents.state import AgentState, RepositoryBundle, load_trip_context
 from app.demo import is_demo, require_demo_pair
 from app.demo.scenario import (
-    DESTINATIONS,
     REFINEMENTS,
+    SUPPORTED_DESTINATIONS,
     build_itinerary,
     destination_items,
     flight_items,
@@ -68,7 +68,7 @@ async def _recommend(state: AgentState, repos: RepositoryBundle, context: dict) 
     if state.run_type == "discovery":
         category, stage = "destination", "DISCOVER"
         proposal = DestinationRecommendationProposal(
-            title="Your prepared Vietnam adventures",
+            title="Your prepared Southeast Asia adventures",
             items=destination_items(room),
             question="Which destination shall the demo party choose?",
             prompt="Vote independently. A split vote lets the leader try a tiebreak.",
@@ -77,12 +77,13 @@ async def _recommend(state: AgentState, repos: RepositoryBundle, context: dict) 
         destination = context["selections"].get("destination")
         if destination is None:
             raise DestinationNotSelectedError()
-        if destination["data"].get("id") not in DESTINATIONS:
-            raise ValidationError("Choose one of the prepared Vietnam destinations.")
+        destination_id = destination["data"].get("id")
+        if destination_id not in SUPPORTED_DESTINATIONS:
+            raise ValidationError("Choose one of the prepared destinations.")
         category, stage = "flight", "LOGISTICS"
         proposal = FlightRecommendationProposal(
             title="Prepared sample return flights",
-            items=flight_items(room),
+            items=flight_items(room, destination_id),
             question="Which sample flight shall the demo party choose?",
             prompt="Sample flights only; no live search or booking is performed.",
         )
@@ -209,7 +210,13 @@ def refine_itinerary(base: dict, feedback: list[dict]) -> tuple[dict, list[str]]
                     "title": title,
                     "time": time,
                     "description": description,
-                    "location": base["destination"]["name"] + " city centre",
+                    "location": {
+                        "Bali, Indonesia": "Seminyak",
+                        "Phuket, Thailand": "Patong",
+                    }.get(
+                        base["destination"]["name"],
+                        base["destination"]["name"] + " city centre",
+                    ),
                     "cost": 20,
                     "tags": [],
                     "location_id": None,

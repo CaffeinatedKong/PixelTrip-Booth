@@ -16,6 +16,32 @@ OPTION_COPY = {
         "tradeOff": DESTINATION_MATCH_COPY["demo-da-nang"]["tradeOff"],
         "tags": ["Beach time", "Food", "Nightlife"],
     },
+    "demo-bali": {
+        "recommendation": "Bali",
+        "whyThisFits": (
+            "Beach sunsets and lively dining balance temple visits and rice-field scenery, "
+            "giving the party both social evenings and cultural discovery."
+        ),
+        "details": (
+            "Combine Seminyak beach time with Ubud's temples and art market, "
+            "Tegallalang rice terraces and Uluwatu's clifftop views."
+        ),
+        "tradeOff": DESTINATION_MATCH_COPY["demo-bali"]["tradeOff"],
+        "tags": ["Beach sunsets", "Temples", "Rice terraces"],
+    },
+    "demo-phuket": {
+        "recommendation": "Phuket",
+        "whyThisFits": (
+            "Thai food and Patong nightlife pair with temple visits, heritage streets "
+            "and quieter beaches for a varied coastal escape."
+        ),
+        "details": (
+            "Mix Patong and Kamala beach breaks with Wat Chalong, "
+            "Phuket Old Town and the views around Kata and Karon."
+        ),
+        "tradeOff": DESTINATION_MATCH_COPY["demo-phuket"]["tradeOff"],
+        "tags": ["Thai food", "Coastal views", "Nightlife"],
+    },
     "demo-hoi-an": {
         "recommendation": "Hoi An",
         "whyThisFits": (
@@ -116,6 +142,28 @@ DESTINATION_BENEFITS = {
         "relaxation": "beach breaks",
         "hidden-gems": "local markets",
         "flexibility": "nearby sightseeing stops",
+    },
+    "demo-bali": {
+        "food": "Balinese dining",
+        "nightlife": "Seminyak evenings",
+        "scenery": "rice terraces",
+        "culture": "temple visits",
+        "adventure": "clifftop viewpoints",
+        "shopping": "Ubud craft stalls",
+        "relaxation": "beach sunsets",
+        "hidden-gems": "garden cafés",
+        "flexibility": "varied day trips",
+    },
+    "demo-phuket": {
+        "food": "Thai seafood",
+        "nightlife": "Patong nightlife",
+        "scenery": "coastal viewpoints",
+        "culture": "Old Town heritage",
+        "adventure": "coastal exploration",
+        "shopping": "Old Town shops",
+        "relaxation": "quieter beach breaks",
+        "hidden-gems": "local food stops",
+        "flexibility": "beach and city options",
     },
     "demo-hoi-an": {
         "food": "local market food",

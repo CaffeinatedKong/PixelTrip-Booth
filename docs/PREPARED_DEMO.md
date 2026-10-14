@@ -6,7 +6,9 @@ lobby display names, not character roles. `DemoBob` cannot create the demo room.
 Demo rooms reserve those two seats; ordinary rooms keep the live workflow.
 
 The room stores `demo_scenario = vietnam-five-days` and a shared departure date
-seven days after creation, using Singapore time. Both profiles are prefilled with
+seven days after creation, using Singapore time. The scenario key is retained for
+compatibility; new destination votes now offer Vietnam, Indonesia and Thailand.
+Both profiles are prefilled with
 SGD 2,000, five matching availability days, complementary interests and roles.
 Users can edit these questionnaire choices and save their own characters.
 The prepared destinations, flights, dates, itinerary and scripted refinements
@@ -29,6 +31,37 @@ Apply the migration **before** deploying the frontend: room reads now select the
 new metadata columns. A restart with the same old Docker image does not deploy
 new backend code; use the normal full backend deployment.
 
+For the multi-country content update, deploy the backend and frontend again; no
+additional SQL migration or environment variable is needed. Start a fresh room to
+see the new destination cards. Existing messages and itineraries remain stored as
+published; old Hoi An/Hue selections can still finish with their original plans.
+
+## Destinations and flights
+
+All three choices have a distinct five-day itinerary and support every prepared
+review choice. Flights are generated for the selected destination rather than
+always using Da Nang airport.
+
+| Destination | Route | Airline options | Highlights |
+| --- | --- | --- | --- |
+| Da Nang, Vietnam | SIN–DAD | Scoot, Vietjet Air, Singapore Airlines | My Khe Beach, Marble Mountains, Son Tra, Hoi An |
+| Bali, Indonesia | SIN–DPS | Scoot, Garuda Indonesia, Singapore Airlines | Seminyak, Ubud, Tegallalang rice terraces, Uluwatu |
+| Phuket, Thailand | SIN–HKT | Scoot, Thai AirAsia, Singapore Airlines | Patong, Wat Chalong, Old Town, Kata and Kamala beaches |
+
+These are real airline names; fares, dates, departure times and durations are fixed
+illustrative data, not live schedules or bookable offers. Times use each airport's
+local offset: Singapore/Bali UTC+08:00 and Vietnam/Thailand UTC+07:00. Arrival and
+return timestamps are calculated from the sample duration, leaving time for the
+first activity and final airport transfer with any of the three flight options.
+
+Route references: Scoot's [Bali](https://www.flyscoot.com/flights/en/flights-from-singapore-to-bali-denpasar),
+[Da Nang](https://www.flyscoot.com/flights/en/flights-from-singapore-to-da-nang) and
+[Phuket](https://www.flyscoot.com/flights/en/flights-from-singapore-to-phuket) pages;
+[AirAsia's Phuket route page](https://www.airasia.com/flights/from-singapore-sin-to-phuket-hkt/);
+[Vietjet's Singapore routes announcement](https://www1.vietjetair.com/en/news/news-1697697232035/vietjet-announces-nha-trangsingapore-route-in-the-presence-of-vietnams-general-secretary-and-president-to-lam-1780282637654);
+[Garuda's Bali–Singapore page](https://www.garuda-indonesia.com/flights/en-id/flights-from-bali-denpasar-to-republic-singapore)
+and [Singapore Airlines' destination network](https://www.singaporeair.com/sg/en/plan-travel/destinations/).
+
 ## Demo walkthrough
 
 1. On device A, create a room as **DemoAlice** and share its code.
@@ -36,11 +69,11 @@ new backend code; use the normal full backend deployment.
    then save both characters. These choices do not recalculate the prepared plan.
 3. Vote for different destination options to demonstrate a real 1–1 tie.
    Prepared MILO advice appears; DemoAlice makes the final choice. Choose Da Nang
-   for the main walkthrough. Hoi An and Hue also have prepared five-day plans.
+   for the main walkthrough, or select Bali or Phuket for a different five-day plan.
 4. Confirm the fixed dates and start the flight stage. Vote for the same sample
    flight to advance immediately, or different ones to demonstrate another tie.
-5. The selected sample flight and prepared itinerary appear. Airlines, fares,
-   schedules and estimated costs are demo data, not bookable offers or live facts.
+5. The selected sample flight and matching itinerary appear. Airline names are
+   real; fares, schedules and estimated costs are illustrative data, not bookable offers.
 6. In day 1, choose **Add a separate club visit after dinner**, then request
    changes. Keep the other days. The other member can keep all days. Both users
    lock their complete reviews before the prepared refinement runs.
@@ -81,17 +114,20 @@ versions. The demo does not invoke Gemini, flight providers, or other agent tool
 Normal rooms continue using the live graph. FastAPI, Supabase and network access
 between the devices and those services remain required.
 
-The backend integration test exercises both vote ties, owner decisions, a separate
-club addition, readiness resets and final approval over a shared test store while
-asserting zero live graph/Gemini/flight calls. Frontend tests cover shared dates,
+The backend integration test exercises all nine destination/flight combinations,
+both vote ties, owner decisions, a separate club addition, readiness resets and
+final approval over a shared test store while asserting zero live graph/Gemini/flight
+calls. Route tests check local offsets, elapsed duration and airport-transfer timing;
+older Hoi An/Hue selections are also tested. Frontend tests cover shared dates,
 profile submission, demo metadata on refresh, supported feedback, and completed
 refinement between polls. These do not replace a live two-device smoke test after
 the migration and deployments.
 
-Local verification: 171 focused backend tests, 28 frontend tests, TypeScript,
-Ruff and the production Next.js build passed. Existing RoomShell tests emit
-React `act` warnings. No live migration, external provider call or deployment was
-performed while implementing the demo.
+Multi-country update verification (2026-10-14): 55 focused backend tests and 13
+frontend tests passed, plus TypeScript and Ruff. The original demo implementation
+also passed 171 focused backend tests, 28 frontend tests and the production Next.js
+build. Existing RoomShell tests emit React `act` warnings. No live migration,
+external provider call or deployment was performed while implementing these changes.
 
 For that smoke test, confirm both devices see the same room, selected destination,
 flight and itinerary version. Try a refresh, a third name, and repeated votes.

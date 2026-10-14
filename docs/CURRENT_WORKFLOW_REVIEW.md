@@ -2,6 +2,22 @@
 
 Reviewed: 2026-10-10 (Asia/Singapore).
 
+Prepared destination update: 2026-10-14. New demo votes offer Da Nang (Vietnam),
+Bali (Indonesia) and Phuket (Thailand), each with its own five-day activities,
+traveller-fit explanations and trade-offs. Flights now depend on the selected
+destination: SIN–DAD, SIN–DPS or SIN–HKT, using real airline names (Scoot, Vietjet Air,
+Garuda Indonesia, Thai AirAsia and Singapore Airlines). Dates, schedules and fares
+remain illustrative; local offsets and elapsed durations are consistent with the
+sample route. Separate additions use Seminyak/Patong locations for the island plans.
+The persisted `vietnam-five-days` scenario key stays compatible with existing rooms,
+and old Hoi An/Hue selections can still finish. No new SQL migration is needed.
+Deploy the updated backend and frontend, then create a fresh room to see the choices.
+Verification: 55 backend tests and 13 frontend tests passed, plus TypeScript and Ruff.
+The backend tests cover all nine destination/flight combinations through real voting,
+tiebreaks, reviews, separate activity insertion and final approval with no provider
+calls, plus route timing and old selections. Existing RoomShell tests emit React
+`act` warnings. No live database change or deployment was performed.
+
 Prepared-demo implementation update: 2026-10-13. New DemoAlice-owned rooms carry a
 shared `vietnam-five-days` scenario and future departure date; DemoBob fills the
 second seat. Prepared execution bypasses the live graph in both synchronous and

@@ -1,14 +1,52 @@
 """Fixed sample content; dates/record identities adapt to the shared demo room."""
 
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 
 from app.agents.proposals import ItineraryModel, RecommendationItem
 
 DESTINATIONS = {
     "demo-da-nang": ("Da Nang, Vietnam", "Beach days, local food and nightlife", 94, 60),
+    "demo-bali": ("Bali, Indonesia", "Beach sunsets, temples and rice terraces", 88, 85),
+    "demo-phuket": ("Phuket, Thailand", "Thai food, coastal views and lively evenings", 82, 75),
+}
+
+# Existing rooms can finish previously published votes without changing their destination.
+LEGACY_DESTINATIONS = {
     "demo-hoi-an": ("Hoi An, Vietnam", "Lantern streets, heritage and relaxed cafés", 88, 65),
     "demo-hue": ("Hue, Vietnam", "Imperial history, river walks and regional food", 82, 55),
 }
+SUPPORTED_DESTINATIONS = {**DESTINATIONS, **LEGACY_DESTINATIONS}
+
+
+@dataclass(frozen=True)
+class FlightRoute:
+    airport: str
+    country: str
+    utc_offset: int
+    duration_minutes: int
+    carriers: tuple[str, str, str]
+    prices: tuple[int, int, int]
+
+
+# Real airline names and routes, with illustrative schedules/fares (not live availability).
+FLIGHT_ROUTES = {
+    "demo-da-nang": FlightRoute(
+        "DAD", "Vietnam", 7, 170, ("Scoot", "Vietjet Air", "Singapore Airlines"), (280, 320, 410)
+    ),
+    "demo-bali": FlightRoute(
+        "DPS",
+        "Indonesia",
+        8,
+        175,
+        ("Scoot", "Garuda Indonesia", "Singapore Airlines"),
+        (300, 380, 450),
+    ),
+    "demo-phuket": FlightRoute(
+        "HKT", "Thailand", 7, 120, ("Scoot", "Thai AirAsia", "Singapore Airlines"), (220, 260, 350)
+    ),
+}
+FLIGHT_ROUTES.update({key: FLIGHT_ROUTES["demo-da-nang"] for key in LEGACY_DESTINATIONS})
 
 DESTINATION_MATCH_COPY = {
     "demo-da-nang": {
@@ -19,7 +57,29 @@ DESTINATION_MATCH_COPY = {
         ),
         "tradeOff": (
             "Bob gets scenic coast and viewpoints, but less time for history "
-            "than Hue's dedicated heritage route."
+            "than on a trip focused on heritage sites."
+        ),
+    },
+    "demo-bali": {
+        "whyThisFits": (
+            "Bali pairs Seminyak dining and lively evenings for Alice with Ubud's temples, "
+            "rice terraces and Uluwatu's coastal views for Bob. Beach breaks between "
+            "sightseeing days give the party time to unwind together."
+        ),
+        "tradeOff": (
+            "Bob gets more varied scenery, but traffic between the coast and Ubud "
+            "can cut into his sightseeing time."
+        ),
+    },
+    "demo-phuket": {
+        "whyThisFits": (
+            "Phuket gives Alice Thai food, seafood dinners and Patong nightlife, "
+            "while Bob gets Wat Chalong, Old Town heritage and coastal viewpoints. "
+            "Kata and Kamala beach stops balance lively evenings with quieter time together."
+        ),
+        "tradeOff": (
+            "Alice gets lively nights in Patong, but its busy beachfront "
+            "may feel crowded when she wants to relax."
         ),
     },
     "demo-hoi-an": {
@@ -306,7 +366,220 @@ HUE = [
     ],
 ]
 
-PLANS = {"demo-da-nang": DA_NANG, "demo-hoi-an": HOI_AN, "demo-hue": HUE}
+BALI = [
+    [
+        (
+            "16:30",
+            "Seminyak Beach Sunset",
+            "Seminyak Beach",
+            "Settle in after your flight with a beach walk and ocean views.",
+            0,
+        ),
+        (
+            "19:00",
+            "Balinese Dinner",
+            "Seminyak",
+            "Share local dishes at a relaxed restaurant near the beach.",
+            35,
+        ),
+    ],
+    [
+        (
+            "09:00",
+            "Ubud Palace and Temple Walk",
+            "Central Ubud",
+            "Discover Balinese architecture and temple courtyards before lunch.",
+            15,
+        ),
+        (
+            "12:00",
+            "Balinese Lunch",
+            "Ubud",
+            "Try nasi campur and local flavours during a shady midday break.",
+            20,
+        ),
+        (
+            "15:00",
+            "Ubud Art Market",
+            "Ubud Art Market",
+            "Browse handmade crafts and souvenirs before returning to Seminyak.",
+            15,
+        ),
+    ],
+    [
+        (
+            "09:00",
+            "Tegallalang Rice Terrace Walk",
+            "Tegallalang",
+            "Enjoy the rice-field scenery on an easy walk with time for photos.",
+            20,
+        ),
+        (
+            "12:30",
+            "Garden Café Lunch",
+            "Ubud",
+            "Rest over lunch in a garden café before the drive back to the coast.",
+            20,
+        ),
+        (
+            "19:30",
+            "Seminyak Evening Walk",
+            "Seminyak",
+            "Explore the neighbourhood's shops and evening atmosphere together.",
+            0,
+        ),
+    ],
+    [
+        (
+            "09:00",
+            "Uluwatu Temple and Clifftop Views",
+            "Uluwatu",
+            "Visit the temple grounds and coastal viewpoints with a local driver.",
+            25,
+        ),
+        (
+            "13:00",
+            "Jimbaran Lunch",
+            "Jimbaran",
+            "Pause for fresh local food near the coast after the temple visit.",
+            25,
+        ),
+        (
+            "18:00",
+            "Jimbaran Sunset Stroll",
+            "Jimbaran Beach",
+            "Enjoy a gentle sunset walk before returning to Seminyak.",
+            0,
+        ),
+    ],
+    [
+        (
+            "08:30",
+            "Breakfast and Beach Farewell",
+            "Seminyak",
+            "Enjoy a final breakfast and pack before leaving the coast.",
+            15,
+        ),
+        (
+            "13:00",
+            "Airport Transfer",
+            "I Gusti Ngurah Rai International Airport",
+            "Head to DPS with time for traffic and check-in before the return flight.",
+            25,
+        ),
+    ],
+]
+PHUKET = [
+    [
+        (
+            "16:30",
+            "Patong Beach Arrival Walk",
+            "Patong Beach",
+            "Unwind after the airport transfer with a relaxed walk by the sea.",
+            0,
+        ),
+        (
+            "19:00",
+            "Thai Seafood Dinner",
+            "Patong",
+            "Share seafood and Thai dishes at a restaurant near the beachfront.",
+            30,
+        ),
+    ],
+    [
+        (
+            "09:00",
+            "Wat Chalong Temple Visit",
+            "Wat Chalong",
+            "Explore the temple grounds and learn about local Buddhist traditions.",
+            10,
+        ),
+        (
+            "12:00",
+            "Phuket Local Lunch",
+            "Phuket Old Town",
+            "Try Hokkien noodles and local Thai dishes during a midday break.",
+            18,
+        ),
+        (
+            "15:00",
+            "Old Town Heritage and Shops",
+            "Phuket Old Town",
+            "Browse colourful streets, small shops and Sino-Portuguese architecture.",
+            10,
+        ),
+    ],
+    [
+        (
+            "09:00",
+            "Karon Viewpoint",
+            "Karon Viewpoint",
+            "Take in views across the southern bays with time for photos.",
+            10,
+        ),
+        (
+            "12:30",
+            "Kata Beach Café Lunch",
+            "Kata Beach",
+            "Relax over lunch near the beach before returning to Patong.",
+            20,
+        ),
+        (
+            "19:30",
+            "Patong Evening Walk",
+            "Patong",
+            "Enjoy the neighbourhood's evening lights and lively atmosphere.",
+            0,
+        ),
+    ],
+    [
+        (
+            "09:00",
+            "Kamala Beach Morning",
+            "Kamala Beach",
+            "Spend a quieter morning by the water away from the busiest streets.",
+            10,
+        ),
+        (
+            "13:00",
+            "Beachside Thai Lunch",
+            "Kamala",
+            "Enjoy Thai food and a relaxed café break near the coast.",
+            20,
+        ),
+        (
+            "18:00",
+            "Old Town Evening Stroll",
+            "Phuket Old Town",
+            "Explore the heritage streets at dusk before returning to Patong.",
+            10,
+        ),
+    ],
+    [
+        (
+            "08:30",
+            "Breakfast by the Beach",
+            "Patong",
+            "Share a final breakfast and leave time to pack for the flight home.",
+            12,
+        ),
+        (
+            "13:00",
+            "Airport Transfer",
+            "Phuket International Airport",
+            "Travel to HKT with time for the road journey and airport check-in.",
+            25,
+        ),
+    ],
+]
+
+PLANS = {
+    "demo-da-nang": DA_NANG,
+    "demo-bali": BALI,
+    "demo-phuket": PHUKET,
+    "demo-hoi-an": HOI_AN,
+    "demo-hue": HUE,
+}
 REFINEMENTS = {
     "Add a separate club visit after dinner": (1, "club"),
     "Replace lunch with a bar lunch": (2, "lunch"),
@@ -331,11 +604,14 @@ def destination_items(room: dict) -> list[RecommendationItem]:
             meta={
                 "score": score,
                 "pick": "Best fit" if index == 0 else "Wildcard",
-                "tags": ["Vietnam", "Five days", "Sample plan"],
+                "tags": [FLIGHT_ROUTES[key].country, "Five days", "Sample plan"],
                 "whyThisFits": DESTINATION_MATCH_COPY[key]["whyThisFits"],
                 "bestFor": ["DemoAlice", "DemoBob"],
                 "tradeOff": DESTINATION_MATCH_COPY[key]["tradeOff"],
-                "details": f"Five-day sample adventure in {title}. Fly through DAD with transfers.",
+                "details": (
+                    f"Five-day sample adventure in {title}. "
+                    f"Fly through {FLIGHT_ROUTES[key].airport} with local transfers."
+                ),
                 "estimatedDailyCostSgd": daily,
                 "tripDays": 5,
                 "tripStart": str(start),
@@ -346,47 +622,57 @@ def destination_items(room: dict) -> list[RecommendationItem]:
     ]
 
 
-def flight_items(room: dict) -> list[RecommendationItem]:
+def flight_items(room: dict, destination_id: str) -> list[RecommendationItem]:
     start, end = dates(room)
-    options = [
-        ("demo-flight-1", "Demo Air · direct", "09:00", "10:45", "16:00", "19:45", 280),
-        ("demo-flight-2", "Sample Airways · direct", "10:00", "11:45", "17:00", "20:45", 320),
-        ("demo-flight-3", "Booth Air · direct", "11:00", "12:45", "18:00", "21:45", 350),
-    ]
-    return [
-        RecommendationItem(
-            id=key,
-            title=title,
-            description="Sample return flight for this demo; not live or bookable.",
-            meta={
-                "price": price,
-                "currency": "SGD",
-                "carrier": title.split(" · ")[0],
-                "origin": "SIN",
-                "destination": "DAD",
-                "duration_minutes": 165,
-                "stops": 0,
-                "depart_at": f"{start}T{depart}:00+08:00",
-                "arrive_at": f"{start}T{arrive}:00+07:00",
-                "return_at": f"{end}T{return_at}:00+07:00",
-                "return_arrive_at": f"{end}T{return_arrive}:00+08:00",
-                "score": 94 - index * 5,
-                "pick": "Best fit" if index == 0 else "Wildcard",
-                "tags": ["Direct", "Sample flight"],
-                "whyThisFits": "Daytime flights leave time for the prepared activities.",
-                "tradeOff": "Fictional airline, sample times and prices.",
-                "details": "Direct sample SIN–DAD return flight. Flight cost is per person.",
-            },
+    route = FLIGHT_ROUTES[destination_id]
+    singapore_tz = timezone(timedelta(hours=8))
+    destination_tz = timezone(timedelta(hours=route.utc_offset))
+    duration = timedelta(minutes=route.duration_minutes)
+    items = []
+    for index, (carrier, price) in enumerate(zip(route.carriers, route.prices, strict=True)):
+        depart = datetime.combine(start, time(9 + index), singapore_tz)
+        arrive = (depart + duration).astimezone(destination_tz)
+        return_depart = datetime.combine(end, time(16 + index), destination_tz)
+        return_arrive = (return_depart + duration).astimezone(singapore_tz)
+        items.append(
+            RecommendationItem(
+                id=f"demo-flight-{index + 1}",
+                title=f"{carrier} · direct",
+                description="Sample return flight; times and fares are illustrative, not bookable.",
+                meta={
+                    "price": price,
+                    "currency": "SGD",
+                    "carrier": carrier,
+                    "origin": "SIN",
+                    "destination": route.airport,
+                    "duration_minutes": route.duration_minutes,
+                    "stops": 0,
+                    "depart_at": depart.isoformat(),
+                    "arrive_at": arrive.isoformat(),
+                    "return_at": return_depart.isoformat(),
+                    "return_arrive_at": return_arrive.isoformat(),
+                    "score": 94 - index * 5,
+                    "pick": "Best fit" if index == 0 else "Wildcard",
+                    "tags": ["Direct", "Sample flight"],
+                    "whyThisFits": "Daytime flights leave time for the prepared activities.",
+                    "tradeOff": (
+                        "The earlier departure means reaching the airport sooner.",
+                        "The balanced schedule costs more than the earliest option.",
+                        "The later arrival leaves less time to explore on the first day.",
+                    )[index],
+                    "details": (
+                        f"Direct sample SIN–{route.airport} return flight with {carrier}. "
+                        "Flight cost is per person; all times are local."
+                    ),
+                },
+            )
         )
-        for index, (key, title, depart, arrive, return_at, return_arrive, price) in enumerate(
-            options
-        )
-    ]
+    return items
 
 
 def build_itinerary(trip_id: str, room: dict, destination_id: str) -> ItineraryModel:
     start, _ = dates(room)
-    title = DESTINATIONS[destination_id][0]
+    title = SUPPORTED_DESTINATIONS[destination_id][0]
     return ItineraryModel(
         trip_id=trip_id,
         room_id=room["id"],

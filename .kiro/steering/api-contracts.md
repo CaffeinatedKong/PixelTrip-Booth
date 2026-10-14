@@ -39,6 +39,9 @@ Shapes:
 - Party room: `{ id, roomCode, name, status: "active" | "finalised" | "cancelled",
   planningStage, demoScenario?, demoStart? }`.
   `demoScenario` is `"vietnam-five-days"` for prepared rooms, otherwise null/absent.
+  This persisted scenario key is retained for compatibility; new prepared
+  recommendations offer Da Nang (Vietnam), Bali (Indonesia) and Phuket (Thailand),
+  with destination-specific sample flights and itineraries.
   `demoStart` is the shared YYYY-MM-DD departure date, set at room creation using
   Singapore time plus seven days. New rooms created by the reserved lobby name
   `DemoAlice` enter this scenario; only `DemoBob` may join its second seat. These

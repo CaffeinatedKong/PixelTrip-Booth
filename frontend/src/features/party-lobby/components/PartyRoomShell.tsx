@@ -102,7 +102,7 @@ function RoomShell({
 
         {session.room.demoScenario === "vietnam-five-days" ? (
           <p className="border-2 border-primary bg-bg-alt p-8 font-body text-primary">
-            Prepared demo · DemoAlice + DemoBob · Five days in Vietnam. Flights and prices are sample data.
+            Prepared demo · DemoAlice + DemoBob · Bali, Vietnam or Thailand. Flights and prices are sample data.
           </p>
         ) : null}
 

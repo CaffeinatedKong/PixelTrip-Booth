@@ -2,7 +2,7 @@
 
 from collections import Counter
 from copy import deepcopy
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -12,7 +12,14 @@ from app.agents.proposals import ItineraryModel
 from app.agents.state import AgentState
 from app.demo import SCENARIO, require_demo_pair
 from app.demo.runner import dispatch_run, refine_itinerary
-from app.demo.scenario import DESTINATIONS, REFINEMENTS, build_itinerary, flight_items
+from app.demo.scenario import (
+    DESTINATIONS,
+    LEGACY_DESTINATIONS,
+    REFINEMENTS,
+    build_itinerary,
+    destination_items,
+    flight_items,
+)
 from app.exceptions import ValidationError
 from app.schemas.planning import (
     ReviewItineraryRequest,
@@ -253,8 +260,16 @@ class World:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("destination", "airport"),
+    [("demo-da-nang", "DAD"), ("demo-bali", "DPS"), ("demo-phuket", "HKT")],
+)
+@pytest.mark.parametrize("flight_id", ["demo-flight-1", "demo-flight-2", "demo-flight-3"])
 async def test_two_clients_complete_the_demo_with_real_ties_reviews_and_no_external_calls(
     monkeypatch,
+    destination,
+    airport,
+    flight_id,
 ):
     # Both execution entry points must bypass the live graph, not just its LLM.
     from app.agents.tools.flights import FlightSearchTool
@@ -269,22 +284,26 @@ async def test_two_clients_complete_the_demo_with_real_ties_reviews_and_no_exter
     again = await w.service.start_run(TRIP, "discovery", ALICE, "discover-once")
     assert again.execute is None
     session = next(iter(w.sessions.values()))
-    await cast_vote(w.repos, session["id"], ALICE, "demo-da-nang")
+    await cast_vote(w.repos, session["id"], ALICE, destination)
     assert not w.selections  # do not resolve after only one of two votes
-    await cast_vote(w.repos, session["id"], BOB, "demo-hoi-an")
+    other_destination = next(key for key in DESTINATIONS if key != destination)
+    await cast_vote(w.repos, session["id"], BOB, other_destination)
     assert session["tie_pending"] and not w.selections
     await w.run("tiebreak")
     assert not w.selections  # prepared advice never chooses for the owner
-    await break_tie(w.repos, session["id"], ALICE, "demo-da-nang")
+    await break_tie(w.repos, session["id"], ALICE, destination)
     await w.run("logistics")
     session = list(w.sessions.values())[-1]
-    await cast_vote(w.repos, session["id"], ALICE, "demo-flight-1")
-    await cast_vote(w.repos, session["id"], BOB, "demo-flight-2")
+    await cast_vote(w.repos, session["id"], ALICE, flight_id)
+    other_flight = "demo-flight-2" if flight_id == "demo-flight-1" else "demo-flight-1"
+    await cast_vote(w.repos, session["id"], BOB, other_flight)
     await w.run("tiebreak")
-    await break_tie(w.repos, session["id"], ALICE, "demo-flight-1")
+    await break_tie(w.repos, session["id"], ALICE, flight_id)
+    assert w.selections["flight"]["data"]["destination"] == airport
     await w.run("itinerary")
     assert w.room["planning_stage"] == "refine"
     original = deepcopy(w.versions[-1])
+    assert original["itinerary"]["destination"]["name"] == DESTINATIONS[destination][0]
     reviews = RefineService(w.repos)
     await reviews.submit_feedback(
         TRIP,
@@ -337,7 +356,100 @@ def test_each_destination_has_a_valid_prepared_plan_and_all_scripted_changes(des
     assert len(refined["days"][0]["items"]) == len(base["days"][0]["items"]) + 1
     twice, _ = refine_itinerary(refined, rows)
     assert twice == refined  # duplicate clicks don't add repeated rows
-    assert len(flight_items(w.room)) == 3
+    assert len(flight_items(w.room, destination)) == 3
+
+
+def test_new_destination_vote_offers_three_countries_with_matching_airports():
+    items = destination_items(World().room)
+    assert {(item.title, item.meta["tags"][0]) for item in items} == {
+        ("Da Nang, Vietnam", "Vietnam"),
+        ("Bali, Indonesia", "Indonesia"),
+        ("Phuket, Thailand", "Thailand"),
+    }
+    for item, airport in zip(items, ("DAD", "DPS", "HKT"), strict=True):
+        assert airport in item.meta["details"]
+
+
+@pytest.mark.parametrize(
+    ("destination", "airport", "airport_name", "offset", "carriers"),
+    [
+        (
+            "demo-da-nang",
+            "DAD",
+            "Da Nang International Airport",
+            7,
+            {"Scoot", "Vietjet Air", "Singapore Airlines"},
+        ),
+        (
+            "demo-bali",
+            "DPS",
+            "I Gusti Ngurah Rai International Airport",
+            8,
+            {"Scoot", "Garuda Indonesia", "Singapore Airlines"},
+        ),
+        (
+            "demo-phuket",
+            "HKT",
+            "Phuket International Airport",
+            7,
+            {"Scoot", "Thai AirAsia", "Singapore Airlines"},
+        ),
+    ],
+)
+def test_route_times_and_airport_transfers_fit_every_prepared_flight(
+    destination,
+    airport,
+    airport_name,
+    offset,
+    carriers,
+):
+    w = World()
+    itinerary = build_itinerary(TRIP, w.room, destination)
+    flights = flight_items(w.room, destination)
+    assert {flight.meta["carrier"] for flight in flights} == carriers
+    assert itinerary.days[-1].items[-1].location == airport_name
+    for flight in flights:
+        meta = flight.meta
+        depart, arrive, back, home = [
+            datetime.fromisoformat(meta[key])
+            for key in ("depart_at", "arrive_at", "return_at", "return_arrive_at")
+        ]
+        assert meta["origin"] == "SIN" and meta["destination"] == airport
+        assert meta["currency"] == "SGD" and meta["stops"] == 0
+        assert arrive - depart == home - back == timedelta(minutes=meta["duration_minutes"])
+        assert depart.utcoffset() == home.utcoffset() == timedelta(hours=8)
+        assert arrive.utcoffset() == back.utcoffset() == timedelta(hours=offset)
+        assert depart.date().isoformat() == itinerary.days[0].date
+        assert back.date().isoformat() == itinerary.days[-1].date
+        first_activity = datetime.combine(
+            arrive.date(),
+            time.fromisoformat(itinerary.days[0].items[0].time),
+            arrive.tzinfo,
+        )
+        airport_transfer = datetime.combine(
+            back.date(),
+            time.fromisoformat(itinerary.days[-1].items[-1].time),
+            back.tzinfo,
+        )
+        assert first_activity - arrive >= timedelta(hours=2)
+        assert back - airport_transfer >= timedelta(hours=3)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("destination", list(LEGACY_DESTINATIONS))
+async def test_already_selected_legacy_destination_can_finish_after_the_content_update(destination):
+    w = World()
+    w.room["planning_stage"] = "logistics"
+    w.trip["status"] = "destination_selected"
+    w.selections["destination"] = {"kind": "destination", "data": {"id": destination}}
+    await w.run("logistics")
+    session = next(iter(w.sessions.values()))
+    await cast_vote(w.repos, session["id"], ALICE, "demo-flight-1")
+    await cast_vote(w.repos, session["id"], BOB, "demo-flight-1")
+    await w.run("itinerary")
+    assert w.selections["flight"]["data"]["destination"] == "DAD"
+    assert w.versions[-1]["itinerary"]["destination"]["name"] == LEGACY_DESTINATIONS[destination][0]
+    w.llm.generate_structured.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -446,8 +558,16 @@ async def test_the_synchronous_agent_entry_also_bypasses_gemini(monkeypatch):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("category", ["destination", "flight"])
-async def test_tiebreak_describes_each_traveller_without_demo_copy(category):
+@pytest.mark.parametrize(
+    ("category", "options"),
+    [
+        ("destination", ("demo-da-nang", "demo-bali")),
+        ("destination", ("demo-bali", "demo-phuket")),
+        ("flight", ("demo-flight-1", "demo-flight-2")),
+        ("flight", ("demo-flight-2", "demo-flight-3")),
+    ],
+)
+async def test_tiebreak_describes_each_traveller_without_demo_copy(category, options):
     import re
 
     w = World()
@@ -464,8 +584,8 @@ async def test_tiebreak_describes_each_traveller_without_demo_copy(category):
         w.room["planning_stage"] = "logistics"
     await w.run("discovery" if category == "destination" else "logistics")
     session = list(w.sessions.values())[-1]
-    await cast_vote(w.repos, session["id"], ALICE, session["options"][0]["id"])
-    await cast_vote(w.repos, session["id"], BOB, session["options"][1]["id"])
+    await cast_vote(w.repos, session["id"], ALICE, options[0])
+    await cast_vote(w.repos, session["id"], BOB, options[1])
     await w.run("tiebreak")
     advice = next(
         m["content"]
@@ -506,9 +626,11 @@ def test_tiebreak_reasons_name_specific_preferences_and_timing_in_one_sentence()
         "Alice's preference for food and nightlife fits Da Nang's beachfront dining "
         "and lively evenings."
     )
-    assert member_reason("demo-hoi-an", "DemoBob", bob) == (
-        "Bob's preference for scenery and culture fits Hoi An's countryside views "
-        "and old-town heritage."
+    assert member_reason("demo-bali", "DemoBob", bob) == (
+        "Bob's preference for scenery and culture fits Bali's rice terraces and temple visits."
+    )
+    assert member_reason("demo-phuket", "DemoAlice", alice) == (
+        "Alice's preference for food and nightlife fits Phuket's Thai seafood and Patong nightlife."
     )
     for option_id in ["demo-flight-1", "demo-flight-2", "demo-flight-3"]:
         text = member_reason(option_id, "DemoBob", bob)
