@@ -39,7 +39,7 @@ import {
   type BudgetTier,
   type GroupRole,
 } from "../types";
-import { toSessionCharacter } from "../lib/draft";
+import { availabilityIssue, toSessionCharacter } from "../lib/draft";
 import { QUESTION_HEADING } from "../lib/questionStyles";
 import { demoDraft } from "../lib/demoScenario";
 
@@ -230,7 +230,10 @@ export function CharacterCreator({
       <div className="flex flex-col gap-8">
         {!canSave ? (
           <p className="font-body text-subtle">
-            Fill in all the questions above to save your traveller.
+            {/* Name the dates when they are the only thing left to fix. */}
+            {draft.budgetTier !== null && draft.groupRole !== null
+              ? availabilityIssue(draft)
+              : "Fill in all the questions above to save your traveller."}
           </p>
         ) : null}
         <PixelButton

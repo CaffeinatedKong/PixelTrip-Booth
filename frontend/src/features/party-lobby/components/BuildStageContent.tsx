@@ -19,6 +19,13 @@ import { GuideMessage, GuideSay, StageChat } from "./StageChat";
 import { WaitingForParty } from "./WaitingForParty";
 import { TAG_PILL } from "../lib/tagStyles";
 import { DEMO_CHANGES } from "../lib/demoScenario";
+import {
+  buildCalendar,
+  buildPlainText,
+  canExportCalendar,
+  downloadFile,
+  exportFileName,
+} from "../lib/itineraryExport";
 
 export interface BuildStageContentProps {
   session: RoomSession;
@@ -87,13 +94,16 @@ function downloadMarkdown(version: ItineraryVersion, flight?: LockedChoice | nul
     }
     lines.push("");
   }
-  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `${version.itinerary.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  downloadFile(lines.join("\n"), exportFileName(version.itinerary.title, "md"), "text/markdown;charset=utf-8");
+}
+
+function downloadText(version: ItineraryVersion, flight?: LockedChoice | null): void {
+  const summary = flight ? { title: flight.title, ...flightTimes(flight) } : null;
+  downloadFile(buildPlainText(version, summary), exportFileName(version.itinerary.title, "txt"), "text/plain;charset=utf-8");
+}
+
+function downloadCalendar(version: ItineraryVersion, flight?: LockedChoice | null): void {
+  downloadFile(buildCalendar(version, flight), exportFileName(version.itinerary.title, "ics"), "text/calendar;charset=utf-8");
 }
 
 function ItinerarySkeleton(): ReactElement {
@@ -419,11 +429,31 @@ export function BuildStageContent({
               ))}
             </div>
             {isWrap ? (
-              <PixelButton
-                variant="primary"
-                label="EXPORT ADVENTURE AS MARKDOWN"
-                onClick={() => downloadMarkdown(version, selectedFlight)}
-              />
+              <section aria-label="Export the adventure" className="flex flex-col gap-8">
+                <div className="flex flex-wrap gap-16">
+                  <PixelButton
+                    variant="primary"
+                    label="EXPORT AS MARKDOWN"
+                    onClick={() => downloadMarkdown(version, selectedFlight)}
+                  />
+                  <PixelButton
+                    variant="primary"
+                    label="EXPORT AS TEXT"
+                    onClick={() => downloadText(version, selectedFlight)}
+                  />
+                  <PixelButton
+                    variant="primary"
+                    label="ADD TO CALENDAR"
+                    disabled={!canExportCalendar(version)}
+                    onClick={() => downloadCalendar(version, selectedFlight)}
+                  />
+                </div>
+                {!canExportCalendar(version) ? (
+                  <p className="font-body text-ink">
+                    The calendar file needs trip dates, and this adventure has none yet.
+                  </p>
+                ) : null}
+              </section>
             ) : null}
             {!isWrap ? (
               <section className="flex flex-col gap-16 border-4 border-accent bg-bg-alt p-16">
